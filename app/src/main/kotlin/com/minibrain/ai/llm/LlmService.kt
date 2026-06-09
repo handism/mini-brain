@@ -80,6 +80,7 @@ class LlmService(private val context: Context) {
         return EngineConfig(
             modelPath = modelFile.absolutePath,
             backend = backend,
+            maxNumTokens = 4096,
         )
     }
 }

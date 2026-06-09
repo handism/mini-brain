@@ -31,6 +31,8 @@ class AgentPipeline(
         private const val TAG = "AgentPipeline"
         private const val MAX_FILES_IN_PROMPT = 50
         private const val MAX_CHUNKS_PER_DOC = 15
+        // maxNumTokens=4096 のうち出力用に ~1024 トークン確保。残りを日本語換算 ~2chars/token で割り当て
+        private const val MAX_CITATION_CHARS = 4000
     }
 
     suspend fun planSearch(
@@ -307,7 +309,15 @@ JSON:
             else -> ""
         }
         val contextBlock = if (citations.isNotEmpty()) {
-            val body = citations.joinToString("\n\n") { "### ${it.headingPath}\n${it.snippet}" }
+            val budgeted = mutableListOf<Citation>()
+            var remaining = MAX_CITATION_CHARS
+            for (c in citations) {
+                val cost = c.headingPath.length + c.snippet.length + 6
+                if (remaining <= 0) break
+                budgeted += c
+                remaining -= cost
+            }
+            val body = budgeted.joinToString("\n\n") { "### ${it.headingPath}\n${it.snippet}" }
             """あなたはユーザーのパーソナルアシスタントです。以下の「知識ベース$sourceNote」を参考にして質問に答えてください。
 知識ベースにある情報を優先し、不足時は一般知識で補足（その際は明記）してください。
 
