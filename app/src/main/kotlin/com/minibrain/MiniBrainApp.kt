@@ -1,0 +1,55 @@
+package com.minibrain
+
+import android.app.Application
+import android.content.Context
+import androidx.datastore.preferences.preferencesDataStore
+import com.minibrain.ai.embed.EmbedderService
+import com.minibrain.ai.llm.LlmService
+import com.minibrain.ai.llm.ModelDownloader
+import com.minibrain.ai.agent.AgentPipeline
+import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.data.db.AppDatabase
+import com.minibrain.data.repo.ChatRepository
+import com.minibrain.data.repo.DocumentRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+
+val Context.dataStore by preferencesDataStore(name = "settings")
+
+class MiniBrainApp : Application() {
+
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    val database: AppDatabase by lazy { AppDatabase.getInstance(this) }
+
+    val modelDownloader: ModelDownloader by lazy { ModelDownloader(this) }
+
+    val embedderService: EmbedderService by lazy { EmbedderService(this) }
+
+    val llmService: LlmService by lazy { LlmService(this) }
+
+    val documentRepository: DocumentRepository by lazy {
+        DocumentRepository(this, database.documentDao(), database.chunkDao(), embedderService, database)
+    }
+
+    val chatRepository: ChatRepository by lazy {
+        ChatRepository(database.chatSessionDao(), database.chatMessageDao())
+    }
+
+    val ragPipeline: RagPipeline by lazy {
+        RagPipeline(embedderService, llmService, database.chunkDao())
+    }
+
+    val agentPipeline: AgentPipeline by lazy {
+        AgentPipeline(llmService, embedderService, database.chunkDao(), database.documentDao(), ragPipeline)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        applicationScope.launch(Dispatchers.IO) {
+            documentRepository.ensureFtsIndex()
+        }
+    }
+}

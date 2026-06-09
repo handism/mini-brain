@@ -1,0 +1,32 @@
+# Android Studio / IntelliJ
+*.iml
+.idea/
+.gradle/
+/local.properties
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# ビルド成果物
+/build/
+app/build/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# ダウンロード済みモデルファイル（巨大なため除外）
+app/src/main/assets/models/
+**/models/*.litertlm
+**/models/*.tflite
+
+# 署名鍵（絶対にコミットしない）
+*.jks
+*.keystore
+keystore.properties
+
+# ローカル設定
+local.properties
+
+# Kotlin コンパイラキャッシュ
+.kotlin/
