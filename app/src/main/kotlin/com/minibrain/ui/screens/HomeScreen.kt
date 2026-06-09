@@ -110,7 +110,8 @@ fun HomeScreen(
                         Text("知識ベース", style = MaterialTheme.typography.labelLarge)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            Uri.parse(treeUri).lastPathSegment ?: treeUri.orEmpty(),
+                            (Uri.parse(treeUri).lastPathSegment ?: treeUri.orEmpty())
+                                .removePrefix("primary:"),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Spacer(Modifier.height(12.dp))
