@@ -120,11 +120,18 @@ class DocumentRepository(
 
         val allChunks = chunkDao.getAll()
         val writableDb = db.openHelper.writableDatabase
-        allChunks.forEach { chunk ->
-            writableDb.execSQL(
-                "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)",
-                arrayOf<Any?>(chunk.id, NGramTokenizer.toBigrams(chunk.text), NGramTokenizer.toBigrams(chunk.headingPath))
-            )
+
+        writableDb.beginTransaction()
+        try {
+            allChunks.forEach { chunk ->
+                writableDb.execSQL(
+                    "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)",
+                    arrayOf<Any?>(chunk.id, NGramTokenizer.toBigrams(chunk.text), NGramTokenizer.toBigrams(chunk.headingPath))
+                )
+            }
+            writableDb.setTransactionSuccessful()
+        } finally {
+            writableDb.endTransaction()
         }
     }
 
