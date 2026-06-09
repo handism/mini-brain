@@ -27,14 +27,20 @@ object NGramTokenizer {
                     tokens.add(cleaned.substring(start, i))
                 }
                 else -> {
-                    // Non-ASCII run → bigrams
+                    // Non-ASCII run → bigrams + unigrams
                     val start = i
                     while (i < cleaned.length && cleaned[i] != ' ' && cleaned[i].code >= 128) i++
                     val run = cleaned.substring(start, i)
+
+                    // Always add unigrams for non-ASCII to support 1-char search
+                    for (j in 0 until run.length) {
+                        tokens.add(run.substring(j, j + 1))
+                    }
+
+                    // Add bigrams
                     for (j in 0 until run.length - 1) {
                         tokens.add(run.substring(j, j + 2))
                     }
-                    // Single non-ASCII char: no bigram possible, skip
                 }
             }
         }
