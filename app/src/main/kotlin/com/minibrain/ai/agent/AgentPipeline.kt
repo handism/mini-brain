@@ -56,7 +56,7 @@ class AgentPipeline(
         val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
         val fileMatches = allDocs.filter { doc ->
             val name = doc.fileName.removeSuffix(".md").lowercase()
-            name.length >= 3 && question.lowercase().contains(name)
+            name.length >= 1 && question.lowercase().contains(name)
         }
         if (fileMatches.isNotEmpty()) {
             Log.d(TAG, "file_lookup: ${fileMatches.map { it.fileName }}")
@@ -262,25 +262,41 @@ class AgentPipeline(
             }
 
     private fun buildPlanPrompt(question: String, folderTree: String, fileList: String): String =
-        """あなたは検索プランナーです。質問に最適な検索計画をJSONのみで出力してください。
+        """あなたは検索プランナーです。質問に最適な検索計画をJSON形式のみで出力してください。
+JSON以外の文章は一切含めないでください。
 
-フォルダ:
+フォルダ構造:
 $folderTree
 
-ファイル(最新順):
+直近のファイルリスト:
 $fileList
 
 質問: $question
-intent: diary_lookup/topic_research/file_lookup/general
+
+出力形式の例:
+{
+  "intent": "topic_research",
+  "reasoning": "ユーザーは特定のトピックについて詳細を知りたがっているため",
+  "targetFolders": ["folder/subfolder"],
+  "targetFiles": ["path/to/file.md"],
+  "searchKeywords": ["キーワード1", "キーワード2"]
+}
+
+有効な intent:
+- diary_lookup: 日付や行動記録に関する質問
+- topic_research: 特定のトピックや概念に関する詳細な検索
+- file_lookup: 特定のファイルの内容を直接確認する場合
+- general: 上記に当てはまらない一般的な質問
 
 JSON:
 """.trimIndent()
 
     private fun parsePlanJson(raw: String): SearchPlan? = runCatching {
-        val s = raw.indexOf('{')
-        val e = raw.lastIndexOf('}')
-        if (s < 0 || e < 0) return null
-        val obj = JSONObject(raw.substring(s, e + 1))
+        val jsonStart = raw.indexOf('{')
+        val jsonEnd = raw.lastIndexOf('}')
+        if (jsonStart < 0 || jsonEnd < 0) return null
+        val jsonStr = raw.substring(jsonStart, jsonEnd + 1)
+        val obj = JSONObject(jsonStr)
 
         fun arr(key: String): List<String> {
             val a = obj.optJSONArray(key) ?: return emptyList()
