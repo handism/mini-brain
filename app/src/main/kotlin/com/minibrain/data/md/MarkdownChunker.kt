@@ -70,6 +70,24 @@ object MarkdownChunker {
         var buffer = StringBuilder()
 
         for (para in paragraphs) {
+            // もし単一の段落が最大サイズを超えている場合、文字数で分割する
+            if (para.length > MAX_CHUNK_CHARS) {
+                // 現在のバッファをフラッシュ
+                if (buffer.isNotEmpty()) {
+                    chunks.add(Chunk(headingPath, buffer.toString().trim()))
+                    buffer = StringBuilder(buffer.takeLast(OVERLAP_CHARS)).append("\n\n")
+                }
+
+                var remainingPara = para
+                while (remainingPara.length > MAX_CHUNK_CHARS) {
+                    val part = remainingPara.take(MAX_CHUNK_CHARS)
+                    chunks.add(Chunk(headingPath, part.trim()))
+                    remainingPara = remainingPara.drop(MAX_CHUNK_CHARS - OVERLAP_CHARS)
+                }
+                buffer.append(remainingPara).append("\n\n")
+                continue
+            }
+
             if (buffer.isNotEmpty() && buffer.length + para.length + 2 > MAX_CHUNK_CHARS) {
                 chunks.add(Chunk(headingPath, buffer.toString().trim()))
                 // overlap: 最後の OVERLAP_CHARS 文字を引き継ぐ
