@@ -59,7 +59,10 @@ Mini Brain は Android 12+ 向けのオンデバイス エージェント型 RAG
 - `FloatArray`（ベクトル）は `ByteArray` として保存
 - 変換: `EmbedderService.floatArrayToBytes()` / `bytesToFloatArray()`
 - コサイン類似度は全件メモリロードで計算（個人用途 = 数千チャンク以下を想定）
-- DB バージョン: 3（v2→v3 マイグレーションで `documents` テーブルに `headings`, `first_para`, `tags` カラムを追加）
+- DB バージョン: 5
+  - v2→v3: `documents` テーブルに `headings`, `first_para`, `tags` カラムを追加
+  - v3→v4: `documents` テーブルに `documentDate` カラムを追加（Recentness Ranking 用）
+  - v4→v5: `folder_embeddings` テーブルを追加（Folder Embedding 用）
 
 ### Storage Access Framework (SAF)
 
@@ -81,22 +84,28 @@ UI (Compose) → ViewModel → AgentPipeline → (LlmService / EmbedderService /
 
 ```
 質問
+↓ QueryClassifier.classify()
+  GENERAL_KNOWLEDGE → RAG スキップ → LLM 直接回答
+  TEMPORAL_SUMMARIZATION / MEMORY_SEARCH → 以下へ
 ↓ buildPlannerHint（DB 先行解析）
+  ├─ 期間クエリ: resolveDateRange → DateRange を hint に注入 / timeline_search 推奨
   ├─ 日付クエリ: YYYYMMDD 8桁で DB 検索 → docId を hint に直接注入
   │              未一致なら YYYYMMDD* / YYYY/MM/DD* / YYYY-MM-DD* の glob パターンを hint に列挙
   └─ ファイル名一致: [d=ID] fileName を hint に追加
 ↓ ReAct ループ（最大 6 回）
-  Planner LLM が以下から1ツールを選択:
-  ├─ glob(pattern)             : ファイルパターン列挙
-  ├─ list_dir(folder)          : フォルダ直下一覧
-  ├─ read_file(docId|path)     : ファイル全文取得（chunks 連結）
-  ├─ grep(query, scope?)       : FTS4 キーワード検索
-  ├─ vector_search(query, k)   : 意味類似検索
-  └─ rrf_search(query, k)      : BM25+ベクトル RRF 融合
+  Planner LLM が以下から1ツールを DSL(key:value)形式で選択:
+  ├─ glob(pattern)                   : ファイルパターン列挙
+  ├─ list_dir(folder)                : フォルダ直下一覧
+  ├─ read_file(docId|path)           : ファイル全文取得（3000字超は LLM 要約）
+  ├─ grep(query, scope?)             : FTS4 キーワード検索
+  ├─ vector_search(query, k)         : 意味類似検索
+  ├─ rrf_search(query, k)            : BM25+ベクトル RRF 融合
+  └─ timeline_search(start, end, k)  : documentDate 範囲フィルタ
   ↓ ToolExecutor 実行 → Observation 追加
-  ↓ {"action":"finalize"} or 6 回到達で終了
-  ↓ JSON パース失敗 2 回連続 → RRF 即時フォールバック
-↓ CitationIntegrator（重複除去・優先度整列・4000 字 budget）
+  ↓ ACTION: finalize or 6 回到達で終了
+  ↓ DSL パース失敗 2 回連続 → RRF 即時フォールバック
+↓ CitationIntegrator（重複除去・優先度整列・トークン budget 1200）
+  優先度: READ_FILE > GREP > VECTOR > RRF > GLOB > FOLDER
   citations 空 → RRF 強制フォールバック（セーフティネット）
 ↓ buildAnswerPrompt → LLM 回答生成（ストリーミング）
 ```
@@ -115,13 +124,15 @@ context.filesDir/models/universal_sentence_encoder_multilingual.tflite  # Embedd
 | 変更内容                     | 対象ファイル                                              |
 | ---------------------------- | --------------------------------------------------------- |
 | ReAct ループ制御・hint 生成  | `ai/agent/AgentPipeline.kt`                               |
-| Planner プロンプト           | `ai/agent/PlannerPrompt.kt`                               |
+| Planner プロンプト（DSL形式）| `ai/agent/PlannerPrompt.kt`                               |
+| クエリ種別分類               | `ai/agent/QueryClassifier.kt`                             |
 | ツール実装（glob/grep 等）   | `ai/agent/tools/ToolExecutor.kt`                          |
 | glob パターン変換            | `ai/agent/tools/GlobMatcher.kt`                           |
 | 引用統合・優先度・budget     | `ai/agent/CitationIntegrator.kt`                          |
-| 日付解決                     | `ai/agent/DateResolver.kt`                                |
+| 日付解決・期間解決           | `ai/agent/DateResolver.kt`                                |
+| エージェントトレースイベント | `ai/agent/AgentTraceEvent.kt`                             |
 | 回答プロンプト               | `ai/agent/AgentPipeline.kt`（buildAnswerPrompt）          |
-| LLM 生成パラメータ           | `ai/llm/LlmService.kt`                                    |
+| LLM 生成パラメータ・要約     | `ai/llm/LlmService.kt`                                    |
 | チャンク分割ロジック         | `data/md/MarkdownChunker.kt`                              |
 | ファイルメタ抽出             | `data/md/MarkdownMetaExtractor.kt`                        |
 | インデックス処理             | `data/repo/DocumentRepository.kt`                         |
@@ -134,7 +145,8 @@ context.filesDir/models/universal_sentence_encoder_multilingual.tflite  # Embedd
 - `EmbedderService` と `LlmService` の初期化はバックグラウンドスレッド（`Dispatchers.Default`）で行う
 - `EmbedderService.embed()` は内部で `Mutex` を使ってシリアライズされているため、並列呼び出しは安全だがスループットは出ない
 - クラウド API の追加は禁止（プライバシー要件）
-- `AgentPipeline.run()` は ReAct ループ（最大 6 回）で動作する。各反復で Planner LLM がツールを選択し、最終的に `CitationIntegrator` で引用を統合して回答を生成する。citations が空の場合は RRF を強制実行するセーフティネットがある
-- `PlannerPrompt` は `org.json` を使わず pure Kotlin regex で JSON をパースする（JVM ユニットテスト互換性のため）
-- `buildPlannerHint` は日付クエリに対して YYYYMMDD 8桁で DB 検索し、docId を直接 hint に注入する（命名形式に依存しない）
-- DB マイグレーション: 既存 `documents` レコードの `headings` / `first_para` / `tags` は次回差分インデックス時に自動補完される。強制補完は Settings → 再インデックスで可能
+- `AgentPipeline.run()` は先に `QueryClassifier.classify()` を呼び、`GENERAL_KNOWLEDGE` の場合は RAG をスキップして LLM 直接回答する
+- `AgentPipeline.run()` の ReAct ループ（最大 6 回）では各反復で Planner LLM がツールを選択し、最終的に `CitationIntegrator` で引用を統合して回答を生成する。citations が空の場合は RRF を強制実行するセーフティネットがある
+- `PlannerPrompt` は `org.json` を使わず DSL key:value 形式で出力・パースする（JVM ユニットテスト互換性のため JSON は使わない）
+- `buildPlannerHint` は期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致の順で解析し hint を構築する
+- DB マイグレーション: 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は次回差分インデックス時に自動補完される。強制補完は Settings → 再インデックスで可能
