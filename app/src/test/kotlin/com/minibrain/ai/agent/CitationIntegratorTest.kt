@@ -34,16 +34,19 @@ class CitationIntegratorTest {
     }
 
     @Test
-    fun `budget limits total characters`() {
+    fun `budget limits total tokens`() {
+        // 1 citation ≒ (2 + 1000) / 3 + 5 ≒ 339 tokens
+        // MAX_CONTEXT_TOKENS = 1200 なので最大 3〜4 件に制限される
         val longSnippet = "a".repeat(1000)
         val citations = (1..20).map { i ->
             Citation("h$i", longSnippet, score = 1f, docId = i.toLong(), source = SourceType.READ_FILE)
         }
         val results = listOf(makeResult(*citations.toTypedArray()))
         val integrated = CitationIntegrator.integrate(results)
-        assertTrue(integrated.size < 20)
-        val totalChars = integrated.sumOf { it.headingPath.length + it.snippet.length + 6 }
-        assertTrue(totalChars <= 4000 + 1006)
+        assertTrue("budget should limit citations, got ${integrated.size}", integrated.size < 20)
+        // トークン推定: 合計が MAX_CONTEXT_TOKENS (1200) + 1 citation 分のコスト以内
+        val totalTokens = integrated.sumOf { (it.headingPath.length + it.snippet.length) / 3 + 5 }
+        assertTrue("total tokens $totalTokens should be near MAX_CONTEXT_TOKENS", totalTokens <= 1200 + 340)
     }
 
     @Test

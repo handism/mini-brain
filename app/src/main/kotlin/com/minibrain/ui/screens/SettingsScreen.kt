@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -45,6 +47,7 @@ fun SettingsScreen(
     vm: SettingsViewModel = viewModel(),
 ) {
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
+    val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
     var showClearDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -103,6 +106,27 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("チャット履歴をすべて削除", color = MaterialTheme.colorScheme.error)
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            SectionTitle("開発者")
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("検索ログを表示する", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "回答の下にエージェントの検索過程を表示します",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = showSearchLog,
+                    onCheckedChange = { vm.setShowSearchLog(it) },
+                )
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
