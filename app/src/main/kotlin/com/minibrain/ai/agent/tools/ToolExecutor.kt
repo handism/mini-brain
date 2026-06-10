@@ -1,5 +1,6 @@
 package com.minibrain.ai.agent.tools
 
+import android.util.Log
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.AgentTool
 import com.minibrain.ai.agent.ToolCall
@@ -18,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
+private const val TAG = "ToolExecutor"
 private const val MAX_GLOB_RESULTS = 30
 private const val MAX_GREP_RESULTS = 20
 private const val GREP_SNIPPET_CHARS = 200
@@ -147,6 +149,7 @@ class ToolExecutor(
         val citations = if (fullText.length > SUMMARIZE_THRESHOLD_CHARS) {
             // 巨大ファイルは要約してから単一の citation として投入
             val summary = runCatching { llmService.summarize(fullText) }
+                .onFailure { Log.w(TAG, "summarize failed for ${doc.relativePath}, truncating", it) }
                 .getOrElse { fullText.take(SUMMARIZE_THRESHOLD_CHARS) }
             listOf(Citation(
                 headingPath = doc.relativePath,
@@ -186,7 +189,8 @@ class ToolExecutor(
                         arrayOf<Any?>(matchQuery),
                     )
                 )
-            }.getOrElse { emptyList() }
+            }.onFailure { Log.w(TAG, "bm25SearchRaw failed for query: $matchQuery", it) }
+             .getOrElse { emptyList() }
         }
 
         val docCache = mutableMapOf<Long, DocumentEntity?>()
@@ -323,10 +327,12 @@ class ToolExecutor(
     private fun parseFirstHeadings(json: String, count: Int): String = runCatching {
         val arr = JSONArray(json)
         (0 until minOf(arr.length(), count)).joinToString(", ") { i -> arr.getString(i) }
-    }.getOrElse { "" }
+    }.onFailure { Log.w(TAG, "parseFirstHeadings failed: $json", it) }
+     .getOrElse { "" }
 
     private fun parseJsonArray(json: String): List<String> = runCatching {
         val arr = JSONArray(json)
         (0 until arr.length()).map { i -> arr.getString(i) }
-    }.getOrElse { emptyList() }
+    }.onFailure { Log.w(TAG, "parseJsonArray failed: $json", it) }
+     .getOrElse { emptyList() }
 }

@@ -2,6 +2,7 @@ package com.minibrain.data.md
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.security.MessageDigest
 
@@ -15,6 +16,9 @@ data class MdFile(
 )
 
 object MdFileReader {
+
+    private const val TAG = "MdFileReader"
+    private const val MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024L // 10MB
 
     fun listMdFiles(context: Context, treeUri: Uri): List<MdFile> {
         val root = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
@@ -36,6 +40,11 @@ object MdFileReader {
                     collectMd(context, file, if (pathPrefix.isEmpty()) name else "$pathPrefix/$name", results)
                 }
                 file.isFile && name.endsWith(".md", ignoreCase = true) -> {
+                    val fileSize = file.length()
+                    if (fileSize > MAX_FILE_SIZE_BYTES) {
+                        Log.w(TAG, "Skipping $name: file too large ($fileSize bytes)")
+                        continue
+                    }
                     val content = readText(context, file.uri) ?: continue
                     val hash = sha256(content)
                     val relativePath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"

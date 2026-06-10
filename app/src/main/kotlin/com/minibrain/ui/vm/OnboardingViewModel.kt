@@ -93,34 +93,31 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     private suspend fun initializeServices(forceCpu: Boolean = false) {
         _state.value = OnboardingUiState.Initializing
-        
         // 初期化開始フラグを立てる（クラッシュ検知用）
         app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = true }
-        
         try {
             android.util.Log.d("Onboarding", "Initializing Embedder...")
             app.embedderService.initialize(downloader.embedderModelFile)
-            
+
             android.util.Log.d("Onboarding", "Initializing LLM (forceCpu=$forceCpu)...")
             if (forceCpu) {
-                // LlmService 側にも forceCpu 対応が必要
                 app.llmService.initialize(downloader.llmModelFile, forceCpu = true)
             } else {
                 app.llmService.initialize(downloader.llmModelFile)
             }
-            
+
             android.util.Log.d("Onboarding", "All services initialized")
-            // 成功したらフラグをクリア
-            app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = false }
             _state.value = OnboardingUiState.Ready
         } catch (e: Exception) {
             android.util.Log.e("Onboarding", "Initialization failed", e)
-            app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = false }
             _state.value = OnboardingUiState.Failure(
                 "初期化に失敗しました: ${e.localizedMessage}\n" +
                 "端末のメモリ不足の可能性があります。",
                 canTryCpu = !forceCpu
             )
+        } finally {
+            // 成功・失敗どちらの場合もクラッシュ検知フラグをクリア
+            app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = false }
         }
     }
 }
