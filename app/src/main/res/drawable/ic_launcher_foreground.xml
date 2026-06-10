@@ -4,7 +4,27 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M54,20 C35.2,20 20,35.2 20,54 C20,72.8 35.2,88 54,88 C72.8,88 88,72.8 88,54 C88,35.2 72.8,20 54,20 Z M54,30 C67.3,30 78,40.7 78,54 C78,67.3 67.3,78 54,78 C40.7,78 30,67.3 30,54 C30,40.7 40.7,30 54,30 Z M46,42 L46,66 L62,54 Z" />
+    <group
+        android:translateX="14"
+        android:translateY="14">
+        <!-- Main Brain Shape -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M40,10c-11,0 -20,9 -20,20c0,2.1 0.3,4.1 1,5.9c-3.6,1.9 -6,5.7 -6,10.1c0,6.6 5.4,12 12,12c1.1,0 2.1,-0.2 3.1,-0.5c2.7,4.9 6,8.5 9.9,8.5c3.9,0 7.2,-3.5 9.9,-8.5c1,0.3 2,0.5 3.1,0.5c6.6,0 12,-5.4 12,-12c0,-4.4 -2.4,-8.2 -6,-10.1c0.7,-1.8 1,-3.8 1,-5.9c0,-11 -9,-20 -20,-20z" />
+
+        <!-- Markdown 'M' Logo -->
+        <path
+            android:fillColor="#2C3E50"
+            android:pathData="M28,28h6l3,4.5l3,-4.5h6v18h-3v-10l-6,9l-6,-9v10h-3z" />
+
+        <!-- Markdown Down Arrow -->
+        <path
+            android:fillColor="#4A90E2"
+            android:pathData="M49,28h6v10h4l-7,8l-7,-8h4z" />
+
+        <!-- Small dots for neural feel -->
+        <path
+            android:fillColor="#4A90E2"
+            android:pathData="M25,48a2,2 0,1,1 0,-4a2,2 0,0,1 0,4z M55,48a2,2 0,1,1 0,-4a2,2 0,0,1 0,4z M40,58a2,2 0,1,1 0,-4a2,2 0,0,1 0,4z" />
+    </group>
 </vector>

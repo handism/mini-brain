@@ -76,6 +76,7 @@ app/src/main/kotlin/com/minibrain/
 │   ├── agent/
 │   │   ├── AgentPipeline.kt     # ReAct ループのオーケストレーション・hint 生成
 │   │   ├── AgentTypes.kt        # AgentTool / Observation / PlannerDecision 等の型定義
+│   │   ├── AgentTraceEvent.kt   # トレースイベント型（PlannerDecision/ToolCall/Observation）
 │   │   ├── PlannerPrompt.kt     # Planner プロンプト生成 + DSL(key:value)パーサ
 │   │   ├── CitationIntegrator.kt# 重複除去・優先度整列・トークン budget 制御
 │   │   ├── DateResolver.kt      # 相対日付・期間表現 → 絶対日付/DateRange 変換
