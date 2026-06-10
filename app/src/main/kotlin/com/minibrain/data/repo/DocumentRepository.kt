@@ -6,13 +6,17 @@ import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.AppDatabase
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
+import com.minibrain.data.db.entities.FolderEmbeddingEntity
 import com.minibrain.data.md.MarkdownChunker
 import com.minibrain.data.md.MarkdownMetaExtractor
+import com.minibrain.data.md.MdFile
 import com.minibrain.data.md.MdFileReader
 import org.json.JSONArray
 import com.minibrain.data.search.NGramTokenizer
+import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +36,7 @@ class DocumentRepository(
     private val chunkDao: ChunkDao,
     private val embedder: EmbedderService,
     private val db: AppDatabase,
+    private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
     private val _indexingState = MutableStateFlow<IndexingState>(IndexingState.Idle)
     val indexingState: StateFlow<IndexingState> = _indexingState
@@ -51,12 +56,16 @@ class DocumentRepository(
 
             val existing = documentDao.getByFileUri(mdFile.uri.toString())
             if (existing != null && existing.contentHash == mdFile.contentHash) {
-                if (existing.headings == null) {
+                if (existing.headings == null || existing.documentDate == null) {
                     documentDao.update(
                         existing.copy(
-                            headings = JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
-                            firstParagraph = MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
-                            tags = JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+                            headings = existing.headings
+                                ?: JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
+                            firstParagraph = existing.firstParagraph
+                                ?: MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
+                            tags = existing.tags
+                                ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+                            documentDate = existing.documentDate ?: extractDateFromPath(mdFile.relativePath),
                         )
                     )
                 }
@@ -81,6 +90,7 @@ class DocumentRepository(
                     headings = JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
                     firstParagraph = MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
                     tags = JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+                    documentDate = extractDateFromPath(mdFile.relativePath),
                 )
             )
 
@@ -102,7 +112,47 @@ class DocumentRepository(
             totalChunks += chunkEntities.size
         }
 
+        // フォルダ単位の仮想埋め込みを生成（直近の親フォルダでグループ化）
+        indexFolderEmbeddings(treeUri, mdFiles)
+
         _indexingState.value = IndexingState.Done(total, totalChunks)
+    }
+
+    private suspend fun indexFolderEmbeddings(treeUri: Uri, mdFiles: List<MdFile>) {
+        val byFolder = mdFiles
+            .filter { it.relativePath.contains('/') }
+            .groupBy { it.relativePath.substringBeforeLast('/') }
+
+        for ((folderPath, files) in byFolder) {
+            val allDocs = files.mapNotNull { f ->
+                documentDao.getByFileUri(f.uri.toString())
+            }
+            val headings = allDocs.flatMap { doc ->
+                doc.headings?.let { json ->
+                    runCatching {
+                        val arr = org.json.JSONArray(json)
+                        (0 until arr.length()).map { i -> arr.getString(i) }
+                    }.getOrElse { emptyList() }
+                } ?: emptyList()
+            }.take(10)
+
+            val folderText = buildString {
+                append("フォルダ: $folderPath\n")
+                append("ファイル: ${files.joinToString(", ") { it.name }}\n")
+                if (headings.isNotEmpty()) append("見出し: ${headings.joinToString(", ")}")
+            }
+
+            runCatching {
+                val embedding = embedder.embed(folderText)
+                folderEmbeddingDao.upsert(
+                    FolderEmbeddingEntity(
+                        path = folderPath,
+                        treeUri = treeUri.toString(),
+                        embedding = EmbedderService.floatArrayToBytes(embedding),
+                    )
+                )
+            }
+        }
     }
 
     suspend fun clearFolder(treeUri: String) = withContext(Dispatchers.IO) {
@@ -160,6 +210,22 @@ class DocumentRepository(
             "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE docId = ?)",
             arrayOf(docId)
         )
+    }
+
+    private fun extractDateFromPath(relativePath: String): String? {
+        val patterns = listOf(
+            Regex("""(\d{4})-(\d{2})-(\d{2})"""),
+            Regex("""(\d{4})/(\d{2})/(\d{2})"""),
+            Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
+        )
+        for (pattern in patterns) {
+            val match = pattern.find(relativePath) ?: continue
+            return runCatching {
+                val (y, m, d) = match.destructured
+                LocalDate.of(y.toInt(), m.toInt(), d.toInt()).toString()
+            }.getOrNull()
+        }
+        return null
     }
 
     private fun deleteFtsByTree(treeUri: String) {

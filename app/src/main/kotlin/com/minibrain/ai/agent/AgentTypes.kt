@@ -10,6 +10,7 @@ sealed class AgentTool {
     data class Grep(val query: String, val scope: String?) : AgentTool()
     data class VectorSearch(val query: String, val scope: String?, val k: Int = 10) : AgentTool()
     data class RrfSearch(val query: String, val k: Int = 10) : AgentTool()
+    data class TimelineSearch(val startDate: String, val endDate: String, val limit: Int = 20) : AgentTool()
 }
 
 data class ToolCall(val iteration: Int, val tool: AgentTool)
@@ -35,4 +36,5 @@ sealed class PlannerDecision {
 data class AgentResult(
     val citations: List<Citation>,
     val answerFlow: Flow<String>,
+    val traceEvents: List<AgentTraceEvent> = emptyList(),
 )

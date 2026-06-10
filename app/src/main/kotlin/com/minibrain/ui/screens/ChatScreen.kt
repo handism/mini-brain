@@ -2,6 +2,7 @@ package com.minibrain.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -59,6 +61,10 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.minibrain.ai.agent.FinalAnswerEvent
+import com.minibrain.ai.agent.ObservationEvent
+import com.minibrain.ai.agent.PlannerDecisionEvent
+import com.minibrain.ai.agent.ToolCallEvent
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.ui.components.MarkdownText
 import com.minibrain.ui.vm.ChatMessage
@@ -78,6 +84,7 @@ fun ChatScreen(
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val errorMessage by vm.errorMessage.collectAsStateWithLifecycle()
     val statusText by vm.statusText.collectAsStateWithLifecycle()
+    val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -132,7 +139,7 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item { Spacer(Modifier.height(8.dp)) }
-                    items(messages) { msg -> MessageBubble(msg) }
+                    items(messages) { msg -> MessageBubble(msg, showSearchLog) }
                     item { Spacer(Modifier.height(8.dp)) }
                 }
             }
@@ -195,9 +202,10 @@ fun ChatScreen(
 }
 
 @Composable
-private fun MessageBubble(msg: ChatMessage) {
+private fun MessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
     val isUser = msg.role == MessageRole.USER
     var citationsExpanded by remember { mutableStateOf(false) }
+    var traceExpanded by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -316,6 +324,82 @@ private fun MessageBubble(msg: ChatMessage) {
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            if (!isUser && !msg.isStreaming && showSearchLog && msg.traceEvents.isNotEmpty()) {
+                TextButton(
+                    onClick = { traceExpanded = !traceExpanded },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                ) {
+                    Icon(
+                        if (traceExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text("検索ログ", style = MaterialTheme.typography.labelSmall)
+                }
+                AnimatedVisibility(visible = traceExpanded) {
+                    AgentTraceSection(msg.traceEvents)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentTraceSection(events: List<com.minibrain.ai.agent.AgentTraceEvent>) {
+    Box(
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest, RoundedCornerShape(8.dp))
+            .padding(8.dp)
+            .fillMaxWidth(),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            events.forEach { event ->
+                when (event) {
+                    is ToolCallEvent -> {
+                        Text(
+                            "Planner",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            "${event.toolName}(\n${event.arguments}\n)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            softWrap = false,
+                        )
+                    }
+                    is ObservationEvent -> {
+                        Text(
+                            "Observation",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                        Text(
+                            event.summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is PlannerDecisionEvent -> {
+                        if (event.decision.startsWith("finalize")) {
+                            Text(
+                                "完了",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                    }
+                    is FinalAnswerEvent -> {
+                        Text(
+                            "回答 ${event.answerLength}字",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
                     }
                 }
             }

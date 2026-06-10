@@ -6,15 +6,20 @@ import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChunkEntity
+import com.minibrain.data.db.entities.FolderEmbeddingEntity
 import com.minibrain.data.search.NGramTokenizer
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
+import kotlin.math.exp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
-enum class SourceType { READ_FILE, GREP, VECTOR, RRF, GLOB, UNKNOWN }
+enum class SourceType { READ_FILE, GREP, VECTOR, RRF, GLOB, FOLDER, UNKNOWN }
 
 data class Citation(
     val headingPath: String,
@@ -30,32 +35,56 @@ class RagPipeline(
     private val llmService: LlmService,
     private val chunkDao: ChunkDao,
     private val documentDao: DocumentDao,
+    private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
     suspend fun retrieveTopChunks(question: String, treeUri: String? = null, topK: Int = 20): List<Citation> =
         coroutineScope {
             val vecJob = async { vectorSearch(question, treeUri, k = 50) }
             val bm25Job = async { bm25Search(question, treeUri, k = 50) }
+            val folderJob = async { folderSearch(question, treeUri, k = 5) }
 
             val vecResults = vecJob.await()
             val bm25Results = bm25Job.await()
+            val folderResults = folderJob.await()
 
-            Log.d("RagPipeline", "vec=${vecResults.size} bm25=${bm25Results.size}")
+            Log.d("RagPipeline", "vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
+
+            val allDocIds = (vecResults.map { it.second.docId } + bm25Results.map { it.docId }).distinct()
+            val docIdToDate: Map<Long, LocalDate?> = withContext(Dispatchers.IO) {
+                documentDao.getDocDatesByIds(allDocIds)
+            }.associate { row ->
+                row.id to row.documentDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            }
 
             val docCache = mutableMapOf<Long, String?>()
             suspend fun relativePath(docId: Long): String? =
                 docCache.getOrPut(docId) { documentDao.getById(docId)?.relativePath }
 
-            rrf(bm25Results, vecResults.map { it.second }, topK).map { (score, chunk) ->
-                Log.d("RagPipeline", "rrf=%.4f path=${chunk.headingPath}".format(score))
+            val chunkCitations = rrf(bm25Results, vecResults.map { it.second }, topK, docIdToDate = docIdToDate)
+                .map { (score, chunk) ->
+                    Log.d("RagPipeline", "rrf=%.4f path=${chunk.headingPath}".format(score))
+                    Citation(
+                        headingPath = chunk.headingPath,
+                        snippet = chunk.text,
+                        score = score,
+                        docId = chunk.docId,
+                        relativePath = relativePath(chunk.docId),
+                        source = SourceType.RRF,
+                    )
+                }
+
+            val folderCitations = folderResults.map { (score, fe) ->
                 Citation(
-                    headingPath = chunk.headingPath,
-                    snippet = chunk.text,
+                    headingPath = "フォルダ: ${fe.path}",
+                    snippet = "（フォルダ全体に関連するコンテンツ）",
                     score = score,
-                    docId = chunk.docId,
-                    relativePath = relativePath(chunk.docId),
-                    source = SourceType.RRF,
+                    docId = null,
+                    relativePath = fe.path,
+                    source = SourceType.FOLDER,
                 )
             }
+
+            chunkCitations + folderCitations
         }
 
     fun answer(
@@ -81,6 +110,22 @@ class RagPipeline(
             @Suppress("UNCHECKED_CAST")
             CosineSimilarity.topK(queryVec, candidates as List<Pair<FloatArray, Any>>, k)
                 .map { (score, meta) -> Pair(score, meta as ChunkEntity) }
+        }
+
+    private suspend fun folderSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =
+        withContext(Dispatchers.Default) {
+            val queryVec = embedderService.embed(question)
+            val folders = withContext(Dispatchers.IO) {
+                if (treeUri != null) folderEmbeddingDao.getAllByTree(treeUri)
+                else emptyList()
+            }
+            if (folders.isEmpty()) return@withContext emptyList()
+            val candidates = folders.map { fe ->
+                Pair(EmbedderService.bytesToFloatArray(fe.embedding), fe)
+            }
+            @Suppress("UNCHECKED_CAST")
+            CosineSimilarity.topK(queryVec, candidates as List<Pair<FloatArray, Any>>, k)
+                .map { (score, meta) -> Pair(score, meta as FolderEmbeddingEntity) }
         }
 
     private suspend fun bm25Search(question: String, treeUri: String?, k: Int): List<ChunkEntity> {
@@ -112,6 +157,7 @@ class RagPipeline(
         vecResults: List<ChunkEntity>,
         topK: Int,
         k: Int = 60,
+        docIdToDate: Map<Long, LocalDate?> = emptyMap(),
     ): List<Pair<Float, ChunkEntity>> {
         val scores = mutableMapOf<Long, Float>()
         val chunks = mutableMapOf<Long, ChunkEntity>()
@@ -125,10 +171,28 @@ class RagPipeline(
             chunks[chunk.id] = chunk
         }
 
+        val today = LocalDate.now()
         return scores.entries
-            .sortedByDescending { it.value }
+            .map { (id, rrfScore) ->
+                val boost = freshnessBoost(docIdToDate[chunks[id]!!.docId], today)
+                Triple(id, rrfScore + boost, chunks[id]!!)
+            }
+            .sortedByDescending { it.second }
             .take(topK)
-            .map { (id, score) -> Pair(score, chunks[id]!!) }
+            .map { (_, score, chunk) -> Pair(score, chunk) }
+    }
+
+    companion object {
+        // freshnessBoost tuning constants — adjust to balance recency vs. relevance
+        // RRF max score ≈ 0.032 (rank=1 in both BM25 and vector)
+        private const val FRESHNESS_BOOST_MAX  = 0.010f  // 最大加点 (RRF max の約 30%)
+        private const val FRESHNESS_DECAY_DAYS = 90f     // 半減期 90 日 (30d:~0.0072, 1y:~0.0017, 3y:~0.0001)
+
+        fun freshnessBoost(docDate: LocalDate?, today: LocalDate): Float {
+            if (docDate == null) return 0f
+            val days = ChronoUnit.DAYS.between(docDate, today).coerceAtLeast(0).toFloat()
+            return (FRESHNESS_BOOST_MAX * exp(-days / FRESHNESS_DECAY_DAYS)).toFloat()
+        }
     }
 
     private fun buildPrompt(

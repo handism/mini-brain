@@ -29,10 +29,18 @@ class AgentPipeline(
         recentHistory: List<Pair<String, String>> = emptyList(),
         onStatus: (String) -> Unit = {},
     ): AgentResult = withContext(Dispatchers.Default) {
-        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri)
+        // 一般知識の場合は RAG をスキップして直接 LLM に回答させる
+        val queryType = QueryClassifier.classify(question)
+        if (queryType == QueryType.GENERAL_KNOWLEDGE) {
+            Log.d(TAG, "GENERAL_KNOWLEDGE — skip RAG")
+            return@withContext AgentResult(emptyList(), llmService.generateStream(buildDirectAnswerPrompt(question, recentHistory)))
+        }
+
+        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri, llmService)
         val plannerHint = buildPlannerHint(question, treeUri)
         val observations = mutableListOf<Observation>()
         val toolResults = mutableListOf<ToolResult>()
+        val traceEvents = mutableListOf<AgentTraceEvent>()
         var consecutiveParseErrors = 0
 
         for (iteration in 1..MAX_ITERATIONS) {
@@ -56,17 +64,21 @@ class AgentPipeline(
             when (decision) {
                 is PlannerDecision.Finalize -> {
                     Log.d(TAG, "finalize: ${decision.reason}")
+                    traceEvents += PlannerDecisionEvent(iteration, "finalize: ${decision.reason}")
                     break
                 }
                 is PlannerDecision.ParseError -> {
                     consecutiveParseErrors++
                     Log.w(TAG, "parse error ($consecutiveParseErrors)")
+                    traceEvents += PlannerDecisionEvent(iteration, "parse_error")
                     if (consecutiveParseErrors >= 2) {
                         Log.d(TAG, "2 consecutive parse errors — RRF fallback")
                         onStatus("フォールバック検索中...")
                         val fallbackCitations = ragPipeline.retrieveTopChunks(question, treeUri)
                         val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(question))
                         toolResults += ToolResult(fallbackCall, "fallback", fallbackCitations)
+                        traceEvents += ToolCallEvent(iteration, "rrf_search", "\"$question\"")
+                        traceEvents += ObservationEvent(iteration, "${fallbackCitations.size} citations returned")
                         break
                     }
                     continue
@@ -74,9 +86,11 @@ class AgentPipeline(
                 is PlannerDecision.Call -> {
                     consecutiveParseErrors = 0
                     val toolCall = ToolCall(iteration, decision.tool)
+                    traceEvents += ToolCallEvent(iteration, traceToolName(decision.tool), traceToolArgs(decision.tool))
                     onStatus(toolProgressDescription(decision.tool))
                     val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
                     toolResults += result
+                    traceEvents += ObservationEvent(iteration, traceObservationSummary(decision.tool, result))
 
                     val isRecent = observations.size < 2
                     val obs = Observation(toolCall, result.summary, full = isRecent)
@@ -104,18 +118,26 @@ class AgentPipeline(
             onStatus("フォールバック検索中...")
             citations = ragPipeline.retrieveTopChunks(question, treeUri)
             Log.d(TAG, "fallback citations=${citations.size}")
+            traceEvents += ToolCallEvent(MAX_ITERATIONS + 1, "rrf_search", "\"$question\"")
+            traceEvents += ObservationEvent(MAX_ITERATIONS + 1, "${citations.size} citations returned (safety fallback)")
         }
 
         onStatus("")
         val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory))
-        AgentResult(citations, answerFlow)
+        AgentResult(citations, answerFlow, traceEvents)
     }
 
     private suspend fun buildPlannerHint(question: String, treeUri: String): String? {
         val parts = mutableListOf<String>()
         val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
 
-        if (DateResolver.isDiaryQuery(question)) {
+        // 期間クエリ: resolveDateRange が成功したら timeline_search を推奨
+        val dateRange = DateResolver.resolveDateRange(question)
+        if (dateRange != null) {
+            parts += "期間クエリ検出: ${dateRange.start} 〜 ${dateRange.end} / timeline_search を推奨"
+        }
+
+        if (dateRange == null && DateResolver.isDiaryQuery(question)) {
             val dates = DateResolver.resolveToDateStrings(question)
             if (dates.isNotEmpty()) {
                 parts += "検出された日付: ${dates.joinToString(", ")}"
@@ -162,6 +184,36 @@ class AgentPipeline(
         return parts.joinToString(" / ").ifBlank { null }
     }
 
+    private fun traceToolName(tool: AgentTool): String = when (tool) {
+        is AgentTool.Glob -> "glob"
+        is AgentTool.ListDir -> "list_dir"
+        is AgentTool.ReadFile -> "read_file"
+        is AgentTool.Grep -> "grep"
+        is AgentTool.VectorSearch -> "vector_search"
+        is AgentTool.RrfSearch -> "rrf_search"
+        is AgentTool.TimelineSearch -> "timeline_search"
+    }
+
+    private fun traceToolArgs(tool: AgentTool): String = when (tool) {
+        is AgentTool.Glob -> tool.pattern
+        is AgentTool.ListDir -> tool.folder
+        is AgentTool.ReadFile -> tool.docId?.let { "docId=$it" } ?: tool.path ?: ""
+        is AgentTool.Grep -> "\"${tool.query}\"${tool.scope?.let { ",\nscope=$it" } ?: ""}"
+        is AgentTool.VectorSearch -> "\"${tool.query}\",\nk=${tool.k}"
+        is AgentTool.RrfSearch -> "\"${tool.query}\",\nk=${tool.k}"
+        is AgentTool.TimelineSearch -> "${tool.startDate},\n${tool.endDate}"
+    }
+
+    private fun traceObservationSummary(tool: AgentTool, result: ToolResult): String = when (tool) {
+        is AgentTool.Glob -> "${result.citations.size} files matched"
+        is AgentTool.ListDir -> "${result.citations.size} entries listed"
+        is AgentTool.ReadFile -> "${result.summary.length} chars loaded"
+        is AgentTool.Grep -> "${result.citations.size} hits returned"
+        is AgentTool.VectorSearch -> "${result.citations.size} results returned"
+        is AgentTool.RrfSearch -> "${result.citations.size} citations returned"
+        is AgentTool.TimelineSearch -> "${result.citations.size} documents found"
+    }
+
     private fun toolProgressDescription(tool: AgentTool): String = when (tool) {
         is AgentTool.Glob -> "ファイルパターン検索中..."
         is AgentTool.ListDir -> "フォルダ一覧取得中..."
@@ -169,6 +221,19 @@ class AgentPipeline(
         is AgentTool.Grep -> "キーワード検索中..."
         is AgentTool.VectorSearch -> "ベクトル検索中..."
         is AgentTool.RrfSearch -> "ハイブリッド検索中..."
+        is AgentTool.TimelineSearch -> "タイムライン検索中..."
+    }
+
+    private fun buildDirectAnswerPrompt(
+        question: String,
+        history: List<Pair<String, String>>,
+    ): String {
+        val historyBlock = history.takeLast(6)
+            .joinToString("\n") { (role, content) ->
+                "${if (role == "user") "ユーザー" else "アシスタント"}: $content"
+            }
+            .let { if (it.isNotBlank()) "$it\n" else "" }
+        return "${historyBlock}ユーザー: $question\nアシスタント:"
     }
 
     private fun buildAnswerPrompt(
@@ -176,15 +241,16 @@ class AgentPipeline(
         citations: List<Citation>,
         history: List<Pair<String, String>>,
     ): String {
-        val MAX_CITATION_CHARS = 4000
+        // トークン推定上限 (chars / 3 で推定; CitationIntegrator と同一定数)
+        val MAX_CONTEXT_TOKENS = 1200
         val contextBlock = if (citations.isNotEmpty()) {
             val budgeted = mutableListOf<Citation>()
-            var remaining = MAX_CITATION_CHARS
+            var remainingTokens = MAX_CONTEXT_TOKENS
             for (c in citations) {
-                val cost = c.headingPath.length + c.snippet.length + 6
-                if (remaining <= 0) break
+                val cost = (c.headingPath.length + c.snippet.length) / 3 + 5
+                if (remainingTokens <= 0) break
                 budgeted += c
-                remaining -= cost
+                remainingTokens -= cost
             }
             val body = budgeted.joinToString("\n\n") { c ->
                 val pathPrefix = c.relativePath?.let { "$it > " } ?: ""

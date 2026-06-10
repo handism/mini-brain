@@ -31,7 +31,7 @@ class MiniBrainApp : Application() {
     val llmService: LlmService by lazy { LlmService(this) }
 
     val documentRepository: DocumentRepository by lazy {
-        DocumentRepository(this, database.documentDao(), database.chunkDao(), embedderService, database)
+        DocumentRepository(this, database.documentDao(), database.chunkDao(), embedderService, database, database.folderEmbeddingDao())
     }
 
     val chatRepository: ChatRepository by lazy {
@@ -39,7 +39,7 @@ class MiniBrainApp : Application() {
     }
 
     val ragPipeline: RagPipeline by lazy {
-        RagPipeline(embedderService, llmService, database.chunkDao(), database.documentDao())
+        RagPipeline(embedderService, llmService, database.chunkDao(), database.documentDao(), database.folderEmbeddingDao())
     }
 
     val agentPipeline: AgentPipeline by lazy {

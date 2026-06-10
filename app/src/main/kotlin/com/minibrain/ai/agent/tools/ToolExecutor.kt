@@ -5,6 +5,7 @@ import com.minibrain.ai.agent.AgentTool
 import com.minibrain.ai.agent.ToolCall
 import com.minibrain.ai.agent.ToolResult
 import com.minibrain.ai.embed.EmbedderService
+import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.CosineSimilarity
 import com.minibrain.ai.rag.RagPipeline
@@ -22,6 +23,8 @@ private const val MAX_GREP_RESULTS = 20
 private const val GREP_SNIPPET_CHARS = 200
 private const val READ_FILE_MAX_CHARS = 8000
 private const val READ_SECTION_MAX_CHARS = 1000
+// ファイル内容がこの文字数を超えたら LLM で要約してから citation に投入 (≒ 1000 tokens)
+private const val SUMMARIZE_THRESHOLD_CHARS = 3000
 
 class ToolExecutor(
     private val documentDao: DocumentDao,
@@ -29,6 +32,7 @@ class ToolExecutor(
     private val embedderService: EmbedderService,
     private val ragPipeline: RagPipeline,
     private val treeUri: String,
+    private val llmService: LlmService,
 ) {
     private var cachedDocs: List<DocumentEntity>? = null
     private val queryVecCache = mutableMapOf<String, FloatArray>()
@@ -45,6 +49,7 @@ class ToolExecutor(
         is AgentTool.Grep -> executeGrep(call, tool)
         is AgentTool.VectorSearch -> executeVectorSearch(call, tool)
         is AgentTool.RrfSearch -> executeRrfSearch(call, tool)
+        is AgentTool.TimelineSearch -> executeTimelineSearch(call, tool)
     }
 
     private suspend fun executeGlob(call: ToolCall, tool: AgentTool.Glob): ToolResult {
@@ -138,17 +143,32 @@ class ToolExecutor(
             }
         }
 
-        val citations = chunks.map { chunk ->
-            Citation(
-                headingPath = chunk.headingPath,
-                snippet = chunk.text,
+        val fullText = sb.toString().trimEnd()
+        val citations = if (fullText.length > SUMMARIZE_THRESHOLD_CHARS) {
+            // 巨大ファイルは要約してから単一の citation として投入
+            val summary = runCatching { llmService.summarize(fullText) }
+                .getOrElse { fullText.take(SUMMARIZE_THRESHOLD_CHARS) }
+            listOf(Citation(
+                headingPath = doc.relativePath,
+                snippet = summary,
                 score = 1f,
                 docId = doc.id,
                 relativePath = doc.relativePath,
                 source = SourceType.READ_FILE,
-            )
+            ))
+        } else {
+            chunks.map { chunk ->
+                Citation(
+                    headingPath = chunk.headingPath,
+                    snippet = chunk.text,
+                    score = 1f,
+                    docId = doc.id,
+                    relativePath = doc.relativePath,
+                    source = SourceType.READ_FILE,
+                )
+            }
         }
-        return ToolResult(call, sb.toString().trimEnd(), citations)
+        return ToolResult(call, fullText, citations)
     }
 
     private suspend fun executeGrep(call: ToolCall, tool: AgentTool.Grep): ToolResult {
@@ -263,6 +283,40 @@ class ToolExecutor(
         } else {
             "RRF \"${tool.query}\": ${citations.size} results\n$lines"
         }
+        return ToolResult(call, text, citations)
+    }
+
+    private suspend fun executeTimelineSearch(call: ToolCall, tool: AgentTool.TimelineSearch): ToolResult {
+        val docs = withContext(Dispatchers.IO) {
+            documentDao.getByDateRange(treeUri, tool.startDate, tool.endDate)
+        }.take(tool.limit)
+
+        if (docs.isEmpty()) {
+            return ToolResult(
+                call,
+                "TIMELINE \"${tool.startDate}\" ~ \"${tool.endDate}\": 0 documents",
+                emptyList(),
+            )
+        }
+
+        val citations = mutableListOf<Citation>()
+        val lines = mutableListOf<String>()
+        for (doc in docs) {
+            val snippet = withContext(Dispatchers.IO) {
+                chunkDao.getByDoc(doc.id).firstOrNull()?.text
+            } ?: doc.firstParagraph ?: ""
+            citations.add(Citation(
+                headingPath = doc.relativePath,
+                snippet = snippet.take(GREP_SNIPPET_CHARS),
+                score = 0.7f,
+                docId = doc.id,
+                relativePath = doc.relativePath,
+                source = SourceType.GREP,
+            ))
+            val dateTag = doc.documentDate?.let { " ($it)" } ?: ""
+            lines.add("- [d=${doc.id}] ${doc.relativePath}$dateTag: ${snippet.take(80)}")
+        }
+        val text = "TIMELINE \"${tool.startDate}\" ~ \"${tool.endDate}\": ${docs.size} documents\n${lines.joinToString("\n")}"
         return ToolResult(call, text, citations)
     }
 

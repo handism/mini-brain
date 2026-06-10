@@ -5,7 +5,11 @@ import com.minibrain.ai.rag.SourceType
 
 object CitationIntegrator {
 
-    private const val MAX_CITATION_CHARS = 4000
+    // トークン推定上限 (chars / 3 で推定; 日英混合の中間値)
+    // 例: 1200 tokens ≒ 3600 文字相当
+    private const val MAX_CONTEXT_TOKENS = 1200
+
+    private fun estimateTokens(text: String): Int = text.length / 3
 
     private val SOURCE_PRIORITY = listOf(
         SourceType.READ_FILE,
@@ -13,6 +17,7 @@ object CitationIntegrator {
         SourceType.VECTOR,
         SourceType.RRF,
         SourceType.GLOB,
+        SourceType.FOLDER,
         SourceType.UNKNOWN,
     )
 
@@ -36,12 +41,12 @@ object CitationIntegrator {
         )
 
         val budgeted = mutableListOf<Citation>()
-        var remaining = MAX_CITATION_CHARS
+        var remainingTokens = MAX_CONTEXT_TOKENS
         for (c in sorted) {
-            val cost = c.headingPath.length + c.snippet.length + 6
-            if (remaining <= 0) break
+            val cost = estimateTokens(c.headingPath + c.snippet) + 5
+            if (remainingTokens <= 0) break
             budgeted += c
-            remaining -= cost
+            remainingTokens -= cost
         }
         return budgeted
     }

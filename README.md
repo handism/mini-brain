@@ -7,7 +7,11 @@
 ## 特徴
 
 - **完全プライベート** — 質問・回答・md の内容はクラウドに送信しない。ネットワーク通信は初回モデルダウンロードのみ
-- **ReAct エージェント検索** — LLM が glob / list_dir / read_file / grep / vector_search / rrf_search を自由に組み合わせて多段探索。レイテンシより精度を優先
+- **ReAct エージェント検索** — LLM が glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search を自由に組み合わせて多段探索。レイテンシより精度を優先
+- **Query Classifier** — 一般知識の質問は RAG をスキップして直接 LLM が回答。検索コストを削減
+- **Recentness Ranking** — ファイルパスから日付を抽出し、RRF スコアに指数減衰のフレッシュネス加点を適用（新しい情報を優先）
+- **Timeline Search** — 期間表現（去年の夏・2024年3月など）を DateRange に解釈し、期間指定でファイルを収集する `timeline_search` ツールを提供
+- **Folder Embedding** — フォルダ単位の仮想埋め込みを生成。ベクトル検索でフォルダ全体の意味をキャプチャ
 - **DCI（Directory/Content Intelligence）** — フォルダ・ファイル名を主軸にした検索。日記は日付ファイルを直読み、ノートはパス絞り込みから全文取得
 - **日付形式不問** — YYYY/MM/DD・YYYYMMDD・YYYY-MM-DD など命名規則が混在していても DB 側で吸収して一致ファイルの docId を解決
 - **ハイブリッド検索** — BM25（FTS4）+ ベクトル検索（USE Multilingual）を RRF でマージ
@@ -72,11 +76,12 @@ app/src/main/kotlin/com/minibrain/
 │   ├── agent/
 │   │   ├── AgentPipeline.kt     # ReAct ループのオーケストレーション・hint 生成
 │   │   ├── AgentTypes.kt        # AgentTool / Observation / PlannerDecision 等の型定義
-│   │   ├── PlannerPrompt.kt     # Planner プロンプト生成 + pure Kotlin regex JSON パーサ
-│   │   ├── CitationIntegrator.kt# 重複除去・優先度整列・budget 制御
-│   │   ├── DateResolver.kt      # 相対日付（昨日・先週等）→ 絶対日付変換
+│   │   ├── PlannerPrompt.kt     # Planner プロンプト生成 + DSL(key:value)パーサ
+│   │   ├── CitationIntegrator.kt# 重複除去・優先度整列・トークン budget 制御
+│   │   ├── DateResolver.kt      # 相対日付・期間表現 → 絶対日付/DateRange 変換
+│   │   ├── QueryClassifier.kt   # クエリ種別判定（MEMORY/GENERAL/TEMPORAL）
 │   │   └── tools/
-│   │       ├── ToolExecutor.kt  # 6 ツールの実装（glob/list_dir/read_file/grep/vector/rrf）
+│   │       ├── ToolExecutor.kt  # 7 ツールの実装（glob/list_dir/read_file/grep/vector/rrf/timeline）
 │   │       └── GlobMatcher.kt   # glob パターン → Kotlin Regex 変換
 │   ├── llm/
 │   │   ├── LlmService.kt        # LiteRT-LM Engine ラッパー
@@ -87,7 +92,7 @@ app/src/main/kotlin/com/minibrain/
 │       ├── RagPipeline.kt       # RAG（RRF フォールバック・Citation 型定義）
 │       └── CosineSimilarity.kt  # コサイン類似度（純 Kotlin）
 ├── data/
-│   ├── db/                      # Room スキーマ・DAO
+│   ├── db/                      # Room スキーマ・DAO（v5: documents+folder_embeddings）
 │   ├── md/
 │   │   ├── MarkdownChunker.kt      # 見出しベースのチャンク分割
 │   │   ├── MarkdownMetaExtractor.kt # 見出し・本文・タグ抽出
@@ -106,25 +111,44 @@ app/src/main/kotlin/com/minibrain/
 
 ```
 質問
+↓ QueryClassifier
+  GENERAL_KNOWLEDGE → RAG スキップ → LLM 直接回答
+  TEMPORAL_SUMMARIZATION / MEMORY_SEARCH → 以下へ
 ↓ buildPlannerHint（DB 先行解析）
+  ├─ 期間クエリ: resolveDateRange → DateRange を hint に注入 / timeline_search 推奨
   ├─ 日付クエリ: YYYYMMDD 8桁で DB 検索 → 一致した docId を hint に注入
-  │              未一致 → YYYYMMDD* / YYYY/MM/DD* / YYYY-MM-DD* の glob hint を列挙
+  │              未一致 → glob hint を列挙
   └─ ファイル名一致: [d=ID] fileName を hint に追加
 ↓ ReAct ループ（最大 6 回）
-  Planner LLM がツールを選択:
-  ├─ glob(pattern)           : パターンでファイル列挙（** 再帰対応）
-  ├─ list_dir(folder)        : フォルダ直下のサブフォルダ・ファイル一覧
-  ├─ read_file(docId|path)   : ファイル全文取得（chunks 連結、8000 字上限）
-  ├─ grep(query, scope?)     : FTS4 BM25 キーワード検索
-  ├─ vector_search(query, k) : USE Multilingual 意味類似検索
-  └─ rrf_search(query, k)    : BM25 + ベクトル RRF 融合
-  → JSON パース失敗 2 回連続 → RRF 即時フォールバック
+  Planner LLM がツールを選択（DSL key:value 形式で出力）:
+  ├─ glob(pattern)                    : パターンでファイル列挙
+  ├─ list_dir(folder)                 : フォルダ直下のサブフォルダ・ファイル一覧
+  ├─ read_file(docId|path)            : ファイル全文取得（巨大ファイルは LLM 要約）
+  ├─ grep(query, scope?)              : FTS4 BM25 キーワード検索
+  ├─ vector_search(query, k)          : USE Multilingual 意味類似検索
+  ├─ rrf_search(query, k)             : BM25 + ベクトル RRF 融合
+  └─ timeline_search(start, end, k)   : 期間指定で documentDate フィルタ
+  → パース失敗 2 回連続 → RRF 即時フォールバック
 ↓ CitationIntegrator
-  優先度: READ_FILE > GREP > VECTOR > RRF > GLOB
-  重複除去（docId + headingPath キー）・4000 字 budget
+  優先度: READ_FILE > GREP > VECTOR > RRF > GLOB > FOLDER
+  重複除去（docId + headingPath キー）・トークン budget（chars/3 推定、上限 1200 tokens）
   citations 空 → RRF 強制フォールバック（セーフティネット）
 ↓ LLM 回答生成（ストリーミング）
 ```
+
+### Recentness Ranking
+
+RRF スコアに指数減衰の freshnessBoost を加算。ファイルパスから YYYY-MM-DD / YYYYMMDD / YYYY/MM/DD 形式で日付を抽出し DB に保存。
+
+```
+finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECAY_DAYS)
+// FRESHNESS_BOOST_MAX = 0.010, FRESHNESS_DECAY_DAYS = 90
+// 30日: +0.0072, 1年: +0.0017, 3年: +0.0001
+```
+
+### Folder Embedding
+
+インデックス時にフォルダ直下のファイル名・見出しを連結して埋め込みを生成し `folder_embeddings` テーブルに保存。ベクトル検索でフォルダ単位の意味マッチを実現。
 
 ## 画面構成
 

@@ -16,4 +16,5 @@ data class DocumentEntity(
     @ColumnInfo(name = "headings") val headings: String? = null,
     @ColumnInfo(name = "first_para") val firstParagraph: String? = null,
     @ColumnInfo(name = "tags") val tags: String? = null,
+    @ColumnInfo(name = "documentDate") val documentDate: String? = null,
 )
