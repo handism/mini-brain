@@ -16,6 +16,7 @@ import kotlin.math.exp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
@@ -39,9 +40,18 @@ class RagPipeline(
 ) {
     suspend fun retrieveTopChunks(question: String, treeUri: String? = null, topK: Int = 20): List<Citation> =
         coroutineScope {
-            val vecJob = async { vectorSearch(question, treeUri, k = 50) }
-            val bm25Job = async { bm25Search(question, treeUri, k = 50) }
-            val folderJob = async { folderSearch(question, treeUri, k = 5) }
+            val vecJob = async {
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k = 50) }
+                    ?: run { Log.w("RagPipeline", "vectorSearch timed out"); emptyList() }
+            }
+            val bm25Job = async {
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { bm25Search(question, treeUri, k = 50) }
+                    ?: run { Log.w("RagPipeline", "bm25Search timed out"); emptyList() }
+            }
+            val folderJob = async {
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { folderSearch(question, treeUri, k = 5) }
+                    ?: run { Log.w("RagPipeline", "folderSearch timed out"); emptyList() }
+            }
 
             val vecResults = vecJob.await()
             val bm25Results = bm25Job.await()
@@ -183,6 +193,7 @@ class RagPipeline(
     }
 
     companion object {
+        private const val SEARCH_TIMEOUT_MS = 8_000L
         // freshnessBoost tuning constants — adjust to balance recency vs. relevance
         // RRF max score ≈ 0.032 (rank=1 in both BM25 and vector)
         private const val FRESHNESS_BOOST_MAX  = 0.010f  // 最大加点 (RRF max の約 30%)

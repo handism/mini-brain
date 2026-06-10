@@ -1,6 +1,7 @@
 package com.minibrain.ai.llm
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -49,7 +50,13 @@ class ModelDownloader(private val context: Context) {
                     when {
                         result is DownloadResult.Done -> {
                             val err = moveFile(tempFile, embedderModelFile)
-                            if (err != null) { emit(DownloadResult.Error(err)); errorOccurred = true }
+                            if (err != null) {
+                                // move 失敗時は temp ファイルを削除して stuck 状態を防ぐ
+                                Log.e(TAG, "Failed to move embedder temp file: $err")
+                                tempFile.delete()
+                                emit(DownloadResult.Error(err))
+                                errorOccurred = true
+                            }
                         }
                         result is DownloadResult.Error -> { emit(result); errorOccurred = true }
                         else -> emit(result)
@@ -64,7 +71,13 @@ class ModelDownloader(private val context: Context) {
                     when {
                         result is DownloadResult.Done -> {
                             val err = moveFile(tempFile, llmModelFile)
-                            if (err != null) { emit(DownloadResult.Error(err)); errorOccurred = true }
+                            if (err != null) {
+                                // move 失敗時は temp ファイルを削除して stuck 状態を防ぐ
+                                Log.e(TAG, "Failed to move LLM temp file: $err")
+                                tempFile.delete()
+                                emit(DownloadResult.Error(err))
+                                errorOccurred = true
+                            }
                         }
                         result is DownloadResult.Error -> { emit(result); errorOccurred = true }
                         else -> emit(result)
@@ -155,6 +168,7 @@ class ModelDownloader(private val context: Context) {
     }
 
     companion object {
+        private const val TAG = "ModelDownloader"
         const val LLM_FILE_NAME = "gemma-4-E2B-it.litertlm"
         const val EMBEDDER_FILE_NAME = "universal_sentence_encoder_multilingual.tflite"
 

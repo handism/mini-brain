@@ -36,8 +36,9 @@ class EmbedderService(private val context: Context) {
     }
 
     suspend fun embed(text: String): FloatArray = withContext(Dispatchers.Default) {
-        val emb = requireNotNull(embedder) { "EmbedderService not initialized. Call initialize() first." }
         mutex.withLock {
+            // embedder の参照をロック内で取得することで、並行する initialize() による close/再作成との競合を防ぐ
+            val emb = requireNotNull(embedder) { "EmbedderService not initialized. Call initialize() first." }
             val result = emb.embed(text)
             // MediaPipe 0.10.x: TextEmbedderResult -> embeddingResult() -> embeddings() -> floatEmbedding()
             val floatList = result.embeddingResult().embeddings().first().floatEmbedding()

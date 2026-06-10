@@ -5,6 +5,9 @@ object PlannerPrompt {
     // キー: 値 形式を解析する regex (大文字小文字どちらも受け付ける)
     private val KEY_VALUE_RE = Regex("""^([A-Za-z_]+):\s*(.+)$""", RegexOption.MULTILINE)
 
+    // 注意: build() のプロンプト内ツール定義と buildTool() のパース定義は対応している。
+    // 新しいツールを追加する場合は build() のツール例示テキストと buildTool() の両方を更新すること。
+
     fun build(
         question: String,
         plannerHint: String?,
