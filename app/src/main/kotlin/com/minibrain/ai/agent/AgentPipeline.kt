@@ -56,7 +56,7 @@ class AgentPipeline(
             val sb = StringBuilder()
             runCatching {
                 llmService.generateStream(prompt).collect { token -> sb.append(token) }
-            }.onFailure { Log.w(TAG, "planner LLM failed: ${it.message}") }
+            }.onFailure { Log.w(TAG, "planner LLM failed", it) }
 
             val decision = PlannerPrompt.parseDecision(sb.toString())
             Log.d(TAG, "decision=$decision raw=${sb.take(200)}")
@@ -92,17 +92,7 @@ class AgentPipeline(
                     toolResults += result
                     traceEvents += ObservationEvent(iteration, traceObservationSummary(decision.tool, result))
 
-                    val isRecent = observations.size < 2
-                    val obs = Observation(toolCall, result.summary, full = isRecent)
-                    observations.add(obs)
-
-                    // 全 observation を最新2件だけ full にする
-                    if (observations.size > 2) {
-                        val idx = observations.size - 3
-                        if (observations[idx].full) {
-                            observations[idx] = observations[idx].copy(full = false)
-                        }
-                    }
+                    addObservation(observations, toolCall, result.summary)
 
                     Log.d(TAG, "tool=${decision.tool} citations=${result.citations.size} obsLen=${result.summary.length}")
                 }
@@ -247,7 +237,7 @@ class AgentPipeline(
             val budgeted = mutableListOf<Citation>()
             var remainingTokens = MAX_CONTEXT_TOKENS
             for (c in citations) {
-                val cost = (c.headingPath.length + c.snippet.length) / 3 + 5
+                val cost = estimateTokens(c.headingPath + c.snippet)
                 if (remainingTokens <= 0) break
                 budgeted += c
                 remainingTokens -= cost
@@ -274,5 +264,25 @@ $body
             .let { if (it.isNotBlank()) "$it\n" else "" }
 
         return "$contextBlock\n\n$historyBlock\nユーザー: $question\nアシスタント:"
+    }
+
+    // observation スライディングウィンドウ: 最新2件を full(詳細)、それ以前を compact(要約)に保つ
+    private fun addObservation(observations: MutableList<Observation>, toolCall: ToolCall, summary: String) {
+        val isRecent = observations.size < 2
+        observations.add(Observation(toolCall, summary, full = isRecent))
+        if (observations.size > 2) {
+            val idx = observations.size - 3
+            if (observations[idx].full) {
+                observations[idx] = observations[idx].copy(full = false)
+            }
+        }
+    }
+
+    // 日本語(非ASCII)は約3文字/トークン、英語(ASCII)は約4文字/トークンで推定
+    private fun estimateTokens(text: String): Int {
+        var jpChars = 0
+        for (c in text) if (c.code > 127) jpChars++
+        val enChars = text.length - jpChars
+        return jpChars / 3 + enChars / 4 + 5
     }
 }
