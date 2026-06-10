@@ -81,16 +81,24 @@ UI (Compose) → ViewModel → AgentPipeline → (LlmService / EmbedderService /
 
 ```
 質問
-↓ planSearch
-  ├─ 日付キーワード → diary_lookup（LLM 不要）
-  ├─ ファイル名一致 → file_lookup（LLM 不要）
-  └─ その他        → LLM が SearchPlan JSON を生成
-↓ executeSearch（intent 別）
-  ├─ diary_lookup   : DateResolver で日付解決 → searchByPath
-  ├─ file_lookup    : searchByPath → getByDoc
-  ├─ topic_research : BM25 + ベクトル検索（targetFolders で絞り込み）
-  └─ general        : RagPipeline.retrieveTopChunks() に委譲
-↓ answer: LLM がソース種別を意識して回答生成
+↓ buildPlannerHint（DB 先行解析）
+  ├─ 日付クエリ: YYYYMMDD 8桁で DB 検索 → docId を hint に直接注入
+  │              未一致なら YYYYMMDD* / YYYY/MM/DD* / YYYY-MM-DD* の glob パターンを hint に列挙
+  └─ ファイル名一致: [d=ID] fileName を hint に追加
+↓ ReAct ループ（最大 6 回）
+  Planner LLM が以下から1ツールを選択:
+  ├─ glob(pattern)             : ファイルパターン列挙
+  ├─ list_dir(folder)          : フォルダ直下一覧
+  ├─ read_file(docId|path)     : ファイル全文取得（chunks 連結）
+  ├─ grep(query, scope?)       : FTS4 キーワード検索
+  ├─ vector_search(query, k)   : 意味類似検索
+  └─ rrf_search(query, k)      : BM25+ベクトル RRF 融合
+  ↓ ToolExecutor 実行 → Observation 追加
+  ↓ {"action":"finalize"} or 6 回到達で終了
+  ↓ JSON パース失敗 2 回連続 → RRF 即時フォールバック
+↓ CitationIntegrator（重複除去・優先度整列・4000 字 budget）
+  citations 空 → RRF 強制フォールバック（セーフティネット）
+↓ buildAnswerPrompt → LLM 回答生成（ストリーミング）
 ```
 
 ## モデルファイルのパス
@@ -104,17 +112,21 @@ context.filesDir/models/universal_sentence_encoder_multilingual.tflite  # Embedd
 
 ## よく変更するファイル
 
-| 変更内容               | 対象ファイル                                          |
-| ---------------------- | ----------------------------------------------------- |
-| 検索計画ロジック       | `ai/agent/AgentPipeline.kt`                           |
-| 日付解決               | `ai/agent/DateResolver.kt`                            |
-| プロンプトテンプレート | `ai/agent/AgentPipeline.kt`（buildAnswerPrompt）      |
-| LLM 生成パラメータ     | `ai/llm/LlmService.kt`                                |
-| チャンク分割ロジック   | `data/md/MarkdownChunker.kt`                          |
-| ファイルメタ抽出       | `data/md/MarkdownMetaExtractor.kt`                    |
-| インデックス処理       | `data/repo/DocumentRepository.kt`                     |
-| チャット履歴管理       | `data/repo/ChatRepository.kt`                         |
-| チャット UI            | `ui/screens/ChatScreen.kt` + `ui/vm/ChatViewModel.kt` |
+| 変更内容                     | 対象ファイル                                              |
+| ---------------------------- | --------------------------------------------------------- |
+| ReAct ループ制御・hint 生成  | `ai/agent/AgentPipeline.kt`                               |
+| Planner プロンプト           | `ai/agent/PlannerPrompt.kt`                               |
+| ツール実装（glob/grep 等）   | `ai/agent/tools/ToolExecutor.kt`                          |
+| glob パターン変換            | `ai/agent/tools/GlobMatcher.kt`                           |
+| 引用統合・優先度・budget     | `ai/agent/CitationIntegrator.kt`                          |
+| 日付解決                     | `ai/agent/DateResolver.kt`                                |
+| 回答プロンプト               | `ai/agent/AgentPipeline.kt`（buildAnswerPrompt）          |
+| LLM 生成パラメータ           | `ai/llm/LlmService.kt`                                    |
+| チャンク分割ロジック         | `data/md/MarkdownChunker.kt`                              |
+| ファイルメタ抽出             | `data/md/MarkdownMetaExtractor.kt`                        |
+| インデックス処理             | `data/repo/DocumentRepository.kt`                         |
+| チャット履歴管理             | `data/repo/ChatRepository.kt`                             |
+| チャット UI                  | `ui/screens/ChatScreen.kt` + `ui/vm/ChatViewModel.kt`     |
 
 ## 注意事項
 
@@ -122,5 +134,7 @@ context.filesDir/models/universal_sentence_encoder_multilingual.tflite  # Embedd
 - `EmbedderService` と `LlmService` の初期化はバックグラウンドスレッド（`Dispatchers.Default`）で行う
 - `EmbedderService.embed()` は内部で `Mutex` を使ってシリアライズされているため、並列呼び出しは安全だがスループットは出ない
 - クラウド API の追加は禁止（プライバシー要件）
-- `AgentPipeline.planSearch()` は `diary_lookup` / `file_lookup` をクライアントサイドで判定して LLM 呼び出しを省略する。LLM 計画が必要な場合は `topic_research` / `general` となり計 2 回の LLM 呼び出しが発生する
+- `AgentPipeline.run()` は ReAct ループ（最大 6 回）で動作する。各反復で Planner LLM がツールを選択し、最終的に `CitationIntegrator` で引用を統合して回答を生成する。citations が空の場合は RRF を強制実行するセーフティネットがある
+- `PlannerPrompt` は `org.json` を使わず pure Kotlin regex で JSON をパースする（JVM ユニットテスト互換性のため）
+- `buildPlannerHint` は日付クエリに対して YYYYMMDD 8桁で DB 検索し、docId を直接 hint に注入する（命名形式に依存しない）
 - DB マイグレーション: 既存 `documents` レコードの `headings` / `first_para` / `tags` は次回差分インデックス時に自動補完される。強制補完は Settings → 再インデックスで可能

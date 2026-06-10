@@ -8,6 +8,7 @@ object DateResolver {
     private val FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     private val MONTH_DAY_RE = Regex("""(\d{1,2})月(\d{1,2})日""")
     private val MONTH_ONLY_RE = Regex("""(\d{1,2})月""")
+    private val DAYS_AGO_RE = Regex("""(\d+)\s*日[前まえ]""")
 
     private val DIARY_KEYWORDS = listOf(
         "昨日", "今日", "本日", "一昨日", "おととい",
@@ -20,10 +21,16 @@ object DateResolver {
         DIARY_KEYWORDS.any { question.contains(it) }
             || MONTH_DAY_RE.containsMatchIn(question)
             || MONTH_ONLY_RE.containsMatchIn(question)
+            || DAYS_AGO_RE.containsMatchIn(question)
 
     fun resolveToDateStrings(question: String): List<String> {
         val today = LocalDate.now()
         val isPastYear = question.contains("去年") || question.contains("昨年")
+
+        DAYS_AGO_RE.find(question)?.let { match ->
+            val days = match.groupValues[1].toLongOrNull() ?: 0L
+            return listOf(today.minusDays(days).format(FORMATTER))
+        }
 
         return when {
             question.contains("一昨日") || question.contains("おととい") ->
