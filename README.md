@@ -7,8 +7,9 @@
 ## 特徴
 
 - **完全プライベート** — 質問・回答・md の内容はクラウドに送信しない。ネットワーク通信は初回モデルダウンロードのみ
-- **エージェント型検索** — LLM が Vault 全体の構造を俯瞰して検索計画を立て、意図に応じた戦略でファイルを取得
-- **日付・ファイル名検索** — 「昨日何していた？」「Datadogについて何か書いていた？」などを高精度で回答
+- **ReAct エージェント検索** — LLM が glob / list_dir / read_file / grep / vector_search / rrf_search を自由に組み合わせて多段探索。レイテンシより精度を優先
+- **DCI（Directory/Content Intelligence）** — フォルダ・ファイル名を主軸にした検索。日記は日付ファイルを直読み、ノートはパス絞り込みから全文取得
+- **日付形式不問** — YYYY/MM/DD・YYYYMMDD・YYYY-MM-DD など命名規則が混在していても DB 側で吸収して一致ファイルの docId を解決
 - **ハイブリッド検索** — BM25（FTS4）+ ベクトル検索（USE Multilingual）を RRF でマージ
 - **Markdown 対応** — 見出し階層を解析してチャンク分割。引用元のファイル名と見出しパスを回答に表示
 - **ストリーミング回答** — LiteRT-LM のトークンストリームを Compose UI にリアルタイム描画
@@ -69,16 +70,21 @@ app/src/main/kotlin/com/minibrain/
 ├── MainActivity.kt
 ├── ai/
 │   ├── agent/
-│   │   ├── AgentPipeline.kt     # エージェント型検索のオーケストレーション
-│   │   ├── SearchPlan.kt        # 検索計画データクラス
-│   │   └── DateResolver.kt      # 相対日付（昨日・先週等）→ 絶対日付変換
+│   │   ├── AgentPipeline.kt     # ReAct ループのオーケストレーション・hint 生成
+│   │   ├── AgentTypes.kt        # AgentTool / Observation / PlannerDecision 等の型定義
+│   │   ├── PlannerPrompt.kt     # Planner プロンプト生成 + pure Kotlin regex JSON パーサ
+│   │   ├── CitationIntegrator.kt# 重複除去・優先度整列・budget 制御
+│   │   ├── DateResolver.kt      # 相対日付（昨日・先週等）→ 絶対日付変換
+│   │   └── tools/
+│   │       ├── ToolExecutor.kt  # 6 ツールの実装（glob/list_dir/read_file/grep/vector/rrf）
+│   │       └── GlobMatcher.kt   # glob パターン → Kotlin Regex 変換
 │   ├── llm/
 │   │   ├── LlmService.kt        # LiteRT-LM Engine ラッパー
 │   │   └── ModelDownloader.kt   # レジューム対応ダウンロード
 │   ├── embed/
 │   │   └── EmbedderService.kt   # MediaPipe TextEmbedder ラッパー
 │   └── rag/
-│       ├── RagPipeline.kt       # RAG（general フォールバック）
+│       ├── RagPipeline.kt       # RAG（RRF フォールバック・Citation 型定義）
 │       └── CosineSimilarity.kt  # コサイン類似度（純 Kotlin）
 ├── data/
 │   ├── db/                      # Room スキーマ・DAO
@@ -96,21 +102,28 @@ app/src/main/kotlin/com/minibrain/
 
 ## 検索アーキテクチャ
 
+レイテンシより精度を優先した **ReAct ループ + DCI（Directory/Content Intelligence）** を採用。LLM がツールを自由に組み合わせて多段探索し、パス・ファイル名→全文読み込みを基本戦略とする。
+
 ```
 質問
-↓
-planSearch（AgentPipeline）
-  ├─ 日付キーワード検出（昨日/先週等）→ diary_lookup  ←クライアント判定（高速）
-  ├─ ファイル名一致検出              → file_lookup   ←クライアント判定（高速）
-  └─ その他                          → LLM が計画生成 → topic_research / general
-↓
-executeSearch（intent 別の戦略）
-  ├─ diary_lookup   : 日付文字列でファイル名検索 → チャンク取得
-  ├─ file_lookup    : ファイル名一致でチャンク取得
-  ├─ topic_research : BM25 + ベクトル検索（対象フォルダで絞り込み）
-  └─ general        : RagPipeline.retrieveTopChunks()（BM25 + ベクトル + RRF）
-↓
-answer（LLM による回答生成）
+↓ buildPlannerHint（DB 先行解析）
+  ├─ 日付クエリ: YYYYMMDD 8桁で DB 検索 → 一致した docId を hint に注入
+  │              未一致 → YYYYMMDD* / YYYY/MM/DD* / YYYY-MM-DD* の glob hint を列挙
+  └─ ファイル名一致: [d=ID] fileName を hint に追加
+↓ ReAct ループ（最大 6 回）
+  Planner LLM がツールを選択:
+  ├─ glob(pattern)           : パターンでファイル列挙（** 再帰対応）
+  ├─ list_dir(folder)        : フォルダ直下のサブフォルダ・ファイル一覧
+  ├─ read_file(docId|path)   : ファイル全文取得（chunks 連結、8000 字上限）
+  ├─ grep(query, scope?)     : FTS4 BM25 キーワード検索
+  ├─ vector_search(query, k) : USE Multilingual 意味類似検索
+  └─ rrf_search(query, k)    : BM25 + ベクトル RRF 融合
+  → JSON パース失敗 2 回連続 → RRF 即時フォールバック
+↓ CitationIntegrator
+  優先度: READ_FILE > GREP > VECTOR > RRF > GLOB
+  重複除去（docId + headingPath キー）・4000 字 budget
+  citations 空 → RRF 強制フォールバック（セーフティネット）
+↓ LLM 回答生成（ストリーミング）
 ```
 
 ## 画面構成

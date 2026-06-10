@@ -1,24 +1,15 @@
 package com.minibrain.ai.agent
 
 import android.util.Log
-import androidx.sqlite.db.SimpleSQLiteQuery
+import com.minibrain.ai.agent.tools.ToolExecutor
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
-import com.minibrain.ai.rag.CosineSimilarity
 import com.minibrain.ai.rag.RagPipeline
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
-import com.minibrain.data.db.entities.ChunkEntity
-import com.minibrain.data.db.entities.DocumentEntity
-import com.minibrain.data.search.NGramTokenizer
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 
 class AgentPipeline(
     private val llmService: LlmService,
@@ -29,301 +20,163 @@ class AgentPipeline(
 ) {
     companion object {
         private const val TAG = "AgentPipeline"
-        private const val MAX_FILES_IN_PROMPT = 50
-        private const val MAX_CHUNKS_PER_DOC = 15
-        // maxNumTokens=4096 のうち出力用に ~1024 トークン確保。残りを日本語換算 ~2chars/token で割り当て
-        private const val MAX_CITATION_CHARS = 4000
+        private const val MAX_ITERATIONS = 6
     }
 
-    suspend fun planSearch(
+    suspend fun run(
         question: String,
         treeUri: String,
+        recentHistory: List<Pair<String, String>> = emptyList(),
         onStatus: (String) -> Unit = {},
-    ): SearchPlan = withContext(Dispatchers.Default) {
-        // 1. 日付関連キーワードによるクライアントサイド判定
-        if (DateResolver.isDiaryQuery(question)) {
-            Log.d(TAG, "diary_lookup: $question")
-            return@withContext SearchPlan(
-                intent = "diary_lookup",
-                reasoning = "日付関連キーワードを検出",
-                targetFolders = emptyList(),
-                targetFiles = emptyList(),
-                searchKeywords = DateResolver.resolveToDateStrings(question),
-            )
+    ): AgentResult = withContext(Dispatchers.Default) {
+        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri)
+        val plannerHint = buildPlannerHint(question, treeUri)
+        val observations = mutableListOf<Observation>()
+        val toolResults = mutableListOf<ToolResult>()
+        var consecutiveParseErrors = 0
+
+        for (iteration in 1..MAX_ITERATIONS) {
+            onStatus("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
+            Log.d(TAG, "iteration=$iteration hint=$plannerHint obs=${observations.size}")
+
+            if (!llmService.isReady()) {
+                Log.d(TAG, "LLM not ready — fallback")
+                break
+            }
+
+            val prompt = PlannerPrompt.build(question, plannerHint, observations)
+            val sb = StringBuilder()
+            runCatching {
+                llmService.generateStream(prompt).collect { token -> sb.append(token) }
+            }.onFailure { Log.w(TAG, "planner LLM failed: ${it.message}") }
+
+            val decision = PlannerPrompt.parseDecision(sb.toString())
+            Log.d(TAG, "decision=$decision raw=${sb.take(200)}")
+
+            when (decision) {
+                is PlannerDecision.Finalize -> {
+                    Log.d(TAG, "finalize: ${decision.reason}")
+                    break
+                }
+                is PlannerDecision.ParseError -> {
+                    consecutiveParseErrors++
+                    Log.w(TAG, "parse error ($consecutiveParseErrors)")
+                    if (consecutiveParseErrors >= 2) {
+                        Log.d(TAG, "2 consecutive parse errors — RRF fallback")
+                        onStatus("フォールバック検索中...")
+                        val fallbackCitations = ragPipeline.retrieveTopChunks(question, treeUri)
+                        val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(question))
+                        toolResults += ToolResult(fallbackCall, "fallback", fallbackCitations)
+                        break
+                    }
+                    continue
+                }
+                is PlannerDecision.Call -> {
+                    consecutiveParseErrors = 0
+                    val toolCall = ToolCall(iteration, decision.tool)
+                    onStatus(toolProgressDescription(decision.tool))
+                    val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
+                    toolResults += result
+
+                    val isRecent = observations.size < 2
+                    val obs = Observation(toolCall, result.summary, full = isRecent)
+                    observations.add(obs)
+
+                    // 全 observation を最新2件だけ full にする
+                    if (observations.size > 2) {
+                        val idx = observations.size - 3
+                        if (observations[idx].full) {
+                            observations[idx] = observations[idx].copy(full = false)
+                        }
+                    }
+
+                    Log.d(TAG, "tool=${decision.tool} citations=${result.citations.size} obsLen=${result.summary.length}")
+                }
+            }
         }
 
-        // 2. ファイル名一致によるクライアントサイド判定
+        var citations = CitationIntegrator.integrate(toolResults)
+        Log.d(TAG, "total citations=${citations.size}")
+
+        // セーフティネット: ツールが何も見つけられなかった場合は必ず RRF 検索を実行
+        if (citations.isEmpty()) {
+            Log.d(TAG, "citations empty after loop — forced RRF fallback")
+            onStatus("フォールバック検索中...")
+            citations = ragPipeline.retrieveTopChunks(question, treeUri)
+            Log.d(TAG, "fallback citations=${citations.size}")
+        }
+
+        onStatus("")
+        val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory))
+        AgentResult(citations, answerFlow)
+    }
+
+    private suspend fun buildPlannerHint(question: String, treeUri: String): String? {
+        val parts = mutableListOf<String>()
         val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
+
+        if (DateResolver.isDiaryQuery(question)) {
+            val dates = DateResolver.resolveToDateStrings(question)
+            if (dates.isNotEmpty()) {
+                parts += "検出された日付: ${dates.joinToString(", ")}"
+
+                val found = mutableListOf<String>()
+                val notFound = mutableListOf<String>()
+                for (date in dates) {
+                    // 区切り文字を除いた8桁数字 (YYYYMMDD) でパスを検索
+                    val digits = date.replace("-", "")
+                    val matches = allDocs.filter { doc ->
+                        doc.relativePath.replace("/", "").replace("-", "").contains(digits)
+                    }.take(3)
+                    if (matches.isNotEmpty()) {
+                        found += matches.map { "[d=${it.id}] ${it.relativePath}" }
+                    } else {
+                        notFound += date
+                    }
+                }
+                if (found.isNotEmpty()) {
+                    parts += "日付に一致するファイル: ${found.joinToString(", ")}"
+                }
+                if (notFound.isNotEmpty()) {
+                    // 見つからない場合は YYYYMMDD / YYYY/MM/DD / YYYY-MM-DD の3形式を列挙
+                    val globs = notFound.flatMap { date ->
+                        listOf(
+                            "\"${date.replace("-", "")}*\"",
+                            "\"${date.replace("-", "/")}*\"",
+                            "\"$date*\"",
+                        )
+                    }
+                    parts += "推奨 glob パターン: ${globs.joinToString(" or ")}"
+                }
+            }
+        }
+
         val fileMatches = allDocs.filter { doc ->
             val name = doc.fileName.removeSuffix(".md").lowercase()
-            name.length >= 1 && question.lowercase().contains(name)
-        }
+            name.length >= 2 && question.lowercase().contains(name)
+        }.take(5)
         if (fileMatches.isNotEmpty()) {
-            Log.d(TAG, "file_lookup: ${fileMatches.map { it.fileName }}")
-            return@withContext SearchPlan(
-                intent = "file_lookup",
-                reasoning = "ファイル名が質問に含まれている",
-                targetFolders = emptyList(),
-                targetFiles = fileMatches.map { it.relativePath },
-                searchKeywords = emptyList(),
-            )
+            parts += "質問にマッチするファイル候補: ${fileMatches.joinToString(", ") { "[d=${it.id}] ${it.fileName}" }}"
         }
 
-        // 3. LLM による検索計画生成
-        if (!llmService.isReady() || allDocs.isEmpty()) {
-            return@withContext SearchPlan(
-                intent = "general",
-                reasoning = "LLM未初期化またはインデックスなし",
-                targetFolders = emptyList(),
-                targetFiles = emptyList(),
-                searchKeywords = emptyList(),
-            )
-        }
-
-        onStatus("検索計画を作成中...")
-        val prompt = buildPlanPrompt(question, buildFolderTree(allDocs), buildFileListForPrompt(allDocs))
-
-        val sb = StringBuilder()
-        runCatching {
-            llmService.generateStream(prompt).collect { token -> sb.append(token) }
-        }.onFailure { Log.w(TAG, "plan LLM failed: ${it.message}") }
-
-        parsePlanJson(sb.toString()) ?: SearchPlan(
-            intent = "general",
-            reasoning = "JSON解析失敗",
-            targetFolders = emptyList(),
-            targetFiles = emptyList(),
-            searchKeywords = emptyList(),
-        )
+        return parts.joinToString(" / ").ifBlank { null }
     }
 
-    suspend fun executeSearch(
-        plan: SearchPlan,
-        question: String,
-        treeUri: String,
-        onStatus: (String) -> Unit = {},
-    ): List<Citation> = withContext(Dispatchers.IO) {
-        Log.d(TAG, "execute intent=${plan.intent} folders=${plan.targetFolders} files=${plan.targetFiles} keywords=${plan.searchKeywords}")
-        when (plan.intent) {
-            "diary_lookup" -> executeDiaryLookup(plan, treeUri, onStatus)
-            "topic_research" -> executeTopicResearch(plan, question, treeUri, onStatus)
-            "file_lookup" -> executeFileLookup(plan, treeUri, onStatus)
-            else -> {
-                onStatus("関連情報を検索中...")
-                ragPipeline.retrieveTopChunks(question)
-            }
-        }
+    private fun toolProgressDescription(tool: AgentTool): String = when (tool) {
+        is AgentTool.Glob -> "ファイルパターン検索中..."
+        is AgentTool.ListDir -> "フォルダ一覧取得中..."
+        is AgentTool.ReadFile -> "ファイル読込中..."
+        is AgentTool.Grep -> "キーワード検索中..."
+        is AgentTool.VectorSearch -> "ベクトル検索中..."
+        is AgentTool.RrfSearch -> "ハイブリッド検索中..."
     }
-
-    fun answer(
-        question: String,
-        citations: List<Citation>,
-        plan: SearchPlan,
-        recentHistory: List<Pair<String, String>> = emptyList(),
-    ): Flow<String> = llmService.generateStream(buildAnswerPrompt(question, citations, plan, recentHistory))
-
-    // ---- Diary Lookup ----
-
-    private suspend fun executeDiaryLookup(
-        plan: SearchPlan,
-        treeUri: String,
-        onStatus: (String) -> Unit,
-    ): List<Citation> {
-        onStatus("日記ファイルを検索中...")
-        val dateStrings = plan.searchKeywords.ifEmpty { DateResolver.resolveToDateStrings("最近") }
-
-        val matched = mutableListOf<DocumentEntity>()
-        for (date in dateStrings) {
-            matched += documentDao.searchByPath(treeUri, date)
-            if (matched.size >= 5) break
-        }
-
-        if (matched.isEmpty()) {
-            onStatus("関連情報を検索中...")
-            return ragPipeline.retrieveTopChunks(plan.searchKeywords.joinToString(" ").ifBlank { "日記" })
-        }
-
-        return matched.distinctBy { it.id }.take(5).flatMap { doc ->
-            chunkDao.getByDoc(doc.id).take(MAX_CHUNKS_PER_DOC)
-                .map { chunk -> Citation(headingPath = chunk.headingPath, snippet = chunk.text, score = 1f) }
-        }
-    }
-
-    // ---- Topic Research ----
-
-    private suspend fun executeTopicResearch(
-        plan: SearchPlan,
-        question: String,
-        treeUri: String,
-        onStatus: (String) -> Unit,
-    ): List<Citation> = coroutineScope {
-        onStatus("関連ファイルを検索中...")
-
-        val targetDocIds: Set<Long>? = if (plan.targetFolders.isNotEmpty()) {
-            plan.targetFolders.flatMap { folder ->
-                documentDao.searchByPath(treeUri, folder)
-            }.map { it.id }.toSet().takeIf { it.isNotEmpty() }
-        } else null
-
-        val keyword = plan.searchKeywords.joinToString(" ").ifBlank { question }
-
-        val bm25Job = async {
-            val matchQuery = NGramTokenizer.toFtsMatchQuery(keyword) ?: return@async emptyList<ChunkEntity>()
-            runCatching {
-                chunkDao.bm25SearchRaw(
-                    SimpleSQLiteQuery(
-                        """SELECT chunks.* FROM chunks_fts
-                           JOIN chunks ON chunks_fts.rowid = chunks.id
-                           WHERE chunks_fts MATCH ?
-                           LIMIT 50""",
-                        arrayOf<Any?>(matchQuery),
-                    )
-                )
-            }.getOrElse { emptyList() }
-        }
-
-        val vecJob = async(Dispatchers.Default) {
-            val queryVec = embedderService.embed(keyword)
-            val pool = if (targetDocIds != null) {
-                chunkDao.getAll().filter { it.docId in targetDocIds }
-            } else {
-                chunkDao.getAll()
-            }
-            @Suppress("UNCHECKED_CAST")
-            CosineSimilarity.topK(
-                queryVec,
-                pool.map { Pair(EmbedderService.bytesToFloatArray(it.embedding), it) } as List<Pair<FloatArray, Any>>,
-                30,
-            ).map { (_, meta) -> meta as ChunkEntity }
-        }
-
-        val bm25 = bm25Job.await().let { chunks ->
-            if (targetDocIds != null) chunks.filter { it.docId in targetDocIds } else chunks
-        }
-        val vec = vecJob.await()
-
-        val seen = mutableSetOf<Long>()
-        (bm25 + vec).filter { seen.add(it.id) }.take(20)
-            .map { chunk -> Citation(headingPath = chunk.headingPath, snippet = chunk.text, score = 1f) }
-    }
-
-    // ---- File Lookup ----
-
-    private suspend fun executeFileLookup(
-        plan: SearchPlan,
-        treeUri: String,
-        onStatus: (String) -> Unit,
-    ): List<Citation> {
-        onStatus("ファイルを取得中...")
-
-        val docs = if (plan.targetFiles.isNotEmpty()) {
-            plan.targetFiles.flatMap { path ->
-                val keyword = path.substringAfterLast("/").removeSuffix(".md")
-                documentDao.searchByPath(treeUri, keyword)
-            }.distinctBy { it.id }
-        } else emptyList()
-
-        if (docs.isEmpty()) {
-            onStatus("関連情報を検索中...")
-            return ragPipeline.retrieveTopChunks(plan.searchKeywords.joinToString(" ").ifBlank { "general" })
-        }
-
-        return docs.take(3).flatMap { doc ->
-            chunkDao.getByDoc(doc.id).take(MAX_CHUNKS_PER_DOC)
-                .map { chunk -> Citation(headingPath = chunk.headingPath, snippet = chunk.text, score = 1f) }
-        }
-    }
-
-    // ---- Prompt Builders ----
-
-    private fun buildFolderTree(docs: List<DocumentEntity>): String {
-        val counts = mutableMapOf<String, Int>()
-        docs.forEach { doc ->
-            val folder = doc.relativePath.substringBeforeLast("/", "(root)")
-            counts[folder] = (counts[folder] ?: 0) + 1
-        }
-        return counts.entries.sortedBy { it.key }
-            .take(30)
-            .joinToString("\n") { (f, n) -> "- $f (${n}件)" }
-    }
-
-    private fun buildFileListForPrompt(docs: List<DocumentEntity>): String =
-        docs.sortedByDescending { it.lastModified }
-            .take(MAX_FILES_IN_PROMPT)
-            .joinToString("\n") { doc ->
-                val hint = doc.firstParagraph?.take(50)
-                    ?: doc.headings?.let {
-                        runCatching {
-                            val arr = JSONArray(it)
-                            (0 until minOf(arr.length(), 2)).joinToString(", ") { i -> arr.getString(i) }
-                        }.getOrElse { "" }
-                    } ?: ""
-                "- ${doc.relativePath}${if (hint.isNotBlank()) ": $hint" else ""}"
-            }
-
-    private fun buildPlanPrompt(question: String, folderTree: String, fileList: String): String =
-        """あなたは検索プランナーです。質問に最適な検索計画をJSON形式のみで出力してください。
-JSON以外の文章は一切含めないでください。
-
-フォルダ構造:
-$folderTree
-
-直近のファイルリスト:
-$fileList
-
-質問: $question
-
-出力形式の例:
-{
-  "intent": "topic_research",
-  "reasoning": "ユーザーは特定のトピックについて詳細を知りたがっているため",
-  "targetFolders": ["folder/subfolder"],
-  "targetFiles": ["path/to/file.md"],
-  "searchKeywords": ["キーワード1", "キーワード2"]
-}
-
-有効な intent:
-- diary_lookup: 日付や行動記録に関する質問
-- topic_research: 特定のトピックや概念に関する詳細な検索
-- file_lookup: 特定のファイルの内容を直接確認する場合
-- general: 上記に当てはまらない一般的な質問
-
-JSON:
-""".trimIndent()
-
-    private fun parsePlanJson(raw: String): SearchPlan? = runCatching {
-        val jsonStart = raw.indexOf('{')
-        val jsonEnd = raw.lastIndexOf('}')
-        if (jsonStart < 0 || jsonEnd < 0) return null
-        val jsonStr = raw.substring(jsonStart, jsonEnd + 1)
-        val obj = JSONObject(jsonStr)
-
-        fun arr(key: String): List<String> {
-            val a = obj.optJSONArray(key) ?: return emptyList()
-            return (0 until a.length()).map { a.getString(it) }
-        }
-
-        SearchPlan(
-            intent = obj.optString("intent", "general"),
-            reasoning = obj.optString("reasoning", ""),
-            targetFolders = arr("targetFolders"),
-            targetFiles = arr("targetFiles"),
-            searchKeywords = arr("searchKeywords"),
-        )
-    }.getOrNull()
 
     private fun buildAnswerPrompt(
         question: String,
         citations: List<Citation>,
-        plan: SearchPlan,
         history: List<Pair<String, String>>,
     ): String {
-        val sourceNote = when (plan.intent) {
-            "diary_lookup" -> "（日記・行動記録）"
-            "topic_research" -> "（トピック検索）"
-            "file_lookup" -> "（ファイル直接参照）"
-            else -> ""
-        }
+        val MAX_CITATION_CHARS = 4000
         val contextBlock = if (citations.isNotEmpty()) {
             val budgeted = mutableListOf<Citation>()
             var remaining = MAX_CITATION_CHARS
@@ -333,8 +186,11 @@ JSON:
                 budgeted += c
                 remaining -= cost
             }
-            val body = budgeted.joinToString("\n\n") { "### ${it.headingPath}\n${it.snippet}" }
-            """あなたはユーザーのパーソナルアシスタントです。以下の「知識ベース$sourceNote」を参考にして質問に答えてください。
+            val body = budgeted.joinToString("\n\n") { c ->
+                val pathPrefix = c.relativePath?.let { "$it > " } ?: ""
+                "### $pathPrefix${c.headingPath}\n${c.snippet}"
+            }
+            """あなたはユーザーのパーソナルアシスタントです。以下の「知識ベース」を参考にして質問に答えてください。
 知識ベースにある情報を優先し、不足時は一般知識で補足（その際は明記）してください。
 
 知識ベース:

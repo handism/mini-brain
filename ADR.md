@@ -175,66 +175,123 @@ Room DB を採用し、`FloatArray` を `ByteArray` に変換して保存する�
 ## ADR-007: 検索アーキテクチャをエージェント型に移行
 
 **日付:** 2026-06-09  
-**ステータス:** 採用
+**ステータス:** 廃止（ADR-008 に置き換え）
+
+### 概要
+
+固定 intent フロー（diary_lookup / file_lookup / topic_research / general）を採用したが、intent の組み合わせに対応できないクエリや、Planner LLM の JSON 出力不安定が問題となり廃止。ADR-008 の ReAct ループに移行。
+
+---
+
+## ADR-008: 検索アーキテクチャを ReAct ループ + DCI に移行
+
+**日付:** 2026-06-10  
+**ステータス:** 採用（ADR-007 を廃止・置き換え）
 
 ### 背景
 
-単純なベクトル検索（+ BM25 ハイブリッド）では、フォルダ構造・ファイル種別・日付を理解した探索が必要なクエリに対応できなかった。
+ADR-007 の固定 intent フローには以下の課題があった:
 
-具体的な未解決クエリ:
-- 「昨日何していた？」→ 日記フォルダの日付ファイルを直接参照すべきだが、意味的に近いチャンクが返らない
-- 「Datadogについて何か書いていた？」→ "Datadog.md" を直接開くべきだが、ベクトル空間での近傍探索になってしまう
+- `SearchPlan` の intent 定義を拡張しないと新しいクエリパターンに対応できない
+- 「フォルダを絞ってからキーワード検索」のような複合クエリに対応不可
+- ナレッジベースが「人間がディレクトリ・ファイル名で意味的に構造化している」前提を活かせていない
+- Planner LLM の JSON パース失敗率が高く、フォールバック頻度が問題
 
 ### 決定
 
-`RagPipeline` を補助扱いとし、新たに `AgentPipeline` を中心に据えたエージェント型検索に移行する。
+固定 intent フローを廃止し、**ReAct ループ + DCI（Directory/Content Intelligence）** を採用する。Planner LLM が `glob / list_dir / read_file / grep / vector_search / rrf_search` から毎ステップ1ツールを選び、観測結果を見て次のツールを決める反復探索を行う。
 
 検索フロー:
 ```
 質問
-↓ planSearch（クライアントサイド判定 or LLM）
-SearchPlan（intent + targetFolders + targetFiles + searchKeywords）
-↓ executeSearch（intent に応じた戦略）
-Citations
-↓ answer（intent を意識したプロンプト）
-回答
+↓ buildPlannerHint（DB 先行解析）
+  ├─ 日付クエリ: YYYYMMDD 8桁で DB 検索 → docId を hint に直接注入
+  │              未一致なら YYYYMMDD* / YYYY/MM/DD* / YYYY-MM-DD* の glob パターンを hint に列挙
+  └─ ファイル名一致: fileName を hint に追加
+↓ ReAct ループ（最大 6 回）
+  Planner LLM → {"tool":"..","args":{..}} or {"action":"finalize"}
+  → ToolExecutor 実行 → Observation 追加
+  → JSON パース失敗 2 回連続 → RRF 即時フォールバック
+↓ CitationIntegrator（重複除去・優先度整列・4000 字 budget）
+  citations 空 → RRF 強制フォールバック（セーフティネット）
+↓ buildAnswerPrompt → LLM 回答生成
 ```
 
-### intent と検索戦略
+### ツール一覧
 
-| intent | トリガー | 検索方法 |
+| ツール | 用途 | 実装 |
 |---|---|---|
-| `diary_lookup` | 「昨日」「先週」等のキーワード（クライアント判定） | 日付文字列でファイル名検索 → チャンク取得 |
-| `file_lookup` | ファイル名が質問に含まれる（クライアント判定） | ファイル名一致でチャンク取得 |
-| `topic_research` | LLM が判定 | BM25 + ベクトル検索（対象フォルダで絞り込み） |
-| `general` | LLM が判定 or フォールバック | 既存 RagPipeline に委譲 |
+| `glob(pattern)` | パターンでファイル列挙（`**` 再帰対応） | DB 全件 + `GlobMatcher.globToRegex` フィルタ |
+| `list_dir(folder)` | フォルダ直下のサブフォルダ・ファイル一覧 | prefix フィルタ |
+| `read_file(docId\|path)` | ファイル全文取得（chunks 連結） | `ChunkDao.getByDoc` → headingPath 順に連結、8000 字上限 |
+| `grep(query, scope?)` | キーワード全文検索 | FTS4 BM25、scope は事後フィルタ |
+| `vector_search(query, scope?, k)` | 意味類似検索 | `EmbedderService.embed` + `CosineSimilarity.topK` |
+| `rrf_search(query, k)` | BM25 + ベクトル RRF 融合 | 既存 `RagPipeline.retrieveTopChunks` に委譲 |
 
-### ファイルメタデータインデックス
+### Citation 優先度
 
-インデックス時に各ファイルから以下をルールベースで抽出し `documents` テーブルに保存する:
-- `headings`: 見出し一覧（JSON 配列）
-- `first_para`: 先頭段落（200 文字上限）
-- `tags`: Obsidian 形式タグ（JSON 配列）
+`READ_FILE > GREP > VECTOR > RRF > GLOB`（`CitationIntegrator` で dedup・整列）
 
-LLM 生成サマリは採用しない（インデックス速度とオフライン動作を優先）。
-
-### 実装ファイル
+### 新規ファイル
 
 | ファイル | 役割 |
 |---|---|
-| `ai/agent/AgentPipeline.kt` | planSearch / executeSearch / answer のオーケストレーション |
-| `ai/agent/SearchPlan.kt` | 検索計画データクラス |
-| `ai/agent/DateResolver.kt` | 相対日付（昨日・先週等）→ 絶対日付変換 |
-| `data/md/MarkdownMetaExtractor.kt` | 見出し・本文・タグのルールベース抽出 |
+| `ai/agent/AgentTypes.kt` | `AgentTool` / `ToolCall` / `ToolResult` / `Observation` / `PlannerDecision` / `AgentResult` |
+| `ai/agent/PlannerPrompt.kt` | Planner プロンプト生成 + pure Kotlin regex JSON パーサ |
+| `ai/agent/CitationIntegrator.kt` | 重複除去・優先度整列・budget 制御（純関数） |
+| `ai/agent/tools/ToolExecutor.kt` | 6 ツールの実装 |
+| `ai/agent/tools/GlobMatcher.kt` | glob → Regex 変換（`**`→`.*` / `*`→`[^/]*` / `?`→`[^/]`） |
+
+### 削除ファイル
+
+- `ai/agent/SearchPlan.kt` — plannerHint 文字列に役割移譲
+
+### 設計のポイント
+
+**pure Kotlin regex JSON パーサ**  
+`org.json.JSONObject` は Android stub であり JVM ユニットテストで機能しない。`PlannerPrompt.parseDecision` は regex のみで `tool` / `action` / `args` を抽出する。
+
+**Observation の token 制御**  
+最新 2 件: full（各 1500 字）、それ以前: 1行サマリ、合計上限 5000 字。
+
+**observations=0 時の finalize 禁止**  
+小型モデルが観測ゼロで即 finalize するのを防ぐため、プロンプトで明示的に禁止する。
 
 ### 理由
 
-- 日付・ファイル名による fast-path（LLM 不要）を優先し、モバイルの応答速度を維持
-- LLM による検索計画は汎用クエリにのみ使用し、二重 LLM 呼び出しを最小化
-- 既存の RagPipeline を残し `general` フォールバックとして再利用することで後方互換性を確保
+- DCI 戦略（glob → read_file）は構造化された KB に対してベクトル検索より精度が高い
+- LLM が自由にツールを選ぶことで事前に想定していないクエリパターンにも対応できる
+- フォールバック多層化（ParseError 2 回 / citations 空 / LLM 未初期化）により旧設計と同等以上の安全性を確保
 
 ### トレードオフ
 
-- `topic_research` / `general` では LLM 呼び出しが 2 回（計画 + 回答）になり、応答時間が増加する
-- Gemma 4 E2B（2B パラメータ）の JSON 出力は不安定な場合があるため、パース失敗時の `general` フォールバックが必須
-- ファイルメタデータは次回の差分インデックス時まで NULL のまま（既存ドキュメントは再インデックスが必要）
+- **レイテンシ増加**: 最大 6 回の LLM 呼び出し（各 3〜10 秒）で、旧設計比で応答時間が大幅に増加する。精度とのトレードオフとして許容する
+- **Gemma 4 E2B の JSON 品質**: 小型モデルのため observations 数に応じてプロンプトを切り替えて軽減
+- **全件メモリロード**: `vector_search` は `ChunkDao.getAll()` を毎回実行する。数万チャンクで問題になった場合は ANN（HNSW 等）への置換を検討
+
+---
+
+## ADR-009: 日付ファイル検索を DB 先行解決に変更
+
+**日付:** 2026-06-10  
+**ステータス:** 採用
+
+### 背景
+
+ADR-008 の当初実装では、日付クエリに対して `glob("YYYY/MM/DD*")` パターンを Planner hint に渡していた。しかしナレッジベースの日付命名形式は `YYYY/MM/DD`・`YYYYMMDD`・`YYYY-MM-DD` など統一されておらず、LLM が正しい形式を選べない問題があった。
+
+### 決定
+
+`buildPlannerHint` の中で、日付の8桁数字（`YYYYMMDD`）を使って `documents.relativePath` を DB 検索する。区切り文字（`/`・`-`）を除去して比較することで形式に依存しない照合を行う。
+
+- **一致あり** → `[d=42] diary/20260609.md` のように `docId` を hint に直接注入。LLM は `read_file(docId=42)` を一発で呼べる
+- **一致なし** → `"20260609*" or "2026/06/09*" or "2026-06-09*"` の3形式 glob パターンを hint に列挙してフォールバック
+
+### 理由
+
+- 命名規則をアプリ側で仮定せずに済む
+- `docId` が確定すれば LLM の glob 試行が不要になり、反復回数と失敗リスクが減る
+
+### トレードオフ
+
+- `buildPlannerHint` が `DocumentDao.getAllByTree` を呼ぶため、DB アクセスが追加で発生する（ただし `ToolExecutor` の `allDocs` キャッシュとは別のタイミング）
