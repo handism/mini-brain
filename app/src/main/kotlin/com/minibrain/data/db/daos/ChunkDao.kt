@@ -20,6 +20,20 @@ interface ChunkDao {
     @Query("SELECT * FROM chunks")
     suspend fun getAll(): List<ChunkEntity>
 
+    @Query("""
+        SELECT chunks.* FROM chunks 
+        INNER JOIN documents ON chunks.docId = documents.id 
+        WHERE documents.treeUri = :treeUri
+    """)
+    suspend fun getAllByTree(treeUri: String): List<ChunkEntity>
+
+    @Query("""
+        SELECT chunks.* FROM chunks 
+        INNER JOIN documents ON chunks.docId = documents.id 
+        WHERE documents.treeUri = :treeUri AND documents.relativePath LIKE :scope || '%'
+    """)
+    suspend fun getByScope(treeUri: String, scope: String): List<ChunkEntity>
+
     @Query("SELECT COUNT(*) FROM chunks INNER JOIN documents ON chunks.docId = documents.id WHERE documents.treeUri = :treeUri")
     fun observeCountByTree(treeUri: String): Flow<Int>
 

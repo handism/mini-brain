@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minibrain.MiniBrainApp
 import com.minibrain.ai.rag.Citation
+import com.minibrain.ai.rag.SourceType
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.dataStore
 import kotlinx.coroutines.Job
@@ -110,22 +111,14 @@ class ChatViewModel(
 
             val treeUri = savedTreeUri.value ?: ""
 
-            // エージェント検索計画
-            val plan = runCatching {
-                app.agentPipeline.planSearch(question, treeUri) { status ->
-                    _statusText.value = status
-                }
-            }.getOrElse {
-                _errorMessage.value = "計画エラー: ${it.message}"
-                _isGenerating.value = false
-                removeStreamingMessage()
-                return@launch
+            val history = app.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
+                Pair(msg.role.name.lowercase(), msg.content)
             }
 
-            // 検索実行
-            val citations = runCatching {
-                app.agentPipeline.executeSearch(plan, question, treeUri) { status ->
-                    _statusText.value = status
+            // エージェントループ（計画 → 多段ツール実行 → 回答）
+            val agentResult = runCatching {
+                app.agentPipeline.run(question, treeUri, history) { status ->
+                    _statusText.value = status.ifBlank { null }
                 }
             }.getOrElse {
                 _errorMessage.value = "検索エラー: ${it.message}"
@@ -134,18 +127,15 @@ class ChatViewModel(
                 return@launch
             }
 
+            val citations = agentResult.citations
             _statusText.value = null
 
             // 引用元をストリーミングメッセージに反映
             updateStreamingMessage { it.copy(citations = citations) }
 
-            val history = app.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
-                Pair(msg.role.name.lowercase(), msg.content)
-            }
-
             val sb = StringBuilder()
             runCatching {
-                app.agentPipeline.answer(question, citations, plan, history).collect { token ->
+                agentResult.answerFlow.collect { token ->
                     sb.append(token)
                     val currentContent = sb.toString()
                     updateStreamingMessage {
@@ -229,7 +219,10 @@ class ChatViewModel(
             Citation(
                 headingPath = obj.getString("headingPath"),
                 snippet = obj.getString("snippet"),
-                score = obj.optDouble("score", 0.0).toFloat()
+                score = obj.optDouble("score", 0.0).toFloat(),
+                docId = if (obj.has("docId")) obj.getLong("docId") else null,
+                relativePath = obj.optString("relativePath").ifBlank { null },
+                source = runCatching { SourceType.valueOf(obj.optString("source")) }.getOrElse { SourceType.UNKNOWN },
             )
         }
     }.getOrElse { emptyList() }
@@ -237,12 +230,14 @@ class ChatViewModel(
     private fun serializeCitations(citations: List<Citation>): String = runCatching {
         JSONArray().also { arr ->
             citations.forEach { c ->
-                arr.put(
-                    JSONObject()
-                        .put("headingPath", c.headingPath)
-                        .put("snippet", c.snippet)
-                        .put("score", c.score)
-                )
+                val obj = JSONObject()
+                    .put("headingPath", c.headingPath)
+                    .put("snippet", c.snippet)
+                    .put("score", c.score)
+                    .put("source", c.source.name)
+                c.docId?.let { obj.put("docId", it) }
+                c.relativePath?.let { obj.put("relativePath", it) }
+                arr.put(obj)
             }
         }.toString()
     }.getOrElse { "[]" }

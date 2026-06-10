@@ -64,8 +64,37 @@ object MarkdownChunker {
         return sections
     }
 
+    private fun splitIntoParagraphs(body: String): List<String> {
+        val paragraphs = mutableListOf<String>()
+        val buf = StringBuilder()
+        var inCode = false
+        var blanks = 0
+
+        for (line in body.lines()) {
+            if (line.trimStart().startsWith("```")) inCode = !inCode
+
+            when {
+                !inCode && line.isBlank() -> {
+                    blanks++
+                    if (blanks >= 2 && buf.isNotBlank()) {
+                        paragraphs += buf.toString()
+                        buf.clear()
+                    }
+                }
+                else -> {
+                    if (blanks == 1 && buf.isNotBlank()) buf.append('\n')
+                    blanks = 0
+                    if (buf.isNotEmpty()) buf.append('\n')
+                    buf.append(line)
+                }
+            }
+        }
+        if (buf.isNotBlank()) paragraphs += buf.toString()
+        return paragraphs
+    }
+
     private fun splitLongSection(headingPath: String, body: String): List<Chunk> {
-        val paragraphs = body.split(Regex("\\n{2,}")).filter { it.isNotBlank() }
+        val paragraphs = splitIntoParagraphs(body)
         val chunks = mutableListOf<Chunk>()
         var buffer = StringBuilder()
 

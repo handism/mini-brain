@@ -39,7 +39,7 @@ class MiniBrainApp : Application() {
     }
 
     val ragPipeline: RagPipeline by lazy {
-        RagPipeline(embedderService, llmService, database.chunkDao())
+        RagPipeline(embedderService, llmService, database.chunkDao(), database.documentDao())
     }
 
     val agentPipeline: AgentPipeline by lazy {

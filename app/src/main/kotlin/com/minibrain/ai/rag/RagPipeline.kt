@@ -5,6 +5,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.data.db.daos.ChunkDao
+import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.search.NGramTokenizer
 import kotlinx.coroutines.Dispatchers
@@ -13,30 +14,47 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
+enum class SourceType { READ_FILE, GREP, VECTOR, RRF, GLOB, UNKNOWN }
+
 data class Citation(
     val headingPath: String,
     val snippet: String,
     val score: Float = 0f,
+    val docId: Long? = null,
+    val relativePath: String? = null,
+    val source: SourceType = SourceType.UNKNOWN,
 )
 
 class RagPipeline(
     private val embedderService: EmbedderService,
     private val llmService: LlmService,
     private val chunkDao: ChunkDao,
+    private val documentDao: DocumentDao,
 ) {
-    suspend fun retrieveTopChunks(question: String, topK: Int = 20): List<Citation> =
+    suspend fun retrieveTopChunks(question: String, treeUri: String? = null, topK: Int = 20): List<Citation> =
         coroutineScope {
-            val vecJob = async { vectorSearch(question, k = 50) }
-            val bm25Job = async { bm25Search(question, k = 50) }
+            val vecJob = async { vectorSearch(question, treeUri, k = 50) }
+            val bm25Job = async { bm25Search(question, treeUri, k = 50) }
 
             val vecResults = vecJob.await()
             val bm25Results = bm25Job.await()
 
             Log.d("RagPipeline", "vec=${vecResults.size} bm25=${bm25Results.size}")
 
+            val docCache = mutableMapOf<Long, String?>()
+            suspend fun relativePath(docId: Long): String? =
+                docCache.getOrPut(docId) { documentDao.getById(docId)?.relativePath }
+
             rrf(bm25Results, vecResults.map { it.second }, topK).map { (score, chunk) ->
                 Log.d("RagPipeline", "rrf=%.4f path=${chunk.headingPath}".format(score))
-                Citation(chunk.headingPath, chunk.text, score)
+                Citation(
+                    headingPath = chunk.headingPath,
+                    snippet = chunk.text,
+                    score = score,
+                    docId = chunk.docId,
+                    relativePath = relativePath(chunk.docId),
+                    source = SourceType.RRF,
+                )
             }
         }
 
@@ -49,11 +67,15 @@ class RagPipeline(
         return llmService.generateStream(prompt)
     }
 
-    private suspend fun vectorSearch(question: String, k: Int): List<Pair<Float, ChunkEntity>> =
+    private suspend fun vectorSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, ChunkEntity>> =
         withContext(Dispatchers.Default) {
             val queryVec = embedderService.embed(question)
-            val allChunks = chunkDao.getAll()
-            val candidates = allChunks.map { chunk ->
+            val chunks = if (treeUri != null) {
+                chunkDao.getAllByTree(treeUri)
+            } else {
+                chunkDao.getAll()
+            }
+            val candidates = chunks.map { chunk ->
                 Pair(EmbedderService.bytesToFloatArray(chunk.embedding), chunk)
             }
             @Suppress("UNCHECKED_CAST")
@@ -61,18 +83,24 @@ class RagPipeline(
                 .map { (score, meta) -> Pair(score, meta as ChunkEntity) }
         }
 
-    private suspend fun bm25Search(question: String, k: Int): List<ChunkEntity> {
+    private suspend fun bm25Search(question: String, treeUri: String?, k: Int): List<ChunkEntity> {
         val matchQuery = NGramTokenizer.toFtsMatchQuery(question) ?: return emptyList()
+        val sql = if (treeUri != null) {
+            """SELECT chunks.* FROM chunks_fts
+               JOIN chunks ON chunks_fts.rowid = chunks.id
+               JOIN documents ON chunks.docId = documents.id
+               WHERE chunks_fts MATCH ? AND documents.treeUri = ?
+               LIMIT ?"""
+        } else {
+            """SELECT chunks.* FROM chunks_fts
+               JOIN chunks ON chunks_fts.rowid = chunks.id
+               WHERE chunks_fts MATCH ?
+               LIMIT ?"""
+        }
+        val args: Array<Any?> = if (treeUri != null) arrayOf(matchQuery, treeUri, k) else arrayOf(matchQuery, k)
+        
         return runCatching {
-            chunkDao.bm25SearchRaw(
-                SimpleSQLiteQuery(
-                    """SELECT chunks.* FROM chunks_fts
-                       JOIN chunks ON chunks_fts.rowid = chunks.id
-                       WHERE chunks_fts MATCH ?
-                       LIMIT ?""",
-                    arrayOf<Any?>(matchQuery, k),
-                )
-            )
+            chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, args))
         }.getOrElse { e ->
             Log.w("RagPipeline", "BM25 search failed: ${e.message}")
             emptyList()
