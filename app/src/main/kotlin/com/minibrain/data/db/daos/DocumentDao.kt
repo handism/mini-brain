@@ -1,5 +1,6 @@
 package com.minibrain.data.db.daos
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -7,6 +8,11 @@ import androidx.room.Query
 import androidx.room.Update
 import com.minibrain.data.db.entities.DocumentEntity
 import kotlinx.coroutines.flow.Flow
+
+data class DocDateRow(
+    @ColumnInfo(name = "id") val id: Long,
+    @ColumnInfo(name = "documentDate") val documentDate: String?,
+)
 
 @Dao
 interface DocumentDao {
@@ -42,4 +48,10 @@ interface DocumentDao {
 
     @Query("SELECT * FROM documents WHERE treeUri = :treeUri ORDER BY lastModified DESC LIMIT :limit")
     suspend fun getRecentFiles(treeUri: String, limit: Int): List<DocumentEntity>
+
+    @Query("SELECT id, documentDate FROM documents WHERE id IN (:ids)")
+    suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow>
+
+    @Query("SELECT * FROM documents WHERE treeUri = :treeUri AND documentDate >= :start AND documentDate <= :end ORDER BY documentDate ASC")
+    suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity>
 }

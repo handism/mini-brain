@@ -2,6 +2,9 @@ package com.minibrain.ai.agent
 
 object PlannerPrompt {
 
+    // キー: 値 形式を解析する regex (大文字小文字どちらも受け付ける)
+    private val KEY_VALUE_RE = Regex("""^([A-Za-z_]+):\s*(.+)$""", RegexOption.MULTILINE)
+
     fun build(
         question: String,
         plannerHint: String?,
@@ -11,7 +14,7 @@ object PlannerPrompt {
         val hintLine = if (!plannerHint.isNullOrBlank()) "ヒント: $plannerHint\n" else ""
         val canFinalize = observations.isNotEmpty()
         val finalizeInstruction = if (canFinalize) {
-            "情報が集まったら finalize。"
+            "情報が集まったら finalize を選択してください。"
         } else {
             "【重要】観測がまだ0件です。必ずツールを1回実行してください。今は finalize 禁止。"
         }
@@ -20,20 +23,42 @@ object PlannerPrompt {
 
 質問: $question
 ${hintLine}
-利用可能ツール:
-- glob(pattern): 例 {"tool":"glob","args":{"pattern":"2026/06/*"}}
-- list_dir(folder): 例 {"tool":"list_dir","args":{"folder":"日記"}}
-- read_file(docId or path): 例 {"tool":"read_file","args":{"docId":12}}
-- grep(query, scope?): 例 {"tool":"grep","args":{"query":"AWS","scope":"tech/"}}
-- vector_search(query, k?): 例 {"tool":"vector_search","args":{"query":"クラウド設計"}}
-- rrf_search(query, k?): 例 {"tool":"rrf_search","args":{"query":"読書記録"}}
+利用可能ツール（以下の形式で1つを選んで出力）:
+
+TOOL: glob
+PATTERN: <パターン例: 2026/06/*>
+
+TOOL: list_dir
+FOLDER: <フォルダ名>
+
+TOOL: read_file
+DOC_ID: <数値>
+（またはPATH: <パス>）
+
+TOOL: grep
+QUERY: <キーワード>
+SCOPE: <フォルダ>（省略可）
+
+TOOL: vector_search
+QUERY: <クエリ>
+K: <件数>（省略可）
+
+TOOL: rrf_search
+QUERY: <クエリ>
+
+TOOL: timeline_search
+START: <yyyy-MM-dd>
+END: <yyyy-MM-dd>
+LIMIT: <件数>（省略可）
+
+情報収集完了の場合:
+ACTION: finalize
+REASON: <理由>
 
 ${if (observations.isEmpty()) "観測: なし" else "観測:\n$obsBlock"}
 
 $finalizeInstruction
-次の1アクションをJSONのみで出力:
-{"tool":"<name>","args":{...}} または {"action":"finalize","reason":"..."}
-JSON:""".trimIndent()
+次の1アクションをキー: 値 形式のみで出力してください（JSONは使わないこと）:""".trimIndent()
     }
 
     private fun formatObservations(observations: List<Observation>): String {
@@ -64,83 +89,48 @@ JSON:""".trimIndent()
         is AgentTool.Grep -> "grep(\"${tool.query}\"${if (tool.scope != null) ", scope=\"${tool.scope}\"" else ""})"
         is AgentTool.VectorSearch -> "vector_search(\"${tool.query}\", k=${tool.k})"
         is AgentTool.RrfSearch -> "rrf_search(\"${tool.query}\", k=${tool.k})"
+        is AgentTool.TimelineSearch -> "timeline_search(\"${tool.startDate}\"~\"${tool.endDate}\", limit=${tool.limit})"
     }
 
     fun parseDecision(raw: String): PlannerDecision {
-        val json = extractJson(raw) ?: return PlannerDecision.ParseError
-        if (extractStringValue(json, "action") == "finalize") {
-            return PlannerDecision.Finalize(extractStringValue(json, "reason") ?: "")
+        val pairs = KEY_VALUE_RE.findAll(raw).associate {
+            it.groupValues[1].uppercase().trim() to it.groupValues[2].trim()
         }
-        val toolName = extractStringValue(json, "tool") ?: return PlannerDecision.ParseError
-        val argsJson = extractArgsBlock(json) ?: "{}"
-        val tool = parseTool(toolName, argsJson) ?: return PlannerDecision.ParseError
-        return PlannerDecision.Call(tool)
+
+        if (pairs["ACTION"]?.lowercase() == "finalize") {
+            return PlannerDecision.Finalize(pairs["REASON"] ?: "")
+        }
+
+        val toolName = pairs["TOOL"] ?: return PlannerDecision.ParseError
+        return buildTool(toolName.lowercase().replace("-", "_"), pairs)
+            ?.let { PlannerDecision.Call(it) }
+            ?: PlannerDecision.ParseError
     }
 
-    private fun parseTool(name: String, argsJson: String): AgentTool? = when (name) {
-        "glob" -> extractStringValue(argsJson, "pattern")?.let { AgentTool.Glob(it) }
-        "list_dir" -> extractStringValue(argsJson, "folder")?.let { AgentTool.ListDir(it) }
+    private fun buildTool(name: String, pairs: Map<String, String>): AgentTool? = when (name) {
+        "glob" -> pairs["PATTERN"]?.let { AgentTool.Glob(it) }
+        "list_dir" -> pairs["FOLDER"]?.let { AgentTool.ListDir(it) }
         "read_file" -> {
-            val docId = extractLongValue(argsJson, "docId")
-            val path = extractStringValue(argsJson, "path")
+            val docId = pairs["DOC_ID"]?.toLongOrNull()
+            val path = pairs["PATH"]
             if (docId == null && path == null) null else AgentTool.ReadFile(docId, path)
         }
-        "grep" -> extractStringValue(argsJson, "query")?.let { q ->
-            AgentTool.Grep(q, extractStringValue(argsJson, "scope"))
+        "grep" -> pairs["QUERY"]?.let { q ->
+            AgentTool.Grep(q, pairs["SCOPE"])
         }
-        "vector_search" -> extractStringValue(argsJson, "query")?.let { q ->
-            AgentTool.VectorSearch(q, extractStringValue(argsJson, "scope"), extractIntValue(argsJson, "k") ?: 10)
+        "vector_search" -> pairs["QUERY"]?.let { q ->
+            AgentTool.VectorSearch(q, pairs["SCOPE"], pairs["K"]?.toIntOrNull() ?: 10)
         }
-        "rrf_search" -> extractStringValue(argsJson, "query")?.let { q ->
-            AgentTool.RrfSearch(q, extractIntValue(argsJson, "k") ?: 10)
+        "rrf_search" -> pairs["QUERY"]?.let { q ->
+            AgentTool.RrfSearch(q, pairs["K"]?.toIntOrNull() ?: 10)
+        }
+        "timeline_search" -> {
+            val start = pairs["START"]
+            val end = pairs["END"]
+            if (start != null && end != null) {
+                AgentTool.TimelineSearch(start, end, pairs["LIMIT"]?.toIntOrNull() ?: 20)
+            } else null
         }
         else -> null
-    }
-
-    // Extracts {"args": {...}} block as a string
-    private fun extractArgsBlock(json: String): String? {
-        val argsKey = "\"args\""
-        val keyIdx = json.indexOf(argsKey)
-        if (keyIdx < 0) return null
-        val colonIdx = json.indexOf(':', keyIdx + argsKey.length)
-        if (colonIdx < 0) return null
-        val braceIdx = json.indexOf('{', colonIdx)
-        if (braceIdx < 0) return null
-        var depth = 0
-        for (i in braceIdx until json.length) {
-            when (json[i]) {
-                '{' -> depth++
-                '}' -> {
-                    depth--
-                    if (depth == 0) return json.substring(braceIdx, i + 1)
-                }
-            }
-        }
-        return null
-    }
-
-    // Extracts the value of a JSON string field "key":"value"
-    internal fun extractStringValue(json: String, key: String): String? {
-        val pattern = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
-        return pattern.find(json)?.groupValues?.get(1)?.replace("\\\"", "\"")?.replace("\\\\", "\\")
-    }
-
-    // Extracts the value of a JSON number field "key":123
-    private fun extractLongValue(json: String, key: String): Long? {
-        val pattern = Regex("\"${Regex.escape(key)}\"\\s*:\\s*(-?\\d+)")
-        return pattern.find(json)?.groupValues?.get(1)?.toLongOrNull()
-    }
-
-    private fun extractIntValue(json: String, key: String): Int? {
-        val pattern = Regex("\"${Regex.escape(key)}\"\\s*:\\s*(-?\\d+)")
-        return pattern.find(json)?.groupValues?.get(1)?.toIntOrNull()
-    }
-
-    private fun extractJson(raw: String): String? {
-        val stripped = raw.replace(Regex("```[a-z]*\\n?"), "").replace("```", "")
-        val start = stripped.indexOf('{')
-        val end = stripped.lastIndexOf('}')
-        if (start < 0 || end < 0 || end <= start) return null
-        return stripped.substring(start, end + 1)
     }
 }

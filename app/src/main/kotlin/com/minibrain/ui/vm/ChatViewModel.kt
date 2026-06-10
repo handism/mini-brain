@@ -1,10 +1,13 @@
 package com.minibrain.ui.vm
 
 import android.app.Application
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minibrain.MiniBrainApp
+import com.minibrain.ai.agent.AgentTraceEvent
+import com.minibrain.ai.agent.FinalAnswerEvent
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.SourceType
 import com.minibrain.data.db.entities.MessageRole
@@ -22,6 +25,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private val PREF_TREE_URI = stringPreferencesKey("tree_uri")
+private val PREF_SHOW_SEARCH_LOG = booleanPreferencesKey("show_search_log")
 
 data class ChatMessage(
     val id: Long = 0,
@@ -29,6 +33,7 @@ data class ChatMessage(
     val content: String,
     val citations: List<Citation> = emptyList(),
     val isStreaming: Boolean = false,
+    val traceEvents: List<AgentTraceEvent> = emptyList(),
 )
 
 class ChatViewModel(
@@ -55,6 +60,10 @@ class ChatViewModel(
         .map { prefs -> prefs[PREF_TREE_URI] }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    val showSearchLog: StateFlow<Boolean> = app.dataStore.data
+        .map { prefs -> prefs[PREF_SHOW_SEARCH_LOG] ?: true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     private val _sessionId = MutableStateFlow<Long>(-1)
     private var currentJob: Job? = null
 
@@ -69,12 +78,14 @@ class ChatViewModel(
                 if (id == -1L) return@collectLatest
                 app.chatRepository.observeMessages(id).collect { entities ->
                     if (!_isGenerating.value) {
+                        val existingTrace = _messages.value.associate { it.id to it.traceEvents }
                         _messages.value = entities.map { entity ->
                             ChatMessage(
                                 id = entity.id,
                                 role = entity.role,
                                 content = entity.content,
                                 citations = parseCitations(entity.citationsJson),
+                                traceEvents = existingTrace[entity.id] ?: emptyList(),
                             )
                         }
                     }
@@ -155,15 +166,17 @@ class ChatViewModel(
             val filteredCitations = if (isNegativeResponse(finalContent)) emptyList() else citations
             val citationsJson = serializeCitations(filteredCitations)
             val msgId = app.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
+            val finalTrace = agentResult.traceEvents + FinalAnswerEvent(finalContent.length)
 
             val finalList = _messages.value.toMutableList()
             val idx = finalList.indexOfLast { it.isStreaming }
             if (idx >= 0) {
-                finalList[idx] = streamingMsg.copy(
+                finalList[idx] = finalList[idx].copy(
                     id = msgId,
                     content = finalContent,
                     citations = filteredCitations,
                     isStreaming = false,
+                    traceEvents = finalTrace,
                 )
                 _messages.value = finalList
             }
