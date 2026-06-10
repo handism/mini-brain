@@ -204,15 +204,18 @@ ADR-007 の固定 intent フローには以下の課題があった:
 検索フロー:
 ```
 質問
+↓ QueryClassifier（MEMORY_SEARCH / GENERAL_KNOWLEDGE / TEMPORAL_SUMMARIZATION）
+  GENERAL_KNOWLEDGE → RAG スキップ → LLM 直接回答
 ↓ buildPlannerHint（DB 先行解析）
+  ├─ 期間クエリ: resolveDateRange → DateRange を hint に注入 / timeline_search 推奨
   ├─ 日付クエリ: YYYYMMDD 8桁で DB 検索 → docId を hint に直接注入
   │              未一致なら YYYYMMDD* / YYYY/MM/DD* / YYYY-MM-DD* の glob パターンを hint に列挙
   └─ ファイル名一致: fileName を hint に追加
 ↓ ReAct ループ（最大 6 回）
-  Planner LLM → {"tool":"..","args":{..}} or {"action":"finalize"}
+  Planner LLM → DSL key:value 形式で1ツールを出力 or ACTION: finalize
   → ToolExecutor 実行 → Observation 追加
-  → JSON パース失敗 2 回連続 → RRF 即時フォールバック
-↓ CitationIntegrator（重複除去・優先度整列・4000 字 budget）
+  → DSL パース失敗 2 回連続 → RRF 即時フォールバック
+↓ CitationIntegrator（重複除去・優先度整列・トークン budget 1200）
   citations 空 → RRF 強制フォールバック（セーフティネット）
 ↓ buildAnswerPrompt → LLM 回答生成
 ```
@@ -223,23 +226,26 @@ ADR-007 の固定 intent フローには以下の課題があった:
 |---|---|---|
 | `glob(pattern)` | パターンでファイル列挙（`**` 再帰対応） | DB 全件 + `GlobMatcher.globToRegex` フィルタ |
 | `list_dir(folder)` | フォルダ直下のサブフォルダ・ファイル一覧 | prefix フィルタ |
-| `read_file(docId\|path)` | ファイル全文取得（chunks 連結） | `ChunkDao.getByDoc` → headingPath 順に連結、8000 字上限 |
+| `read_file(docId\|path)` | ファイル全文取得（chunks 連結） | `ChunkDao.getByDoc` → headingPath 順、8000 字上限。3000 字超は LLM 要約して単一 citation |
 | `grep(query, scope?)` | キーワード全文検索 | FTS4 BM25、scope は事後フィルタ |
 | `vector_search(query, scope?, k)` | 意味類似検索 | `EmbedderService.embed` + `CosineSimilarity.topK` |
 | `rrf_search(query, k)` | BM25 + ベクトル RRF 融合 | 既存 `RagPipeline.retrieveTopChunks` に委譲 |
+| `timeline_search(start, end, k)` | 期間指定で documentDate フィルタ | `DocumentDao.getByDateRange` → 先頭 chunk をスニペットに |
 
 ### Citation 優先度
 
-`READ_FILE > GREP > VECTOR > RRF > GLOB`（`CitationIntegrator` で dedup・整列）
+`READ_FILE > GREP > VECTOR > RRF > GLOB > FOLDER`（`CitationIntegrator` で dedup・整列）
 
 ### 新規ファイル
 
 | ファイル | 役割 |
 |---|---|
 | `ai/agent/AgentTypes.kt` | `AgentTool` / `ToolCall` / `ToolResult` / `Observation` / `PlannerDecision` / `AgentResult` |
-| `ai/agent/PlannerPrompt.kt` | Planner プロンプト生成 + pure Kotlin regex JSON パーサ |
+| `ai/agent/AgentTraceEvent.kt` | トレースイベント型（`PlannerDecisionEvent` / `ToolCallEvent` / `ObservationEvent` / `FinalAnswerEvent`） |
+| `ai/agent/PlannerPrompt.kt` | Planner プロンプト生成 + DSL key:value パーサ（`org.json` 非使用） |
 | `ai/agent/CitationIntegrator.kt` | 重複除去・優先度整列・budget 制御（純関数） |
-| `ai/agent/tools/ToolExecutor.kt` | 6 ツールの実装 |
+| `ai/agent/QueryClassifier.kt` | クエリ種別判定（MEMORY_SEARCH / GENERAL_KNOWLEDGE / TEMPORAL_SUMMARIZATION） |
+| `ai/agent/tools/ToolExecutor.kt` | 7 ツールの実装 |
 | `ai/agent/tools/GlobMatcher.kt` | glob → Regex 変換（`**`→`.*` / `*`→`[^/]*` / `?`→`[^/]`） |
 
 ### 削除ファイル
@@ -248,8 +254,8 @@ ADR-007 の固定 intent フローには以下の課題があった:
 
 ### 設計のポイント
 
-**pure Kotlin regex JSON パーサ**  
-`org.json.JSONObject` は Android stub であり JVM ユニットテストで機能しない。`PlannerPrompt.parseDecision` は regex のみで `tool` / `action` / `args` を抽出する。
+**DSL key:value パーサ（JSON 非使用）**  
+`org.json.JSONObject` は Android stub であり JVM ユニットテストで機能しない。`PlannerPrompt` は Planner LLM に JSON でなく `TOOL: glob\nPATTERN: foo` のような key:value DSL を出力させ、`KEY_VALUE_RE` regex で全キーを抽出してパースする。
 
 **Observation の token 制御**  
 最新 2 件: full（各 1500 字）、それ以前: 1行サマリ、合計上限 5000 字。
@@ -295,3 +301,186 @@ ADR-008 の当初実装では、日付クエリに対して `glob("YYYY/MM/DD*")
 ### トレードオフ
 
 - `buildPlannerHint` が `DocumentDao.getAllByTree` を呼ぶため、DB アクセスが追加で発生する（ただし `ToolExecutor` の `allDocs` キャッシュとは別のタイミング）
+
+---
+
+## ADR-010: QueryClassifier によるクエリ種別ルーティング
+
+**日付:** 2026-06-11  
+**ステータス:** 採用
+
+### 背景
+
+「Kotlin とは何ですか？」のような一般知識の質問でも RAG ループが動作し、無駄な LLM 呼び出しと検索レイテンシが発生していた。
+
+### 決定
+
+`QueryClassifier.classify()` を AgentPipeline の入口に追加し、3 種別に分類する。
+
+| 種別 | 条件 | ルーティング |
+|---|---|---|
+| `GENERAL_KNOWLEDGE` | `とは何？`・`の仕組み`・英語識別子＋`の使い方` 等の明確なパターン | RAG スキップ → LLM 直接回答 |
+| `TEMPORAL_SUMMARIZATION` | `DateResolver.resolveDateRange` が DateRange を返す | ReAct ループ（`timeline_search` 推奨） |
+| `MEMORY_SEARCH` | 上記以外（デフォルト） | ReAct ループ（通常フロー） |
+
+### 理由
+
+- 一般知識クエリの応答速度を大幅に改善（ReAct ループ最大 6 回 → 直接回答）
+- 誤分類コストの非対称性: GENERAL_KNOWLEDGE への誤分類は RAG データを使えないリスクがあるため、パターンは意図的に厳しめに設定
+
+### トレードオフ
+
+- パターンに完全にマッチしない一般知識クエリは `MEMORY_SEARCH` にフォールバックする（精度より安全性を優先）
+- 新しいパターンが必要な場合は `GENERAL_KNOWLEDGE_PATTERNS` リストへの追加が必要
+
+---
+
+## ADR-011: Planner 出力形式を JSON から DSL key:value に変更
+
+**日付:** 2026-06-11  
+**ステータス:** 採用（ADR-008 の設計ポイントを置き換え）
+
+### 背景
+
+ADR-008 では Planner LLM が JSON（`{"tool":"glob","args":{"pattern":"..."}}` 形式）を出力し、`PlannerPrompt.parseDecision` が regex で抽出していた。小型モデル（Gemma 4 E2B）は JSON の閉じ括弧を省略したり余分なテキストを混入させたりすることが多く、パース失敗率が高かった。
+
+### 決定
+
+Planner プロンプトのツール例示を DSL key:value 形式に変更する。
+
+```
+TOOL: glob
+PATTERN: 2026/06/*
+
+TOOL: read_file
+DOC_ID: 42
+
+ACTION: finalize
+REASON: 情報が揃った
+```
+
+`PlannerPrompt.parseDecision` は `KEY_VALUE_RE`（`^([A-Za-z_]+):\s*(.+)$`）で全行をスキャンし、`TOOL` キーでルーティングする。
+
+### 理由
+
+- JSON より構造が単純でモデルが間違えにくい
+- 閉じ括弧・引用符が不要なためトークン数が減り、生成速度も向上する
+- `org.json` を使わないため JVM ユニットテスト（`PlannerPromptTest`）がそのまま動く
+
+### トレードオフ
+
+- DSL はカスタム仕様であり、モデルにとって学習データが少ない可能性がある
+- プロンプトのツール例示とパーサの定義が対応している必要があるため、新ツール追加時は両方を更新する必要がある
+
+---
+
+## ADR-012: Timeline Search ツールの追加
+
+**日付:** 2026-06-11  
+**ステータス:** 採用
+
+### 背景
+
+「去年の夏に何をしていた？」のような期間クエリに対して、glob / grep では期間フィルタができなかった。`DateResolver.resolveDateRange` が `DateRange` を解決できても、ToolExecutor にその期間でファイルを絞るツールがなかった。
+
+### 決定
+
+`timeline_search(start, end, limit)` ツールを追加する。`DocumentDao.getByDateRange(treeUri, startDate, endDate)` で `documentDate` カラムを ISO-8601 文字列として範囲検索し、ヒットした文書の先頭チャンクをスニペットとして `Citation` に投入する。
+
+- `documentDate` は `DocumentRepository` のインデックス時にファイルパスから抽出（`YYYY-MM-DD` / `YYYYMMDD` / `YYYY/MM/DD` 形式を正規化）して保存する
+- `buildPlannerHint` が `resolveDateRange` で DateRange を取得できた場合、`timeline_search` を推奨する hint を挿入する
+
+### 理由
+
+- 期間クエリを O(ファイル数) の DB range scan で解決でき、glob の試行錯誤が不要
+- `QueryClassifier.TEMPORAL_SUMMARIZATION` → `timeline_search` のパスが明確になる
+
+### トレードオフ
+
+- `documentDate` が null のファイル（日付形式でない命名）はヒットしない → grep / vector_search へのフォールバックが依然必要
+
+---
+
+## ADR-013: Recentness Ranking（RRF スコアへの新鮮度加点）
+
+**日付:** 2026-06-11  
+**ステータス:** 採用
+
+### 背景
+
+RRF のスコアはランク位置だけで決まるため、1年前の文書と昨日の文書が同じランクにいると同スコアになる。日記・メモ用途では「最新情報」を優先したいケースが多い。
+
+### 決定
+
+RRF スコアに指数減衰の `freshnessBoost` を加算する。
+
+```kotlin
+finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECAY_DAYS)
+// FRESHNESS_BOOST_MAX = 0.010f, FRESHNESS_DECAY_DAYS = 90f
+// 30日経過: +0.0072, 1年: +0.0017, 3年: +0.0001
+```
+
+`documentDate` は ADR-012 で保存した値を使用。`null` の場合は加点なし。
+
+### 理由
+
+- RRF max score（両方 rank=1）≈ 0.032。boost max を約 30% に設定することで、低ランクの古い文書が常に上位を取ることを防ぎつつ新しい文書を優遇できる
+- 指数関数により古い文書のスコアが滑らかに減衰し、急激な断絶がない
+
+### トレードオフ
+
+- 日付のない文書（`documentDate = null`）はランキングで不利になる
+- `FRESHNESS_BOOST_MAX` と `FRESHNESS_DECAY_DAYS` のチューニングが必要
+
+---
+
+## ADR-014: Folder Embedding（フォルダ単位の意味ベクトル）
+
+**日付:** 2026-06-11  
+**ステータス:** 採用
+
+### 背景
+
+ベクトル検索はチャンク単位で動作するため、「仕事フォルダに関する質問」のようなフォルダ全体を対象とするクエリに弱かった。
+
+### 決定
+
+インデックス時にフォルダ直下のファイル名・見出しを連結したテキストを埋め込み、`folder_embeddings` テーブルに保存する。`RagPipeline.retrieveTopChunks` で `folderSearch` を並列実行し、フォルダレベルの `Citation`（`source=FOLDER`）として結果に追加する。
+
+- `CitationIntegrator` での優先度は最低位（`GLOB > FOLDER`）
+- DB スキーマ: `folder_embeddings(id, path, treeUri, embedding)` に `UNIQUE INDEX (path, treeUri)`
+
+### 理由
+
+- フォルダ名・ファイル名が意味的にまとまっている KB では、チャンク検索より高精度でフォルダを絞り込める
+- 既存の `RagPipeline` に `folderSearch` を追加するだけで導入でき、変更範囲が小さい
+
+### トレードオフ
+
+- フォルダ数が多い場合は埋め込み生成コストが増加する
+- フォルダ単位 Citation は snippet が「フォルダ全体に関連するコンテンツ」という固定テキストのため、回答生成には直接貢献しない（フォルダの存在を示すメタ情報として機能する）
+
+---
+
+## ADR-015: read_file 大ファイルの LLM 要約
+
+**日付:** 2026-06-11  
+**ステータス:** 採用
+
+### 背景
+
+`read_file` で 3000 字を超えるファイルをそのまま `Citation.snippet` に入れると、`CitationIntegrator` のトークン budget（1200 tokens）を1ファイルで使い切り、他の引用が入らなくなる問題があった。
+
+### 決定
+
+`ToolExecutor.executeReadFile` でファイル全文が `SUMMARIZE_THRESHOLD_CHARS`（3000 字）を超えた場合、`LlmService.summarize()` で 500 字以内の要約を生成してから単一の `Citation` として投入する。要約失敗時は先頭 3000 字に切り詰めてフォールバック。
+
+### 理由
+
+- 大ファイルでもトークン budget を圧迫しない
+- 要約内容を LLM が生成するため、冗長な本文よりも回答プロンプトのコンテキスト品質が向上する可能性がある
+
+### トレードオフ
+
+- 要約のために追加の LLM 呼び出しが1回発生し、レイテンシが増加する
+- 要約精度は Gemma 4 E2B の能力に依存する
