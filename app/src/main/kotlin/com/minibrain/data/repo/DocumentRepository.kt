@@ -65,7 +65,9 @@ class DocumentRepository(
                                 ?: MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
                             tags = existing.tags
                                 ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
-                            documentDate = existing.documentDate ?: extractDateFromPath(mdFile.relativePath),
+                            documentDate = existing.documentDate
+                                ?: extractDateFromPath(mdFile.relativePath)
+                                ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
                         )
                     )
                 }
@@ -90,7 +92,8 @@ class DocumentRepository(
                     headings = JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
                     firstParagraph = MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
                     tags = JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
-                    documentDate = extractDateFromPath(mdFile.relativePath),
+                    documentDate = extractDateFromPath(mdFile.relativePath)
+                        ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
                 )
             )
 
