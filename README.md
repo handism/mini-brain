@@ -7,12 +7,17 @@
 ## 特徴
 
 - **完全プライベート** — 質問・回答・md の内容はクラウドに送信しない。ネットワーク通信は初回モデルダウンロードのみ
-- **ReAct エージェント検索** — LLM が glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search を自由に組み合わせて多段探索。レイテンシより精度を優先
+- **Search First → Coverage Check → Agent** — Query Expansion で検索語を展開し BM25 / Metadata / Vector を並行検索、LLM Reranker で上位候補を選択。さらに Coverage Check で「証拠が揃っているか」を評価し、不足している場合は Explorer Strategy を決定して ReAct にエスカレーション
+- **Query Expansion** — LLM が元クエリを 3〜8 件の検索語群に展開。固有名詞（人名・地名・施設名・サービス名等）は助詞・疑問詞を取り除いた単独名詞として必ず保持し、日付表現・関連語も補完
+- **Metadata Search** — ファイル名・フォルダパス・タグ・documentDate を直接検索。本文にない情報（日付フォルダ・会社名）も Recall に貢献。ファイル名(拡張子除く)が質問に部分文字列として含まれる場合の逆引きも実施し、日本語助詞でトークン化されないクエリでも固有名詞ファイルを確実に拾う。snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込み、日付クエリでの回答可能性判定を高速化
+- **Vector Search** — 元クエリを Embedding に変換しコサイン類似度で意味的近傍を取得。字面が一致しない言い換えや概念質問を補完
+- **LLM Reranker** — 50 件の候補を LLM が関連度順に再採点し、上位 10 件を回答コンテキストに投入。日付クエリ（いつ・何月 等）は日付情報を含む候補を優先
+- **Coverage Check** — Search First 後に LLM が「回答に必要な証拠が揃っているか」を評価。不足情報（`visit_date` 等）を特定し、Explorer Strategy（EXPAND_TIME / EXPAND_TOPIC）を決定して ReAct に指示を渡す。日付クエリ かつ 日付プレフィックス付き候補がある場合は LLM 呼び出しを短絡
+- **ReAct エージェント（Fallback）** — Search First + Coverage Check で証拠が揃わなかった場合のフォールバック。Explorer Strategy の hint を参照し、glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search を自由に組み合わせて多段探索。EXPAND_TIME は read_file での全文読解を優先
 - **Query Classifier** — 一般知識の質問は RAG をスキップして直接 LLM が回答。検索コストを削減
 - **Recentness Ranking** — ファイルパスから日付を抽出し、RRF スコアに指数減衰のフレッシュネス加点を適用（新しい情報を優先）
 - **Timeline Search** — 期間表現（去年の夏・2024年3月など）を DateRange に解釈し、期間指定でファイルを収集する `timeline_search` ツールを提供
 - **Folder Embedding** — フォルダ単位の仮想埋め込みを生成。ベクトル検索でフォルダ全体の意味をキャプチャ
-- **DCI（Directory/Content Intelligence）** — フォルダ・ファイル名を主軸にした検索。日記は日付ファイルを直読み、ノートはパス絞り込みから全文取得
 - **日付形式不問** — YYYY/MM/DD・YYYYMMDD・YYYY-MM-DD など命名規則が混在していても DB 側で吸収して一致ファイルの docId を解決
 - **ハイブリッド検索** — BM25（FTS4）+ ベクトル検索（USE Multilingual）を RRF でマージ
 - **Markdown 対応** — 見出し階層を解析してチャンク分割。引用元のファイル名と見出しパスを回答に表示
@@ -73,10 +78,15 @@ app/src/main/kotlin/com/minibrain/
 ├── MiniBrainApp.kt          # Application — シングルトン DI
 ├── MainActivity.kt
 ├── ai/
+│   ├── search/                  # Search First パイプライン（新規）
+│   │   ├── SearchPipeline.kt    # QueryExpansion→並行検索→Merge→Rerank のオーケストレーション
+│   │   ├── QueryExpander.kt     # LLM によるクエリ展開（3〜8 件・JSON 配列出力）
+│   │   └── LlmReranker.kt       # LLM による候補再採点（インデックス出力方式）
 │   ├── agent/
-│   │   ├── AgentPipeline.kt     # ReAct ループのオーケストレーション・hint 生成
+│   │   ├── AgentPipeline.kt     # Search First + CoverageCheck + ReAct フォールバック統合
 │   │   ├── AgentTypes.kt        # AgentTool / Observation / PlannerDecision 等の型定義
-│   │   ├── AgentTraceEvent.kt   # トレースイベント型（PlannerDecision/ToolCall/Observation）
+│   │   ├── AgentTraceEvent.kt   # トレースイベント型（Search First + CoverageCheck + ReAct）
+│   │   ├── CoverageChecker.kt   # 回答可能性評価（LLM）+ Explorer Strategy 決定
 │   │   ├── PlannerPrompt.kt     # Planner プロンプト生成 + DSL(key:value)パーサ
 │   │   ├── CitationIntegrator.kt# 重複除去・優先度整列・トークン budget 制御
 │   │   ├── DateResolver.kt      # 相対日付・期間表現 → 絶対日付/DateRange 変換
@@ -90,7 +100,7 @@ app/src/main/kotlin/com/minibrain/
 │   ├── embed/
 │   │   └── EmbedderService.kt   # MediaPipe TextEmbedder ラッパー
 │   └── rag/
-│       ├── RagPipeline.kt       # RAG（RRF フォールバック・Citation 型定義）
+│       ├── RagPipeline.kt       # RAG（RRF・Citation 型・SourceType 定義）
 │       └── CosineSimilarity.kt  # コサイン類似度（純 Kotlin）
 ├── data/
 │   ├── db/                      # Room スキーマ・DAO（v5: documents+folder_embeddings）
@@ -108,30 +118,40 @@ app/src/main/kotlin/com/minibrain/
 
 ## 検索アーキテクチャ
 
-レイテンシより精度を優先した **ReAct ループ + DCI（Directory/Content Intelligence）** を採用。LLM がツールを自由に組み合わせて多段探索し、パス・ファイル名→全文読み込みを基本戦略とする。
+**Recall 最大化** を目的とした **Search First → Coverage Check → Agent** を採用。候補収集を並行多手法で行い、LLM は選別（Rerank）・回答可能性評価（Coverage Check）・回答生成に専念させる。
 
 ```
 質問
 ↓ QueryClassifier
   GENERAL_KNOWLEDGE → RAG スキップ → LLM 直接回答
   TEMPORAL_SUMMARIZATION / MEMORY_SEARCH → 以下へ
-↓ buildPlannerHint（DB 先行解析）
-  ├─ 期間クエリ: resolveDateRange → DateRange を hint に注入 / timeline_search 推奨
-  ├─ 日付クエリ: YYYYMMDD 8桁で DB 検索 → 一致した docId を hint に注入
-  │              未一致 → glob hint を列挙
-  └─ ファイル名一致: [d=ID] fileName を hint に追加
-↓ ReAct ループ（最大 6 回）
-  Planner LLM がツールを選択（DSL key:value 形式で出力）:
-  ├─ glob(pattern)                    : パターンでファイル列挙
-  ├─ list_dir(folder)                 : フォルダ直下のサブフォルダ・ファイル一覧
-  ├─ read_file(docId|path)            : ファイル全文取得（巨大ファイルは LLM 要約）
-  ├─ grep(query, scope?)              : FTS4 BM25 キーワード検索
-  ├─ vector_search(query, k)          : USE Multilingual 意味類似検索
-  ├─ rrf_search(query, k)             : BM25 + ベクトル RRF 融合
-  └─ timeline_search(start, end, k)   : 期間指定で documentDate フィルタ
+
+↓ SearchPipeline（Search First）
+  1. QueryExpander（LLM）: クエリを 3〜8 件に展開
+  2. Parallel Retrieval:
+     ├─ 展開クエリ × BM25（FTS4）
+     ├─ 展開クエリ × Metadata Search（fileName / path / tags / documentDate）
+     │                              + fileName 逆引き（fileName が query の substring）
+     │                              snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込む
+     └─ 元クエリ × Vector（Embedding コサイン類似）
+  3. Candidate Merge: 重複排除 → 上位 50 件
+  4. LlmReranker（LLM）: 上位 10 件に絞り込み
+     ※ 日付クエリは日付情報を含む候補を優先
+
+↓ CoverageCheck（LLM）
+  ※ 日付クエリ かつ snippet 先頭が `[日付:` で始まる候補があれば LLM を呼ばずに即 canAnswer=true で短絡
+  canAnswer=true  → 回答生成へ
+  canAnswer=false → ExplorerStrategy を決定して ReAct ループへ
+    EXPAND_TIME  : visit/date/time が不足 → read_file で全文を読んで日付メタを確認（timeline_search は最終手段）
+    EXPAND_TOPIC : その他の情報が不足    → read_file/grep を hint に追加
+
+↓ 空 OR CoverageCheck 失敗の場合 → ReAct ループ（Fallback）
+  Planner LLM がツールを選択（DSL key:value 形式）:
+  ├─ glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search
   → パース失敗 2 回連続 → RRF 即時フォールバック
+
 ↓ CitationIntegrator
-  優先度: READ_FILE > GREP > VECTOR > RRF > GLOB > FOLDER
+  優先度: READ_FILE > GREP > METADATA > VECTOR > RRF > GLOB > FOLDER
   重複除去（docId + headingPath キー）・トークン budget（chars/3 推定、上限 1200 tokens）
   citations 空 → RRF 強制フォールバック（セーフティネット）
 ↓ LLM 回答生成（ストリーミング）

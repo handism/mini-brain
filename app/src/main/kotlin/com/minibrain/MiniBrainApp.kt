@@ -7,7 +7,11 @@ import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.llm.ModelDownloader
 import com.minibrain.ai.agent.AgentPipeline
+import com.minibrain.ai.agent.CoverageChecker
 import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.ai.search.LlmReranker
+import com.minibrain.ai.search.QueryExpander
+import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.AppDatabase
 import com.minibrain.data.repo.ChatRepository
 import com.minibrain.data.repo.DocumentRepository
@@ -42,8 +46,18 @@ class MiniBrainApp : Application() {
         RagPipeline(embedderService, llmService, database.chunkDao(), database.documentDao(), database.folderEmbeddingDao())
     }
 
+    val queryExpander: QueryExpander by lazy { QueryExpander(llmService) }
+
+    val llmReranker: LlmReranker by lazy { LlmReranker(llmService) }
+
+    val searchPipeline: SearchPipeline by lazy {
+        SearchPipeline(queryExpander, llmReranker, ragPipeline, database.chunkDao(), database.documentDao())
+    }
+
+    val coverageChecker: CoverageChecker by lazy { CoverageChecker(llmService) }
+
     val agentPipeline: AgentPipeline by lazy {
-        AgentPipeline(llmService, embedderService, database.chunkDao(), database.documentDao(), ragPipeline)
+        AgentPipeline(llmService, embedderService, database.chunkDao(), database.documentDao(), ragPipeline, searchPipeline, coverageChecker)
     }
 
     override fun onCreate() {
