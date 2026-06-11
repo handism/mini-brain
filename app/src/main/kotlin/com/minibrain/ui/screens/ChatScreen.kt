@@ -61,9 +61,18 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.minibrain.ai.agent.BM25SearchHitEvent
+import com.minibrain.ai.agent.CandidateMergeEvent
 import com.minibrain.ai.agent.FinalAnswerEvent
+import com.minibrain.ai.agent.GrepSearchHitEvent
+import com.minibrain.ai.agent.MetadataSearchHitEvent
+import com.minibrain.ai.agent.VectorSearchHitEvent
 import com.minibrain.ai.agent.ObservationEvent
 import com.minibrain.ai.agent.PlannerDecisionEvent
+import com.minibrain.ai.agent.QueryExpansionEvent
+import com.minibrain.ai.agent.CoverageCheckEvent
+import com.minibrain.ai.agent.ExplorerStrategyEvent
+import com.minibrain.ai.agent.RerankEvent
 import com.minibrain.ai.agent.ToolCallEvent
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.ui.components.MarkdownText
@@ -399,6 +408,75 @@ private fun AgentTraceSection(events: List<com.minibrain.ai.agent.AgentTraceEven
                             "回答 ${event.answerLength}字",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
+                    is QueryExpansionEvent -> {
+                        Text(
+                            "Query Expansion",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            event.queries.joinToString(" / "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is BM25SearchHitEvent -> {
+                        Text(
+                            "BM25  ${event.hitCount} hits",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is MetadataSearchHitEvent -> {
+                        Text(
+                            "Metadata  ${event.hitCount} hits",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is GrepSearchHitEvent -> {
+                        Text(
+                            "Grep  ${event.hitCount} hits",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is VectorSearchHitEvent -> {
+                        Text(
+                            "Vector  ${event.hitCount} hits",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is CandidateMergeEvent -> {
+                        Text(
+                            "Merge  ${event.totalCount} candidates",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is RerankEvent -> {
+                        Text(
+                            "Rerank  ${event.before} → ${event.after}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                    is CoverageCheckEvent -> {
+                        val label = if (event.canAnswer) "Coverage  OK" else "Coverage  NG — missing: ${event.missingInformation.joinToString(", ")}"
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (event.canAnswer) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    is ExplorerStrategyEvent -> {
+                        Text(
+                            "Explorer  ${event.strategy}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }

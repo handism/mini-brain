@@ -6,6 +6,7 @@ import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,8 @@ class AgentPipeline(
     private val chunkDao: ChunkDao,
     private val documentDao: DocumentDao,
     private val ragPipeline: RagPipeline,
+    private val searchPipeline: SearchPipeline,
+    private val coverageChecker: CoverageChecker,
 ) {
     companion object {
         private const val TAG = "AgentPipeline"
@@ -36,19 +39,89 @@ class AgentPipeline(
             return@withContext AgentResult(emptyList(), llmService.generateStream(buildDirectAnswerPrompt(question, recentHistory)))
         }
 
+        val traceEvents = mutableListOf<AgentTraceEvent>()
+
+        // --- Search First ---
+        val searchResult = searchPipeline.search(question, treeUri, onStatus)
+        traceEvents += searchResult.traceEvents
+        var citations: List<Citation> = searchResult.citations
+        Log.d(TAG, "SearchPipeline returned ${citations.size} citations")
+
+        // CoverageCheck: candidates があっても質問に答えられない場合を検出
+        var explorerHint: String? = null
+        if (citations.isNotEmpty()) {
+            onStatus("回答可能性を確認中...")
+            val coverage = coverageChecker.check(question, citations)
+            traceEvents += CoverageCheckEvent(coverage.canAnswer, coverage.missingInformation)
+            Log.d(TAG, "CoverageCheck canAnswer=${coverage.canAnswer} missing=${coverage.missingInformation}")
+            if (!coverage.canAnswer) {
+                val strategy = resolveExplorerStrategy(coverage.missingInformation)
+                traceEvents += ExplorerStrategyEvent(strategy.first, strategy.second)
+                explorerHint = strategy.third
+                Log.d(TAG, "ExplorerStrategy=${strategy.first}")
+                citations = emptyList()
+            }
+        }
+
+        // ReAct ループはフォールバック専用 (SearchPipeline が空 or CoverageCheck 失敗の場合)
+        if (citations.isEmpty()) {
+            Log.d(TAG, "falling back to ReAct loop (explorerHint=$explorerHint)")
+            citations = runReActLoop(question, treeUri, traceEvents, onStatus, explorerHint)
+        }
+
+        // 最終セーフティネット: RRF 強制実行
+        if (citations.isEmpty()) {
+            Log.d(TAG, "citations still empty — forced RRF fallback")
+            onStatus("フォールバック検索中...")
+            citations = ragPipeline.retrieveTopChunks(question, treeUri)
+            traceEvents += ToolCallEvent(MAX_ITERATIONS + 1, "rrf_search", "\"$question\"")
+            traceEvents += ObservationEvent(MAX_ITERATIONS + 1, "${citations.size} citations returned (safety fallback)")
+        }
+
+        onStatus("")
+        val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory))
+        AgentResult(citations, answerFlow, traceEvents)
+    }
+
+    private data class ExplorerStrategy(val name: String, val reason: String, val hint: String)
+
+    private fun resolveExplorerStrategy(missing: List<String>): Triple<String, String, String> {
+        val isTimeRelated = missing.any { it.contains("date") || it.contains("visit") || it.contains("time") || it.contains("when") }
+        return if (isTimeRelated) {
+            Triple(
+                "EXPAND_TIME",
+                "missing date info",
+                "ファイル本文に日付メタが埋め込まれている可能性が高いです。まず read_file で該当ファイル全文を取得して『初回訪問日』『日付』『date』などのラベル行を確認してください。それでも特定できない場合のみ timeline_search を使ってください。",
+            )
+        } else {
+            Triple("EXPAND_TOPIC", "missing detail", "read_file または grep で詳細内容を調べてください。")
+        }
+    }
+
+    private suspend fun runReActLoop(
+        question: String,
+        treeUri: String,
+        traceEvents: MutableList<AgentTraceEvent>,
+        onStatus: (String) -> Unit,
+        explorerHint: String? = null,
+    ): List<Citation> {
         val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri, llmService)
-        val plannerHint = buildPlannerHint(question, treeUri)
+        val baseHint = buildPlannerHint(question, treeUri)
+        val plannerHint = when {
+            explorerHint != null && baseHint != null -> "$explorerHint / $baseHint"
+            explorerHint != null -> explorerHint
+            else -> baseHint
+        }
         val observations = mutableListOf<Observation>()
         val toolResults = mutableListOf<ToolResult>()
-        val traceEvents = mutableListOf<AgentTraceEvent>()
         var consecutiveParseErrors = 0
 
         for (iteration in 1..MAX_ITERATIONS) {
             onStatus("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
-            Log.d(TAG, "iteration=$iteration hint=$plannerHint obs=${observations.size}")
+            Log.d(TAG, "ReAct iteration=$iteration hint=$plannerHint obs=${observations.size}")
 
             if (!llmService.isReady()) {
-                Log.d(TAG, "LLM not ready — fallback")
+                Log.d(TAG, "LLM not ready — exit ReAct loop")
                 break
             }
 
@@ -91,30 +164,13 @@ class AgentPipeline(
                     val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
                     toolResults += result
                     traceEvents += ObservationEvent(iteration, traceObservationSummary(decision.tool, result))
-
                     addObservation(observations, toolCall, result.summary)
-
-                    Log.d(TAG, "tool=${decision.tool} citations=${result.citations.size} obsLen=${result.summary.length}")
+                    Log.d(TAG, "tool=${decision.tool} citations=${result.citations.size}")
                 }
             }
         }
 
-        var citations = CitationIntegrator.integrate(toolResults)
-        Log.d(TAG, "total citations=${citations.size}")
-
-        // セーフティネット: ツールが何も見つけられなかった場合は必ず RRF 検索を実行
-        if (citations.isEmpty()) {
-            Log.d(TAG, "citations empty after loop — forced RRF fallback")
-            onStatus("フォールバック検索中...")
-            citations = ragPipeline.retrieveTopChunks(question, treeUri)
-            Log.d(TAG, "fallback citations=${citations.size}")
-            traceEvents += ToolCallEvent(MAX_ITERATIONS + 1, "rrf_search", "\"$question\"")
-            traceEvents += ObservationEvent(MAX_ITERATIONS + 1, "${citations.size} citations returned (safety fallback)")
-        }
-
-        onStatus("")
-        val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory))
-        AgentResult(citations, answerFlow, traceEvents)
+        return CitationIntegrator.integrate(toolResults)
     }
 
     private suspend fun buildPlannerHint(question: String, treeUri: String): String? {

@@ -14,6 +14,7 @@ object CitationIntegrator {
     private val SOURCE_PRIORITY = listOf(
         SourceType.READ_FILE,
         SourceType.GREP,
+        SourceType.METADATA,
         SourceType.VECTOR,
         SourceType.RRF,
         SourceType.GLOB,

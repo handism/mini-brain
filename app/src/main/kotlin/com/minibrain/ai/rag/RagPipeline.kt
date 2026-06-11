@@ -20,7 +20,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
-enum class SourceType { READ_FILE, GREP, VECTOR, RRF, GLOB, FOLDER, UNKNOWN }
+enum class SourceType { READ_FILE, GREP, METADATA, VECTOR, RRF, GLOB, FOLDER, UNKNOWN }
 
 data class Citation(
     val headingPath: String,
@@ -104,6 +104,25 @@ class RagPipeline(
     ): Flow<String> {
         val prompt = buildPrompt(question, citations, recentHistory)
         return llmService.generateStream(prompt)
+    }
+
+    // ベクトル検索のみで Citation 化（SearchPipeline の Parallel Retrieval から呼ぶ）
+    suspend fun vectorOnlyTopK(question: String, treeUri: String, k: Int = 20): List<Citation> {
+        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k) }
+            ?: run { Log.w("RagPipeline", "vectorOnlyTopK timed out"); return emptyList() }
+        val docCache = mutableMapOf<Long, String?>()
+        suspend fun relativePath(docId: Long): String? =
+            docCache.getOrPut(docId) { documentDao.getById(docId)?.relativePath }
+        return hits.map { (score, chunk) ->
+            Citation(
+                headingPath = chunk.headingPath,
+                snippet = chunk.text,
+                score = score,
+                docId = chunk.docId,
+                relativePath = relativePath(chunk.docId),
+                source = SourceType.VECTOR,
+            )
+        }
     }
 
     private suspend fun vectorSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, ChunkEntity>> =

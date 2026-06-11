@@ -484,3 +484,299 @@ finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECA
 
 - 要約のために追加の LLM 呼び出しが1回発生し、レイテンシが増加する
 - 要約精度は Gemma 4 E2B の能力に依存する
+
+---
+
+## ADR-016: 検索アーキテクチャを Search First → Rerank → Agent に移行
+
+**日付:** 2026-06-12  
+**ステータス:** 採用（ADR-008 の ReAct ループは Fallback に降格）
+
+### 背景
+
+ADR-008 の ReAct ループは「LLM がどの文書を探すか決める」アーキテクチャであり、LLM の推論能力が候補収集の上限になっていた。Recall 不足により以下のクエリで精度が不十分だった:
+
+- 「5年前の3月何してた？」
+- 「Datadog関連で何をやった？」
+- 「AWS Organizations導入したのいつ？」
+- 「TOKIUMについて教えて」
+
+原因は Agent の推論能力ではなく、**候補の取りこぼし（Recall 不足）**。
+
+### 決定
+
+**Search First → Rerank → Agent** アーキテクチャを採用する。
+
+```
+User Query
+↓ QueryExpander（LLM）: クエリを 3〜8 件に展開
+↓ Parallel Retrieval: 展開クエリ × (BM25 + Metadata) を並行実行 + 元クエリの Grep
+↓ Candidate Merge: 重複排除して最大 50 件に統合
+↓ LlmReranker（LLM）: 候補をスコアリングし上位 10 件に絞り込み
+↓ Citation → Answer（SearchPipeline 結果が空の場合のみ ReAct ループにフォールバック）
+```
+
+#### QueryExpander
+
+- `LlmService.generateStream()` でクエリを 3〜8 件に展開
+- JSON 配列 `["クエリ1", "クエリ2", ...]` 固定出力。パース失敗時は元クエリのみ使用
+- 実装: `ai/search/QueryExpander.kt`
+
+#### Metadata Search（新ツール）
+
+- `DocumentEntity` の `fileName` / `relativePath` / `tags` / `documentDate` をメモリ内フィルタで検索
+- BM25 が本文を対象とするのに対し、メタデータ検索はパス・タグを直接参照するため、日付フォルダ・会社名など **構造化された命名規則** のある KB で Recall が向上する
+- `Citation.source = SourceType.METADATA`（優先度: GREP の次）
+
+#### LlmReranker
+
+- 最大 30 件の候補を `[i] headingPath: snippet(100字)` 形式でプロンプトに展開
+- LLM に上位 K 件のインデックスを JSON 配列で出力させる（スコア値ではなく順序インデックス）
+- パース失敗時は元順序の先頭 K 件にフォールバック
+- 実装: `ai/search/LlmReranker.kt`
+
+#### ReAct ループの位置づけ変更
+
+ADR-008 の ReAct ループは **SearchPipeline が空を返した場合のフォールバック** に降格。削除はしない。
+
+### 新規ファイル
+
+| ファイル | 役割 |
+|---|---|
+| `ai/search/QueryExpander.kt` | LLM によるクエリ展開（JSON パーサ内蔵） |
+| `ai/search/LlmReranker.kt` | LLM による候補再採点（インデックス出力方式） |
+| `ai/search/SearchPipeline.kt` | Search First フロー全体のオーケストレーション |
+
+### 変更ファイル
+
+| ファイル | 変更内容 |
+|---|---|
+| `ai/agent/AgentPipeline.kt` | `SearchPipeline` を先行実行。空のときのみ `runReActLoop()` を呼び出す |
+| `ai/agent/AgentTraceEvent.kt` | `QueryExpansionEvent` / `BM25SearchHitEvent` / `MetadataSearchHitEvent` / `GrepSearchHitEvent` / `CandidateMergeEvent` / `RerankEvent` を追加 |
+| `ai/rag/RagPipeline.kt` | `SourceType.METADATA` を追加 |
+| `ai/agent/CitationIntegrator.kt` | `METADATA` を `SOURCE_PRIORITY` に挿入（`GREP > METADATA > VECTOR`） |
+| `ai/agent/QueryClassifier.kt` | `について教えて` パターンを `GENERAL_KNOWLEDGE` から削除（個人ノートでも多用される表現のため `MEMORY_SEARCH` に倒す） |
+| `MiniBrainApp.kt` | `QueryExpander` / `LlmReranker` / `SearchPipeline` の lazy インスタンスを追加 |
+| `ui/screens/ChatScreen.kt` | 新トレースイベント 6 種を Search Trace として表示 |
+
+### 理由
+
+- **Recall 最大化**: 候補収集を複数手法の並行実行に委ね、LLM は選別（Rerank）に専念させる
+- **メタデータ検索の追加**: 日付フォルダ・会社名など本文以外に意味がある KB に対して効果的
+- **ReAct ループの保持**: フォールバックとして残すことでフォルダ探索・複数ファイル横断クエリへの対応力を維持
+
+### トレードオフ
+
+- **レイテンシ増加**: QueryExpander（LLM×1）+ 並行検索 + LlmReranker（LLM×1）が追加される。既存の ReAct ループが走らない分で一部相殺されるが、初回応答は遅くなる
+- **LiteRT-LM 単一スレッド制約**: `QueryExpander` と `LlmReranker` は逐次実行が必須。並行 LLM 呼び出しは不可
+- **小型モデルの JSON 品質**: Gemma 4 E2B の JSON 出力は不安定なため、両クラスともパース失敗フォールバックを実装済み
+- **メモリフィルタのスケール**: `metadataSearch` は `documentDao.getAllByTree()` で全件ロード。個人用途（数千件）では問題なし
+
+---
+
+## ADR-017: Coverage Check + Explorer Strategy の追加
+
+**日付:** 2026-06-12  
+**ステータス:** 採用（ADR-016 のフォールバック条件を拡張）
+
+### 背景
+
+ADR-016 の Search First では「SearchPipeline が 1 件以上 candidates を返した場合は ReAct をスキップ」という単純条件だった。しかし「サウナしきじにはいつ行ったっけ？」のような日付クエリでは、SearchPipeline がサウナ関連記事を返しても **訪問日付を含む文書** が上位に入らないケースがあり、正しく回答できなかった。
+
+**根本原因**: 「candidates > 0 = 回答可能」という仮定が誤り。10 件の候補が返ってもすべて不正解のケースが存在する。
+
+### 決定
+
+Search First の後に **CoverageCheck** ステップを追加し、「証拠が揃っているか」を LLM で評価する。
+
+```
+SearchPipeline
+↓
+CoverageCheck（LLM）
+  canAnswer=true  → 回答生成
+  canAnswer=false → ExplorerStrategy 決定 → ReAct ループ
+↓（ReAct）
+CitationIntegrator → LLM 回答生成
+```
+
+#### CoverageChecker
+
+- `query` + `candidates top5` を LLM に渡し、`yes` / `no, 不足情報` の単純テキスト形式で出力させる
+- パース: 先頭が `yes` → `canAnswer=true`、`no` → `canAnswer=false` + カンマ区切りの `missingInformation`
+- 判定不能（出力が曖昧）→ `canAnswer=true` にデフォルトし、不要な ReAct 起動を抑制
+- 実装: `ai/agent/CoverageChecker.kt`
+
+#### ExplorerStrategy
+
+`missingInformation` の内容に応じて探索戦略を決定し、ReAct の `plannerHint` 先頭に注入する。
+
+| strategy | 条件 | hint 内容 |
+|---|---|---|
+| `EXPAND_TIME` | missing に `date` / `visit` / `time` / `when` を含む | `timeline_search または metadata_search(date) で訪問日・イベント日時を調べてください。` |
+| `EXPAND_TOPIC` | 上記以外 | `read_file または grep で詳細内容を調べてください。` |
+
+#### LlmReranker の日付クエリ対応
+
+`いつ / 何月 / 何日 / 何年 / 年前 / 月前 / 去年 / 先月 / 先週 / いつから / いつまで` を含むクエリを `isDateQuery()` で検出し、rerank プロンプトに「日付情報を含む候補を優先する」旨を追記する。
+
+### 変更ファイル
+
+| ファイル | 変更内容 |
+|---|---|
+| `ai/agent/CoverageChecker.kt`（新規） | CoverageResult(canAnswer, missingInformation)、LLM プロンプト + テキストパーサ |
+| `ai/agent/AgentTraceEvent.kt` | `CoverageCheckEvent` / `ExplorerStrategyEvent` を追加 |
+| `ai/agent/AgentPipeline.kt` | ReAct 起動条件を `isEmpty \|\| !canAnswer` に変更。`resolveExplorerStrategy()` 追加。`runReActLoop` に `explorerHint` パラメータ追加 |
+| `ai/search/LlmReranker.kt` | `isDateQuery()` + 日付クエリ時のプロンプト追記 |
+| `MiniBrainApp.kt` | `CoverageChecker` を lazy 生成して `AgentPipeline` に注入 |
+| `ui/screens/ChatScreen.kt` | `CoverageCheckEvent`（OK=tertiary / NG=error）/ `ExplorerStrategyEvent` の表示追加 |
+
+### 理由
+
+- 「候補が存在する」ではなく「質問に答えられる証拠が揃っている」を ReAct 起動の判定基準にする
+- 不足情報から探索戦略を自動決定することで、日付クエリに対して `timeline_search` を優先的に実行できる
+- LlmReranker の日付認識により、rerank 段階でも日付情報を持つ候補が落ちにくくなる
+
+### トレードオフ
+
+- **レイテンシ追加**: candidates が返った場合に LLM 呼び出しが 1 回増加する（`canAnswer=true` のケースも含む）
+- **LLM 精度依存**: 小型モデルが `yes/no` 形式を確実に守らない場合、デフォルト `canAnswer=true` に倒すため偽陽性（回答できるのに ReAct スキップ）は起きにくいが、偽陰性（回答できるのに ReAct 起動）の余地がある
+- **LiteRT-LM 単一スレッド**: CoverageChecker は LlmReranker の後（SearchPipeline 返却後）に逐次実行されるため、スレッド競合は発生しない
+
+---
+
+## ADR-018: Parallel Retrieval を BM25 + Metadata + Vector に再編、CoverageCheck 短絡、EXPAND_TIME ヒント見直し
+
+**日付:** 2026-06-12
+**ステータス:** 採用（ADR-016・ADR-017 を部分置き換え）
+
+### 背景
+
+ADR-016 / ADR-017 の Search First 導入後、本文先頭にメタ行（`初回訪問日: 2022/01/02` 等）を埋めるタイプのノートに対する日付クエリ（例: 「サウナしきじにいつ行ったっけ？」）で正答できないリグレッションが発生した。
+
+原因の連鎖:
+
+1. `SearchPipeline.metadataSearch` の snippet が `doc.firstParagraph` のみで、メタ行が含まれない
+2. `CoverageChecker` が snippet に日付を見出せず `canAnswer=false` を返す
+3. `resolveExplorerStrategy(EXPAND_TIME)` が `timeline_search` 強制ヒントを ReAct に渡す
+4. 具体年月日のない汎用日付クエリでは `timeline_search` が空ヒットし、「ファイル名一致 → `read_file` で全文を読む」勝ち筋に入れない
+
+加えて、Parallel Retrieval の 3 本目「元クエリ Grep（FTS4）」は BM25 と検索対象・スコアリングが近く、意味的近傍を拾う手段が欠けていた。
+
+### 決定
+
+3 つを同時に変更する。
+
+#### A. Parallel Retrieval を BM25 + Metadata + Vector に再編
+
+`SearchPipeline.search()` の並行3本柱から Grep を廃止し、Vector（Embedding 類似）に差し替える。
+
+- `RagPipeline.vectorOnlyTopK(question, treeUri, k)` を新規公開メソッドとして追加（既存 private `vectorSearch` + Citation 化 + タイムアウト）
+- `SearchPipeline.vectorSearch` は `ragPipeline.vectorOnlyTopK` を呼ぶラッパー
+- `Citation.source = SourceType.VECTOR` で投入
+- トレースイベントを `GrepSearchHitEvent` → `VectorSearchHitEvent` に差し替え（`GrepSearchHitEvent` は ReAct ループの `grep` ツール用に温存）
+
+#### B. EXPAND_TIME ヒントを read_file 優先に変更
+
+`AgentPipeline.resolveExplorerStrategy()` の `EXPAND_TIME` 分岐で渡す hint を、`timeline_search または metadata_search(date) で…` から以下に変更:
+
+> ファイル本文に日付メタが埋め込まれている可能性が高いです。まず read_file で該当ファイル全文を取得して『初回訪問日』『日付』『date』などのラベル行を確認してください。それでも特定できない場合のみ timeline_search を使ってください。
+
+#### C. metadataSearch の snippet 強化と CoverageCheck の短絡
+
+- `SearchPipeline.metadataSearch` / `dateRangeSearch` の Citation 生成で、`doc.documentDate` が非 NULL の場合に snippet 先頭へ `[日付: YYYY-MM-DD] ` プレフィックスを付与（共通ヘルパ `buildSnippetWithDate`）
+- `CoverageChecker.check` の冒頭に短絡ロジックを追加: 日付クエリ正規表現（`いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで`）にマッチし、かつ top5 候補に `[日付:` プレフィックス付き snippet が含まれる場合、LLM を呼ばずに `canAnswer=true` を返す
+
+### 期待効果
+
+- 「サウナしきじ」問題は **C** だけで直る: CoverageCheck が短絡で `canAnswer=true` を返し、Search First の reranked 結果がそのまま回答プロンプトに渡る
+- **A** は Recall 向上（ファイル名や本文に直接出てこない概念にもベクトル類似で寄せられる）
+- **B** は ReAct フォールバック経路に落ちた際の最終手段として、構造化ノートに対する全文読解を優先させる
+
+### 変更ファイル
+
+| ファイル | 変更内容 |
+|---|---|
+| `ai/rag/RagPipeline.kt` | `vectorOnlyTopK()` 公開メソッドを追加 |
+| `ai/search/SearchPipeline.kt` | `grepSearch` を `vectorSearch` に差し替え、`buildSnippetWithDate` 追加、`metadataSearch` / `dateRangeSearch` の snippet を強化 |
+| `ai/agent/CoverageChecker.kt` | 日付クエリ × 日付プレフィックス候補で LLM 呼ばずに短絡 |
+| `ai/agent/AgentPipeline.kt` | `resolveExplorerStrategy(EXPAND_TIME)` の hint を `read_file` 優先に書き換え |
+| `ai/agent/AgentTraceEvent.kt` | `VectorSearchHitEvent` を追加（`GrepSearchHitEvent` は温存） |
+| `ui/screens/ChatScreen.kt` | トレース UI に Vector 行を追加 |
+
+### 理由
+
+- **C（snippet 強化と短絡）** は根本原因への直接対処であり、副作用が小さく効果が確実
+- **A（Grep → Vector）** は Parallel Retrieval を「字面マッチ（BM25）/ 構造マッチ（Metadata）/ 意味マッチ（Vector）」の直交三本柱に整理する
+- **B（read_file 優先）** はノートの実装スタイル（本文先頭にメタ行）と整合した探索戦略
+
+### トレードオフ
+
+- **Vector 検索のレイテンシ**: 並行ジョブ 1 本が embed + 全件コサイン類似度になり、Grep（FTS4）よりは重い。タイムアウト（`SEARCH_TIMEOUT_MS = 8s`）でガード
+- **snippet 強化は documentDate に依存**: 既存 DB の `documentDate` が NULL のままだとプレフィックスが付かず短絡も効かない。再インデックスで `MarkdownMetaExtractor.extractDateFromContent` が補完する想定（NULL のもののみ再抽出）
+- **`isDateQuery` 正規表現の二重持ち**: `CoverageChecker` と `LlmReranker` が同じ正規表現を独立に保持する。共通化リファクタは別途
+
+---
+
+## ADR-019: QueryExpander の固有名詞保持 + metadataSearch のファイル名逆引き
+
+**日付:** 2026-06-12
+**ステータス:** 採用（ADR-016 の Query Expansion と Metadata Search を強化）
+
+### 背景
+
+ADR-018 までで日付クエリのリグレッションは解消したが、別パターンのリグレッションが残っていた:
+
+「サウナしきじにいつ行ったっけ？」のような **固有名詞 + 助詞 + 疑問詞** からなる質問で、`サウナしきじ.md` がそもそも引用 10 件に出てこない。
+
+二つの欠陥が連鎖していた:
+
+1. **QueryExpander が固有名詞を独立した検索語として保てない**: LLM 出力に `["サウナしきじ"]` 単体が含まれないことがあり、展開クエリのどれも `サウナしきじ` 単体を含まない
+2. **`metadataSearch` のトークン分割が日本語助詞を扱えない**: `Regex("[\\s　、。・]+")` で分割するため、「サウナしきじにいつ行ったっけ？」は丸ごと 1 トークンになり、fileName `サウナしきじ.md` との `contains` 比較が成立しない
+
+### 決定
+
+両側から塞ぐ。
+
+#### D1: QueryExpander プロンプトの固有名詞保持ルールを明示
+
+`ai/search/QueryExpander.kt` の `buildPrompt` に必須ルールを追加:
+
+- クエリに含まれる固有名詞（人名・地名・施設名・店名・サービス名・商品名・会社名・略語・カタカナ語の塊）は、助詞・疑問詞を取り除いた「単独の名詞」として 1 件以上含めること
+- 元のクエリは丸ごと 1 件として含めること（上記とは別カウント）
+- 「サウナしきじにいつ行ったっけ？」を例示に追加し、`["サウナしきじにいつ行ったっけ？","サウナしきじ","しきじ","訪問日","初回訪問日","いつ"]` の形を示す
+
+#### D2: metadataSearch にファイル名逆引きを追加
+
+`ai/search/SearchPipeline.kt` の `metadataSearch` に、既存のトークン一致に加えて以下の OR 条件を追加:
+
+```kotlin
+val fileStem = doc.fileName.removeSuffix(".md").removeSuffix(".MD")
+val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
+    queries.any { q -> q.contains(fileStem, ignoreCase = true) }
+```
+
+`MIN_FILENAME_MATCH_CHARS = 3` でノイズ（短すぎる fileName が偶然 substring 一致するケース）を抑制。
+
+### 期待効果
+
+- **D2 単体で当該問題は直る**: 「サウナしきじにいつ行ったっけ？」の中に fileStem `サウナしきじ` が部分文字列として含まれるため、QueryExpansion の挙動に関係なく metadataSearch がヒットする
+- **D1 は別パターンへの汎用効果**: ファイル名そのものが質問に出ていない概念的な質問でも、展開段階で固有名詞が抽出されやすくなる
+
+### 変更ファイル
+
+| ファイル | 変更内容 |
+|---|---|
+| `ai/search/QueryExpander.kt` | プロンプトに固有名詞保持ルール + サウナしきじ例示を追加 |
+| `ai/search/SearchPipeline.kt` | `metadataSearch` にファイル名逆引きの OR 条件、`MIN_FILENAME_MATCH_CHARS` 定数を追加 |
+
+### 理由
+
+- 日本語クエリは助詞で分割しないと意味のあるトークンが取り出せないが、形態素解析を Mini Brain に追加するのは依存・パフォーマンス・モデルファイル増の点でコストが高い
+- ファイル名逆引きは「ノートの命名は意味的に重要」というナレッジベース固有の構造を利用しており、形態素解析なしで日本語助詞の壁を回避できる
+- LLM 側（QueryExpander）にも固有名詞保持を明示することで、ファイル名逆引きが効かない概念的質問にも備える
+
+### トレードオフ
+
+- **誤マッチの可能性**: fileStem が 3 文字以上あっても、稀に偶然の substring 一致が起きる（例: `AWS.md` と質問「AWS の使い方」）。実害は metadataSearch スコア 0.6 で LlmReranker に渡されるだけなので、reranker が落としてくれることを期待
+- **LLM の指示追従性**: QueryExpander のルールを Gemma 4 E2B が守らないケースは依然あるが、D2 のファイル名逆引きがセーフティネットとして機能する
+- **メモリ全件スキャン**: `documentDao.getAllByTree` を毎回呼ぶのは ADR-016 から変わらず。数千件規模では問題なし
