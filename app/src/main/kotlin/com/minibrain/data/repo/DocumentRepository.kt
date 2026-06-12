@@ -2,6 +2,8 @@ package com.minibrain.data.repo
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
+import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.AppDatabase
 import com.minibrain.data.db.daos.ChunkDao
@@ -55,7 +57,10 @@ class DocumentRepository(
             _indexingState.value = IndexingState.Progress(index + 1, total, mdFile.name)
 
             val existing = documentDao.getByFileUri(mdFile.uri.toString())
-            if (existing != null && existing.contentHash == mdFile.contentHash) {
+            // チャンク 0 件は過去のインデックスで embed が全滅した痕跡なので、ハッシュ一致でも再処理する
+            if (existing != null && existing.contentHash == mdFile.contentHash &&
+                chunkDao.getByDoc(existing.id).isNotEmpty()
+            ) {
                 if (existing.headings == null || existing.documentDate == null) {
                     documentDao.update(
                         existing.copy(
@@ -100,13 +105,15 @@ class DocumentRepository(
             val rawChunks = MarkdownChunker.chunk(mdFile.content, mdFile.relativePath)
             val chunkEntities = rawChunks.mapNotNull { chunk ->
                 runCatching {
-                    val embedding = embedder.embed(chunk.text)
+                    val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
                     ChunkEntity(
                         docId = docId,
                         headingPath = chunk.headingPath,
                         text = chunk.text,
                         embedding = EmbedderService.floatArrayToBytes(embedding),
                     )
+                }.onFailure { e ->
+                    Log.e("DocumentRepository", "embed failed: ${mdFile.relativePath} / ${chunk.headingPath}", e)
                 }.getOrNull()
             }
 
@@ -146,7 +153,7 @@ class DocumentRepository(
             }
 
             runCatching {
-                val embedding = embedder.embed(folderText)
+                val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
                 folderEmbeddingDao.upsert(
                     FolderEmbeddingEntity(
                         path = folderPath,

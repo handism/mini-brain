@@ -5,6 +5,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.AgentTool
 import com.minibrain.ai.agent.ToolCall
 import com.minibrain.ai.agent.ToolResult
+import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
@@ -240,7 +241,7 @@ class ToolExecutor(
             }
         }
 
-        val vec = queryVecCache.getOrPut(tool.query) { embedderService.embed(tool.query) }
+        val vec = queryVecCache.getOrPut(tool.query) { embedderService.embed(tool.query, EmbedType.QUERY) }
         @Suppress("UNCHECKED_CAST")
         val topChunks = CosineSimilarity.topK(
             vec,
