@@ -37,9 +37,12 @@ class ModelDownloader(private val context: Context) {
 
     val llmModelFile: File get() = File(modelsDir, LLM_FILE_NAME)
     val embedderModelFile: File get() = File(modelsDir, EMBEDDER_FILE_NAME)
+    val tokenizerModelFile: File get() = File(modelsDir, TOKENIZER_FILE_NAME)
 
     fun isLlmReady(): Boolean = llmModelFile.exists() && llmModelFile.length() >= MIN_LLM_SIZE
     fun isEmbedderReady(): Boolean = embedderModelFile.exists() && embedderModelFile.length() >= MIN_EMBEDDER_SIZE
+    fun isTokenizerReady(): Boolean = tokenizerModelFile.exists() && tokenizerModelFile.length() >= MIN_TOKENIZER_SIZE
+    fun isAllReady(): Boolean = isLlmReady() && isEmbedderReady() && isTokenizerReady()
 
     fun downloadAll(): Flow<DownloadResult> = flow {
         try {
@@ -51,8 +54,27 @@ class ModelDownloader(private val context: Context) {
                         result is DownloadResult.Done -> {
                             val err = moveFile(tempFile, embedderModelFile)
                             if (err != null) {
-                                // move 失敗時は temp ファイルを削除して stuck 状態を防ぐ
                                 Log.e(TAG, "Failed to move embedder temp file: $err")
+                                tempFile.delete()
+                                emit(DownloadResult.Error(err))
+                                errorOccurred = true
+                            }
+                        }
+                        result is DownloadResult.Error -> { emit(result); errorOccurred = true }
+                        else -> emit(result)
+                    }
+                }
+                if (errorOccurred) return@flow
+            }
+            if (!isTokenizerReady()) {
+                val tempFile = File(modelsDir, "$TOKENIZER_FILE_NAME.download")
+                var errorOccurred = false
+                downloadFile(TOKENIZER_URL, tempFile, TOKENIZER_FILE_NAME).collect { result ->
+                    when {
+                        result is DownloadResult.Done -> {
+                            val err = moveFile(tempFile, tokenizerModelFile)
+                            if (err != null) {
+                                Log.e(TAG, "Failed to move tokenizer temp file: $err")
                                 tempFile.delete()
                                 emit(DownloadResult.Error(err))
                                 errorOccurred = true
@@ -72,7 +94,6 @@ class ModelDownloader(private val context: Context) {
                         result is DownloadResult.Done -> {
                             val err = moveFile(tempFile, llmModelFile)
                             if (err != null) {
-                                // move 失敗時は temp ファイルを削除して stuck 状態を防ぐ
                                 Log.e(TAG, "Failed to move LLM temp file: $err")
                                 tempFile.delete()
                                 emit(DownloadResult.Error(err))
@@ -85,10 +106,10 @@ class ModelDownloader(private val context: Context) {
                 }
                 if (errorOccurred) return@flow
             }
-            if (isLlmReady() && isEmbedderReady()) {
+            if (isAllReady()) {
                 emit(DownloadResult.Done(llmModelFile))
             } else {
-                val msg = "準備失敗: LLM=${llmModelFile.length()}/$MIN_LLM_SIZE, Embedder=${embedderModelFile.length()}/$MIN_EMBEDDER_SIZE"
+                val msg = "準備失敗: LLM=${llmModelFile.length()}/$MIN_LLM_SIZE, Embedder=${embedderModelFile.length()}/$MIN_EMBEDDER_SIZE, Tokenizer=${tokenizerModelFile.length()}/$MIN_TOKENIZER_SIZE"
                 emit(DownloadResult.Error("ダウンロードが完了しましたが、ファイルが準備できていません。($msg)"))
             }
         } catch (e: Exception) {
@@ -157,7 +178,7 @@ class ModelDownloader(private val context: Context) {
                     downloaded += bytes
                     emit(DownloadResult.Progress(DownloadProgress(label, downloaded, totalBytes)))
                 }
-                
+
                 if (totalBytes > 0 && downloaded < totalBytes) {
                     emit(DownloadResult.Error("中断されました: $downloaded / $totalBytes bytes"))
                     return@flow
@@ -170,18 +191,23 @@ class ModelDownloader(private val context: Context) {
     companion object {
         private const val TAG = "ModelDownloader"
         const val LLM_FILE_NAME = "gemma-4-E2B-it.litertlm"
-        const val EMBEDDER_FILE_NAME = "universal_sentence_encoder_multilingual.tflite"
+        const val EMBEDDER_FILE_NAME = "multilingual-e5-small-q.onnx"
+        const val TOKENIZER_FILE_NAME = "e5-tokenizer.json"
 
         // HuggingFace litert-community/gemma-4-E2B-it-litert-lm 配布 URL
-        // 実際の URL は HuggingFace ページで確認してください
         private const val LLM_URL =
             "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
 
-        // MediaPipe multilingual USE model
+        // Xenova/multilingual-e5-small INT8 量子化版 ONNX
         private const val EMBEDDER_URL =
-            "https://storage.googleapis.com/mediapipe-models/text_embedder/universal_sentence_encoder/float32/latest/universal_sentence_encoder.tflite"
+            "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/onnx/model_quantized.onnx"
+
+        // 同リポジトリの XLM-RoBERTa SentencePiece tokenizer (HuggingFace tokenizers.json 形式)
+        private const val TOKENIZER_URL =
+            "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/tokenizer.json"
 
         private const val MIN_LLM_SIZE = 2_000_000_000L    // 2GB (実際は約2.5GB)
-        private const val MIN_EMBEDDER_SIZE = 1_000_000L   // 1MB (ユーザーの環境で約6MBであることを確認)
+        private const val MIN_EMBEDDER_SIZE = 50_000_000L  // 50MB (実際は約118MB)
+        private const val MIN_TOKENIZER_SIZE = 1_000_000L  // 1MB (実際は約17MB)
     }
 }

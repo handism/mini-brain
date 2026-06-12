@@ -8,7 +8,8 @@ lifecycle = "2.9.0"
 room = "2.7.1"
 datastore = "1.1.2"
 documentfile = "1.1.0"
-mediapipe-tasks-text = "0.10.35"
+onnxruntime-android = "1.26.0"
+moshi = "1.15.2"
 coroutines = "1.9.0"
 okhttp = "4.12.0"
 core-ktx = "1.16.0"
@@ -34,7 +35,8 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 androidx-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splash" }
 google-litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version = "latest.release" }
-mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipe-tasks-text" }
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime-android" }
+moshi = { group = "com.squareup.moshi", name = "moshi", version.ref = "moshi" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

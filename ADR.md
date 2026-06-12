@@ -58,7 +58,7 @@ Gemma 4 E2B (`.litertlm` 形式、HuggingFace: `litert-community/gemma-4-E2B-it-
 ## ADR-003: Embedder に MediaPipe TextEmbedder + USE Multilingual を採用
 
 **日付:** 2026-06-08  
-**ステータス:** 採用
+**ステータス:** 廃止（ADR-020 に置き換え）
 
 ### 背景
 
@@ -780,3 +780,96 @@ val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
 - **誤マッチの可能性**: fileStem が 3 文字以上あっても、稀に偶然の substring 一致が起きる（例: `AWS.md` と質問「AWS の使い方」）。実害は metadataSearch スコア 0.6 で LlmReranker に渡されるだけなので、reranker が落としてくれることを期待
 - **LLM の指示追従性**: QueryExpander のルールを Gemma 4 E2B が守らないケースは依然あるが、D2 のファイル名逆引きがセーフティネットとして機能する
 - **メモリ全件スキャン**: `documentDao.getAllByTree` を毎回呼ぶのは ADR-016 から変わらず。数千件規模では問題なし
+
+---
+
+## ADR-020: Embedder を multilingual-e5-small + ONNX Runtime に置換
+
+**日付:** 2026-06-12  
+**ステータス:** 部分置き換え（ADR-003 を廃止・置き換え。tokenizer 部分は ADR-021 で置き換え）
+
+### 背景
+
+ADR-003 で採用した MediaPipe TextEmbedder + Universal Sentence Encoder Multilingual (USE) は次の問題があった:
+
+- 文脈理解が浅く、短いクエリ vs 長い文書のマッチング精度が不足
+- USE は MTEB / JMTEB 系ベンチで現代的な多言語埋め込みモデルに大きく劣る
+- MediaPipe の TextEmbedder API は USE 専用フォーマットに固定されており、他モデルへの差し替えが事実上不可能
+
+### 決定
+
+埋め込みモデルを `intfloat/multilingual-e5-small` の INT8 量子化 ONNX 版に切り替える。
+推論ランタイムは MediaPipe TextEmbedder から ONNX Runtime Mobile + HuggingFace Tokenizers (DJL) に置換する。
+
+### 候補との比較
+
+| 案 | 精度（日本語） | サイズ | Android 実装容易性 |
+|---|---|---|---|
+| Universal Sentence Encoder Multilingual（旧採用） | △ | 280 MB | ◎（MediaPipe TextEmbedder） |
+| multilingual-e5-small INT8（**採用**） | ○ | ~118 MB | ○（ONNX 既製版あり） |
+| Ruri-v3-30m | ◎（JMTEB トップ級） | ~150 MB | △（公式 ONNX/TFLite なし、自前変換必須） |
+
+### 理由
+
+- Xenova/multilingual-e5-small が INT8 量子化済み ONNX を配布しており、自前変換不要で導入できる
+- XLM-RoBERTa 基盤は ONNX Runtime での実績が豊富で運用リスクが低い
+- INT8 量子化版は USE より小さく、Gemma 4 E2B (~2.5 GB) と合算しても端末ストレージ圧迫が緩和される
+- `ai.djl.huggingface:tokenizers` + `ai.djl.android:tokenizer-native` の組み合わせで `tokenizer.json` を Android arm64-v8a 上で直接読める
+- E5 公式 1+1 prefix 規約（`query: ` / `passage: `）を `EmbedType` enum で API レベルに昇格させ、誤用しにくくする
+
+### 実装の要点
+
+- 埋め込み次元: 100 → 384（**既存 chunks/folder_embeddings は破棄必須**）
+- DB マイグレーション v5 → v6 で `chunks` / `chunks_fts` / `folder_embeddings` を空にし、`documents.contentHash` を改変して次回 `indexFolder()` 実行時に全文書を再 chunk + 再 embed
+- Pooling: attention_mask によるマスク平均 + L2 正規化（E5 公式仕様）
+- ダウンロード対象が 1 → 2 に増加（`model_quantized.onnx` + `tokenizer.json`）
+
+### トレードオフ
+
+- APK サイズ +約 25 MB（onnxruntime-android + djl tokenizer ネイティブ libs）
+- 既存ユーザーは v5→v6 マイグレーション後に Settings → 再インデックスを手動で実行する必要がある（SAF treeUri が必要なため起動時自動 indexing は不可）
+- LiteRT-LM と ONNX Runtime の native lib が共存するため、`packaging.pickFirsts += "**/*.so"` が引き続き必須
+- Ruri-v3-30m と比べると JMTEB スコアは劣るが、ONNX エコシステムの安定性を優先
+
+## ADR-021: 16KB ページサイズ対応 — DJL Tokenizer を純 Kotlin 実装に置換
+
+**日付:** 2026-06-13  
+**ステータス:** 採用（ADR-020 の tokenizer 部分を置き換え）
+
+### 背景
+
+ADR-020 の実機デバッグで「このアプリは16KBアライメントではありません。ELFのアライメントチェックに失敗しました。」が発生した（Android 16 / 16KB ページサイズ端末）。原因は新規追加した prebuilt ネイティブライブラリ 2 つの ELF LOAD セグメントが 4KB アライメントのままであること:
+
+1. `onnxruntime-android:1.20.0` の `libonnxruntime4j_jni.so`（microsoft/onnxruntime#24902、PR #24947 で修正済み → 1.23.0 以降で解決）
+2. `ai.djl.android:tokenizer-native:0.33.0` の `libdjl_tokenizer.so`（deepjavalibrary/djl#3815、**未解決**。しかも 0.33.0 が唯一のリリースでバージョンアップ不可能）
+
+APK の zip アライメントは AGP 8.5.1+ が自動処理するため、問題は prebuilt .so の ELF アライメントのみ。
+
+### 決定
+
+- `onnxruntime-android` を 1.26.0 にアップグレード（ELF 16KB アライメント済み）
+- DJL tokenizer（`ai.djl.huggingface:tokenizers` + `ai.djl.android:tokenizer-native`）を削除し、`tokenizer.json` を直接読む**純 Kotlin tokenizer** (`E5Tokenizer`) を自前実装
+
+### 候補との比較
+
+| 案 | 16KB 対応 | 工数 | 備考 |
+|---|---|---|---|
+| DJL のバージョンアップ | × | — | tokenizer-native は 0.33.0 が唯一のリリース |
+| `android:pageSizeCompat="enabled"` 互換モード | △ | 最小 | 4KB 互換モードで動作。根本解決ではない |
+| libdjl_tokenizer.so を自前リビルド | ○ | 大 | Rust + NDK ツールチェーンが必要 |
+| 純 Kotlin tokenizer 実装（**採用**） | ◎ | 中 | ネイティブ依存を完全排除。JVM ユニットテストも可能に |
+
+### 実装の要点
+
+XLM-RoBERTa tokenizer (SentencePiece Unigram) の HuggingFace `tokenizer.json` パイプラインを Kotlin で再現:
+
+- `PrecompiledCharsMap`: `precompiled_charsmap`（Darts double-array trie）による SentencePiece 正規化。HuggingFace `spm_precompiled` (Rust) の忠実移植。grapheme 単位処理は `java.text.BreakIterator`
+- `UnigramModel`: Viterbi によるサブワード分割。未知文字は `min_score - 10` ペナルティで `<unk>`（fuse_unk 対応）
+- `E5Tokenizer`: 正規化 → 連続スペース圧縮 → Metaspace（`▁` 置換 + prefix）→ セグメント毎 Viterbi → `<s>`/`</s>` 付与 + 512 トランケート
+- `tokenizer.json`（17MB）のロードは Moshi `JsonReader` でストリーミングパース（`org.json` 非依存のため JVM ユニットテスト互換）
+
+### トレードオフ
+
+- HF tokenizers (Rust) との完全一致は理論保証されない（ユニットテストで主要ケースの一致を検証）。トークン列の微差は embedding 類似度にほぼ影響しない
+- APK サイズ約 9MB 減（libdjl_tokenizer.so 削除）、Moshi（~250KB）追加
+- tokenizer ロード時間は DJL native と同等オーダー（17MB JSON のストリーミングパース）
