@@ -77,9 +77,21 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+// Embedder を USE Multilingual (100 dim) → multilingual-e5-small (384 dim) に乗り換えたため、
+// 既存の embedding は次元不整合で使えない。chunks と folder_embeddings を空にし、
+// documents.contentHash を改変することで次回 indexFolder() 時に全文書を再 chunk + 再 embed させる。
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DELETE FROM chunks")
+        db.execSQL("DELETE FROM chunks_fts")
+        db.execSQL("DELETE FROM folder_embeddings")
+        db.execSQL("UPDATE documents SET contentHash = '__REINDEX_REQUIRED_V6__'")
+    }
+}
+
 @Database(
     entities = [DocumentEntity::class, ChunkEntity::class, ChatSessionEntity::class, ChatMessageEntity::class, FolderEmbeddingEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -100,7 +112,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minibrain.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

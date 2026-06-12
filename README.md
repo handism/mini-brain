@@ -19,7 +19,7 @@
 - **Timeline Search** — 期間表現（去年の夏・2024年3月など）を DateRange に解釈し、期間指定でファイルを収集する `timeline_search` ツールを提供
 - **Folder Embedding** — フォルダ単位の仮想埋め込みを生成。ベクトル検索でフォルダ全体の意味をキャプチャ
 - **日付形式不問** — YYYY/MM/DD・YYYYMMDD・YYYY-MM-DD など命名規則が混在していても DB 側で吸収して一致ファイルの docId を解決
-- **ハイブリッド検索** — BM25（FTS4）+ ベクトル検索（USE Multilingual）を RRF でマージ
+- **ハイブリッド検索** — BM25（FTS4）+ ベクトル検索（multilingual-e5-small INT8 / 384 次元）を RRF でマージ
 - **Markdown 対応** — 見出し階層を解析してチャンク分割。引用元のファイル名と見出しパスを回答に表示
 - **ストリーミング回答** — LiteRT-LM のトークンストリームを Compose UI にリアルタイム描画
 - **差分インデックス** — SHA-256 ハッシュで変更ファイルだけ再インデックス
@@ -32,7 +32,7 @@
 | UI           | Jetpack Compose + Material 3              |
 | 最小 SDK     | API 31 (Android 12)                       |
 | LLM          | Gemma 4 E2B via LiteRT-LM                 |
-| Embedder     | MediaPipe TextEmbedder + USE Multilingual |
+| Embedder     | multilingual-e5-small (INT8 ONNX) via ONNX Runtime + 純 Kotlin tokenizer |
 | DB           | Room（FTS4 + ベクトル）                   |
 | 設定保存     | DataStore                                 |
 | ファイル選択 | Storage Access Framework                  |
@@ -67,7 +67,7 @@ gradle wrapper --gradle-version 9.5.1
 
 1. Wi-Fi に接続した状態でアプリを起動
 2. Onboarding 画面で「ダウンロード開始」をタップ
-3. モデルのダウンロードが完了するまで待機（LLM 約 2.5 GB + Embedder 約 280 MB）
+3. モデルのダウンロードが完了するまで待機（LLM 約 2.5 GB + Embedder 約 118 MB + Tokenizer 約 17 MB）
 4. ホーム画面で md ファイルが入ったフォルダを選択
 5. インデックス作成が完了したらチャット画面で質問
 
@@ -98,12 +98,12 @@ app/src/main/kotlin/com/minibrain/
 │   │   ├── LlmService.kt        # LiteRT-LM Engine ラッパー
 │   │   └── ModelDownloader.kt   # レジューム対応ダウンロード
 │   ├── embed/
-│   │   └── EmbedderService.kt   # MediaPipe TextEmbedder ラッパー
+│   │   └── EmbedderService.kt   # ONNX Runtime + multilingual-e5-small ラッパー（EmbedType で query/passage 切替）
 │   └── rag/
 │       ├── RagPipeline.kt       # RAG（RRF・Citation 型・SourceType 定義）
 │       └── CosineSimilarity.kt  # コサイン類似度（純 Kotlin）
 ├── data/
-│   ├── db/                      # Room スキーマ・DAO（v5: documents+folder_embeddings）
+│   ├── db/                      # Room スキーマ・DAO（v6: E5 Embedder への切替で chunks/folder_embeddings をリセット）
 │   ├── md/
 │   │   ├── MarkdownChunker.kt      # 見出しベースのチャンク分割
 │   │   ├── MarkdownMetaExtractor.kt # 見出し・本文・タグ抽出
@@ -182,12 +182,13 @@ finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECA
 
 ## モデル情報
 
-| モデル           | 用途             | サイズ    | ライセンス |
-| ---------------- | ---------------- | --------- | ---------- |
-| Gemma 4 E2B      | テキスト生成     | 約 2.5 GB | Apache 2.0 |
-| USE Multilingual | テキスト埋め込み | 約 280 MB | Apache 2.0 |
+| モデル                                | 用途             | サイズ    | ライセンス |
+| ------------------------------------- | ---------------- | --------- | ---------- |
+| Gemma 4 E2B                           | テキスト生成     | 約 2.5 GB | Apache 2.0 |
+| multilingual-e5-small (INT8 ONNX)     | テキスト埋め込み | 約 118 MB | MIT        |
+| XLM-RoBERTa SentencePiece (tokenizer) | トークナイズ     | 約 17 MB  | MIT        |
 
-モデルは初回起動時に `context.filesDir/models/` にダウンロードされる。アプリのアンインストール時に自動削除される。
+モデルは初回起動時に `context.filesDir/models/` にダウンロードされる（Xenova/multilingual-e5-small から取得）。アプリのアンインストール時に自動削除される。
 
 ## プライバシー
 

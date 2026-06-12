@@ -44,25 +44,37 @@ Mini Brain は Android 12+ 向けのオンデバイス エージェント型 RAG
   <uses-native-library android:name="libOpenCL.so" android:required="false"/>
   ```
 
-### MediaPipe TextEmbedder（Embedder）
+### ONNX Runtime + multilingual-e5-small（Embedder）
 
-- 依存: `com.google.mediapipe:tasks-text`（こちらは現役）
-- モデル: Universal Sentence Encoder Multilingual（日本語対応）
+- 依存:
+  - `com.microsoft.onnxruntime:onnxruntime-android`（推論ランタイム）
+  - `ai.djl.huggingface:tokenizers` + `ai.djl.android:tokenizer-native`（XLM-RoBERTa SentencePiece、Android arm64-v8a 用 `libdjl_tokenizer.so` を AAR で同梱）
+- モデル: `Xenova/multilingual-e5-small` INT8 量子化版（`model_quantized.onnx` 約 118MB + `tokenizer.json` 約 17MB）
+- 埋め込み次元: **384**（USE は 100 だった）
+- 最大トークン長: 512
+- **Prefix 必須**: クエリは `query: `, 文書は `passage: ` を付ける。`EmbedType` enum (`QUERY` / `PASSAGE`) を `embed()` の引数で渡す（誤用防止のため API レベルに昇格）
 - API:
   ```kotlin
-  val result = textEmbedder.embed(text)
-  val floatList = result.embeddingResult().embeddings().first().floatEmbedding()
+  // 文書（インデックス時）
+  val vec = embedderService.embed(chunk.text, EmbedType.PASSAGE)
+  // クエリ（検索時）
+  val vec = embedderService.embed(question, EmbedType.QUERY)
   ```
+- 内部処理: tokenize → ONNX run (`input_ids` + `attention_mask`) → `last_hidden_state[1, seq, 384]` → **attention_mask で重み平均 pooling** → **L2 正規化**
+- `EmbedderService` は `Mutex` でシリアライズ済み（並列推論非推奨）
+- 初期化はバックグラウンドスレッド（`Dispatchers.Default`）で行う
+- MediaPipe `tasks-text` は依存から削除済み
 
 ### Room DB
 
 - `FloatArray`（ベクトル）は `ByteArray` として保存
 - 変換: `EmbedderService.floatArrayToBytes()` / `bytesToFloatArray()`
 - コサイン類似度は全件メモリロードで計算（個人用途 = 数千チャンク以下を想定）
-- DB バージョン: 5
+- DB バージョン: 6
   - v2→v3: `documents` テーブルに `headings`, `first_para`, `tags` カラムを追加
   - v3→v4: `documents` テーブルに `documentDate` カラムを追加（Recentness Ranking 用）
   - v4→v5: `folder_embeddings` テーブルを追加（Folder Embedding 用）
+  - v5→v6: Embedder を E5 (384 次元) に乗り換えたため `chunks` / `chunks_fts` / `folder_embeddings` を空にし、`documents.contentHash` を `__REINDEX_REQUIRED_V6__` に置換（次回 `indexFolder()` 実行時に全文書を再 chunk + 再 embed）。**既存ユーザーは Settings → 再インデックスを実行する必要あり**
 
 ### Storage Access Framework (SAF)
 
@@ -129,8 +141,9 @@ UI (Compose) → ViewModel → AgentPipeline → SearchPipeline → (QueryExpand
 ## モデルファイルのパス
 
 ```
-context.filesDir/models/gemma-4-E2B-it.litertlm      # LLM（約 2.5 GB）
-context.filesDir/models/universal_sentence_encoder_multilingual.tflite  # Embedder（約 280 MB）
+context.filesDir/models/gemma-4-E2B-it.litertlm          # LLM（約 2.5 GB）
+context.filesDir/models/multilingual-e5-small-q.onnx    # Embedder（INT8 量子化、約 118 MB）
+context.filesDir/models/e5-tokenizer.json               # XLM-RoBERTa SentencePiece tokenizer（約 17 MB）
 ```
 
 モデルは `ModelDownloader` が Range リクエスト対応でダウンロードし、レジュームをサポートする。

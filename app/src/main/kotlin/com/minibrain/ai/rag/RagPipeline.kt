@@ -2,6 +2,7 @@ package com.minibrain.ai.rag
 
 import android.util.Log
 import androidx.sqlite.db.SimpleSQLiteQuery
+import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.data.db.daos.ChunkDao
@@ -127,7 +128,7 @@ class RagPipeline(
 
     private suspend fun vectorSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, ChunkEntity>> =
         withContext(Dispatchers.Default) {
-            val queryVec = embedderService.embed(question)
+            val queryVec = embedderService.embed(question, EmbedType.QUERY)
             val chunks = if (treeUri != null) {
                 chunkDao.getAllByTree(treeUri)
             } else {
@@ -143,7 +144,7 @@ class RagPipeline(
 
     private suspend fun folderSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =
         withContext(Dispatchers.Default) {
-            val queryVec = embedderService.embed(question)
+            val queryVec = embedderService.embed(question, EmbedType.QUERY)
             val folders = withContext(Dispatchers.IO) {
                 if (treeUri != null) folderEmbeddingDao.getAllByTree(treeUri)
                 else emptyList()

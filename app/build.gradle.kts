@@ -77,10 +77,13 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.documentfile)
     implementation(libs.google.litertlm.android)
-    implementation(libs.mediapipe.tasks.text)
+    implementation(libs.onnxruntime.android)
+    implementation(libs.moshi)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    // E5Tokenizer parity テスト用の参照実装（JVM のみ、APK には含まれない）
+    testImplementation("ai.djl.huggingface:tokenizers:0.33.0")
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
