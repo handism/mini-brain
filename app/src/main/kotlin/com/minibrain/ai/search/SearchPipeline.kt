@@ -14,14 +14,15 @@ import com.minibrain.ai.agent.RerankEvent
 import com.minibrain.ai.agent.VectorSearchHitEvent
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.rag.SourceType
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.search.NGramTokenizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withContext
 
 data class SearchPipelineResult(
     val citations: List<Citation>,
@@ -59,7 +60,11 @@ class SearchPipeline(
         treeUri: String,
         onStatus: (String) -> Unit = {},
         dateRange: DateRange? = DateResolver.resolveDateRange(query),
+        cache: SearchRequestCache? = null,
     ): SearchPipelineResult {
+        // cache が渡されなかった場合（EvalRunner や単独呼び出し）はリクエスト内でだけ使う
+        // ローカルキャッシュを作る。AgentPipeline 経由なら ReAct 後段でも共有される。
+        val ctx = cache ?: SearchRequestCache(treeUri, chunkDao, documentDao)
         val traceEvents = mutableListOf<AgentTraceEvent>()
 
         // 1. Query Expansion (LLM 呼び出し — 単一スレッドのため逐次)
@@ -87,13 +92,13 @@ class SearchPipeline(
             // 日付範囲検索（DateResolver 経由）+ メタデータ検索を合算
             // 日付ヒットを rank 先頭に置き、RRF 融合で優先されるようにする
             val metaJob = async(Dispatchers.IO) {
-                dateRangeSearch(query, treeUri, dateRange) + metadataSearch(expanded, treeUri)
+                dateRangeSearch(query, treeUri, dateRange, ctx) + metadataSearch(expanded, ctx)
             }
             // ベクトル検索: 展開クエリ全件 + （任意）HyDE 仮想回答を投入し、Recall を底上げする。
             // EmbedderService は Mutex で直列化されるため、ここを async にしても並列実行はされないが、
             // 他ジョブ（BM25 / metadata）とは並列に走る。低スコアの候補は閾値カットで除外する。
             val vectorJob = async(Dispatchers.IO) {
-                multiVectorSearch(query, expanded, hypothetical, treeUri)
+                multiVectorSearch(query, expanded, hypothetical, treeUri, ctx)
             }
             Triple(bm25Job.await(), metaJob.await(), vectorJob.await())
         }
@@ -148,8 +153,8 @@ class SearchPipeline(
         }
     }
 
-    private suspend fun metadataSearch(queries: List<String>, treeUri: String): List<Citation> {
-        val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
+    private suspend fun metadataSearch(queries: List<String>, ctx: SearchRequestCache): List<Citation> {
+        val allDocs = ctx.documents()
         val tokens = queries.flatMap { q ->
             q.split(Regex("[\\s　、。・]+")).filter { it.length >= 2 }
         }.distinct()
@@ -187,42 +192,49 @@ class SearchPipeline(
         append(firstParagraph ?: "")
     }
 
-    private suspend fun vectorSearch(query: String, treeUri: String, k: Int = VECTOR_LIMIT): List<Citation> =
+    private suspend fun vectorSearch(
+        query: String,
+        treeUri: String,
+        k: Int = VECTOR_LIMIT,
+        ctx: SearchRequestCache,
+    ): List<Citation> =
         runCatching {
-            ragPipeline.vectorOnlyTopK(query, treeUri, k = k)
+            ragPipeline.vectorOnlyTopK(query, treeUri, k = k, cache = ctx)
                 .filter { it.score >= VECTOR_MIN_SCORE }
         }.getOrElse { e ->
             Log.w(TAG, "Vector search failed: ${e.message}")
             emptyList()
         }
 
-    // 元クエリ + 展開クエリ + HyDE 仮想回答でベクトル検索を実行し、重複排除した上で
-    // RRF rank として扱える順序リストを返す。
-    // - 元クエリの top 結果を優先するため最初に並べる
-    // - 続いて展開クエリ・HyDE 結果を順に並べ、(docId, headingPath) 重複は除外
+    // 元クエリ + 展開クエリ + HyDE 仮想回答でベクトル検索を実行する。
+    // R4: 同一テキストへの embed を防ぐため、まず正規化 + distinct でユニークなクエリ集合を作る。
+    // 主クエリ（先頭）を VECTOR_LIMIT、それ以降を VECTOR_LIMIT_PER_EXPANDED の枠で検索し、
+    // (docId, headingPath) で重複排除する。
     private suspend fun multiVectorSearch(
         originalQuery: String,
         expanded: List<String>,
         hypothetical: String?,
         treeUri: String,
+        ctx: SearchRequestCache,
     ): List<Citation> {
+        val ordered = LinkedHashSet<String>()
+        fun addIfValid(s: String?) {
+            if (s.isNullOrBlank()) return
+            val normalized = s.trim().replace(Regex("\\s+"), " ")
+            if (normalized.isNotEmpty()) ordered.add(normalized)
+        }
+        addIfValid(originalQuery)
+        expanded.forEach(::addIfValid)
+        addIfValid(hypothetical)
+
         val seen = HashSet<String>()
         val out = mutableListOf<Citation>()
-
-        suspend fun push(q: String, k: Int) {
-            vectorSearch(q, treeUri, k = k).forEach { c ->
+        ordered.forEachIndexed { idx, q ->
+            val k = if (idx == 0) VECTOR_LIMIT else VECTOR_LIMIT_PER_EXPANDED
+            vectorSearch(q, treeUri, k = k, ctx = ctx).forEach { c ->
                 val key = "${c.docId}::${c.headingPath}"
                 if (seen.add(key)) out += c
             }
-        }
-
-        push(originalQuery, VECTOR_LIMIT)
-        // 元クエリは expanded[0] に含まれる想定だが、重複の場合は seen で弾かれる
-        expanded.filter { it != originalQuery }.forEach { q ->
-            push(q, VECTOR_LIMIT_PER_EXPANDED)
-        }
-        if (!hypothetical.isNullOrBlank()) {
-            push(hypothetical, VECTOR_LIMIT_PER_EXPANDED)
         }
         return out
     }
@@ -230,12 +242,16 @@ class SearchPipeline(
     // 日付/期間クエリを DB の documentDate 範囲検索に変換する。
     // metadataSearch のトークン一致では "2021年3月" → "2021-03-15" が突合できないため専用で持つ。
     // dateRange は AgentPipeline で一度だけ解決された値を受け取る（二重解決を避ける）
-    private suspend fun dateRangeSearch(query: String, treeUri: String, dateRange: DateRange?): List<Citation> {
+    private suspend fun dateRangeSearch(
+        query: String,
+        treeUri: String,
+        dateRange: DateRange?,
+        ctx: SearchRequestCache,
+    ): List<Citation> {
         // 期間クエリ（去年の夏・5年前の3月 など）→ getByDateRange で一括取得
+        // documents() がキャッシュ済みなら DB を叩かずに同等のフィルタを実行する
         if (dateRange != null) {
-            val docs = withContext(Dispatchers.IO) {
-                documentDao.getByDateRange(treeUri, dateRange.start.toString(), dateRange.end.toString())
-            }
+            val docs = filterDocsByDateRange(ctx, dateRange)
             Log.d(TAG, "dateRangeSearch range=${dateRange.start}〜${dateRange.end} hits=${docs.size}")
             return docs.map { doc ->
                 Citation(
@@ -252,7 +268,7 @@ class SearchPipeline(
         if (DateResolver.isDiaryQuery(query)) {
             val dateStrings = DateResolver.resolveToDateStrings(query)
             if (dateStrings.isNotEmpty()) {
-                val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
+                val allDocs = ctx.documents()
                 val matched = allDocs.filter { doc ->
                     val docDate = doc.documentDate ?: return@filter false
                     val docDigits = docDate.replace("-", "")
@@ -278,6 +294,21 @@ class SearchPipeline(
         return emptyList()
     }
 
+    // documentDate は ISO 文字列(YYYY-MM-DD)で保存されており辞書順 = 時系列順なので
+    // 文字列比較で安全に範囲フィルタできる。元の SQL `WHERE documentDate >= ? AND ... <= ?` 相当。
+    private suspend fun filterDocsByDateRange(
+        ctx: SearchRequestCache,
+        range: DateRange,
+    ): List<DocumentEntity> {
+        val start = range.start.toString()
+        val end = range.end.toString()
+        return ctx.documents()
+            .filter { doc ->
+                val d = doc.documentDate ?: return@filter false
+                d >= start && d <= end
+            }
+            .sortedBy { it.documentDate }
+    }
 }
 
 // ソース別 rank リストを RRF（Reciprocal Rank Fusion）で融合する。

@@ -209,7 +209,8 @@ context.filesDir/models/e5-tokenizer.json               # XLM-RoBERTa SentencePi
 - `QueryClassifier` の `GENERAL_KNOWLEDGE_PATTERNS` に `について教えて` は含まない（個人ノートでも多用されるため MEMORY_SEARCH に倒す）
 - `QueryExpander` のプロンプトには「固有名詞を助詞・疑問詞を取り除いた単独名詞として 1 件以上含める」必須ルールを書いておく（日本語助詞でトークン化されない問題への対策）
 - `SearchPipeline.metadataSearch` はトークン一致と「fileName(拡張子除く) を query が substring として含む」逆引きの OR で候補抽出する（日本語形態素解析を使わずに固有名詞ファイルを拾う）
-- `SearchPipeline.multiVectorSearch` は Embedder の Mutex により実質直列で走る（並列ではない）。サブクエリ N 件 ≒ 30ms × N の追加コスト
+- `SearchPipeline.multiVectorSearch` は Embedder の Mutex により実質直列で走る（並列ではない）。サブクエリ N 件 ≒ 30ms × N の追加コスト。embed 前に元クエリ + 展開クエリ + HyDE を正規化 + distinct してから embed する（同一テキストへの重複 embed を排除）
+- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `buildPlannerHint` に注入する。これにより同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する（ADR-024）。リクエスト終了で破棄するため書き込みとの整合性は不要
 - `SearchPipeline.VECTOR_MIN_SCORE = 0.45f` 未満のベクトル候補は Reranker に渡る前に捨てる。閾値は評価セット (`EvalRunner`) で調整する
 - `mergeCandidatesRrf(weights=...)` の重みは [meta=1.5, vector=1.0, bm25=1.2]。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新する
 - `HyDE` は LiteRT-LM 単一スレッド制約のため `QueryExpander` の直後に逐次実行する（並列不可）。失敗・タイムアウトは null フォールバック

@@ -953,3 +953,42 @@ ADR-022 で RRF rank 融合に切り替え、SearchPipeline の基本骨格は�
 - LLM 呼び出しが 1 件増える（QueryExpander → HyDE → Reranker → CoverageCheck）。タイムアウトでフォールバック保証
 - インデックスサイズが OVERLAP 増 + SECTION_TAIL_CARRY で約 10〜15% 増（個人ノートのスケールでは無視可）
 - 重み・閾値の定数は実評価セットで調整する想定。EvalRunner を使ったオフライン計測がチューニング基盤
+
+## ADR-024: リクエストスコープの SearchRequestCache 導入（Recall/Precision 無影響な処理効率化）
+
+ステータス: 採用
+
+### 背景
+
+`SearchPipeline → RagPipeline` 経路で同一リクエスト内に大きな重複ロード/デコードが残っていた。
+
+- `RagPipeline.vectorSearch` が呼ばれるたびに `chunkDao.getAllByTree(treeUri)` と各チャンクの `bytesToFloatArray()` を再実行する
+- `multiVectorSearch` は 元クエリ + 展開クエリ(最大 7) + HyDE(1) で `vectorSearch` を最大 9 回呼ぶ
+- `documentDao.getAllByTree(treeUri)` も `SearchPipeline.metadataSearch` / `SearchPipeline.dateRangeSearch` / `AgentPipeline.buildPlannerHint` で重複してロードされる
+- `multiVectorSearch` の embed 前重複排除がなく、同一文字列に対する embed が走り得る（EmbedderService は Mutex 直列）
+
+スコアや候補集合に影響を与えずに削れる純粋な計算重複であり、Recall/Precision を一切落とさずに時間短縮できる。
+
+### 決定
+
+1. **リクエストスコープのキャッシュ層 `SearchRequestCache` を新設**（`ai/rag/SearchRequestCache.kt`）
+   - `treeUri` をキーに `documents()`, `chunkVectors()`（chunks と decode 済み `Array<FloatArray>` のペア）を lazy + Mutex 付きで提供
+   - `cosineTopK(queryVec, k)` を提供して、`CosineSimilarity` をキャッシュ済みベクトルに対して一度に走らせる
+   - スコープは 1 リクエスト分のみ。`AgentPipeline.run` の冒頭で生成し、`SearchPipeline.search`、`RagPipeline.retrieveTopChunks` / `vectorOnlyTopK`、`buildPlannerHint` に注入する
+2. **`multiVectorSearch` の embed 前重複排除**
+   - 元クエリ + 展開クエリ + HyDE 仮想回答を **正規化（trim + 空白圧縮）→ LinkedHashSet で distinct** してから順に embed する
+   - 主クエリ枠 `VECTOR_LIMIT` / それ以外 `VECTOR_LIMIT_PER_EXPANDED` の K 値割り当ては従来通り
+3. **`RagPipeline` のシグネチャに `cache: SearchRequestCache?` を追加**（デフォルト null）
+   - cache != null かつ `cache.treeUri == treeUri` のときだけキャッシュ経路を使う
+   - EvalRunner や単独テストなど cache を渡さない呼び出しは従来パスで動作（後方互換）
+4. **`SearchPipeline.search` も `cache` を受け取る**。null の場合はリクエスト内で自前生成し、少なくとも 1 リクエスト内の重複排除は保証する
+
+### 影響
+
+- 6000 チャンク・600 ドキュメントの想定で `bytesToFloatArray` × 約 54000 回 → 6000 回、`chunkDao.getAllByTree` × 9 → 1、`documentDao.getAllByTree` × 3〜4 → 1 に圧縮
+- スコアリングは「同じ FloatArray に対する同じ CosineSimilarity」となり完全に bit-equal。Recall/Precision は維持
+
+### 既知の未解決領域（別 ADR 候補）
+
+- ReAct ループの `ToolExecutor` は依然として独自に `cachedDocs` / `queryVecCache` を持つ。SearchRequestCache を共有すれば SearchPipeline 経由の結果を再利用できるが、ロジック変更幅が大きく別 PR で扱う（R3 領域）
+- `DocumentEntity` への `@Index(["treeUri", "documentDate"])` 追加（R5 領域）も別 PR。マイグレーションが伴うため独立させる
