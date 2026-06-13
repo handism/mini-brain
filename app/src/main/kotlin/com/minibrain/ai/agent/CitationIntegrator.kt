@@ -2,6 +2,7 @@ package com.minibrain.ai.agent
 
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.SourceType
+import com.minibrain.ai.rag.dedupeKey
 
 object CitationIntegrator {
 
@@ -28,7 +29,7 @@ object CitationIntegrator {
 
         results.forEach { result ->
             result.citations.forEach { citation ->
-                val key = "${citation.docId}::${citation.headingPath}"
+                val key = citation.dedupeKey
                 val existing = seen[key]
                 if (existing == null || priorityOf(citation.source) < priorityOf(existing.source)) {
                     seen[key] = citation

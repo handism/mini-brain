@@ -44,7 +44,7 @@ class MiniBrainApp : Application() {
     }
 
     val ragPipeline: RagPipeline by lazy {
-        RagPipeline(embedderService, llmService, database.chunkDao(), database.documentDao(), database.folderEmbeddingDao())
+        RagPipeline(embedderService, database.chunkDao(), database.documentDao(), database.folderEmbeddingDao())
     }
 
     val queryExpander: QueryExpander by lazy { QueryExpander(llmService) }
