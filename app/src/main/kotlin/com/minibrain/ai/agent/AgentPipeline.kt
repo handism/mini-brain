@@ -6,6 +6,7 @@ import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
@@ -42,10 +43,15 @@ class AgentPipeline(
             return@withContext AgentResult(emptyList(), llmService.generateStream(buildDirectAnswerPrompt(question, recentHistory)))
         }
 
+        // 1 リクエスト分の DB ロードと FloatArray デコードを memoize する。
+        // SearchPipeline / RagPipeline / buildPlannerHint で共有することで、
+        // 同じ treeUri に対する chunks/documents の重複ロードを完全に排除する（ADR-024）。
+        val cache = SearchRequestCache(treeUri, chunkDao, documentDao)
+
         val traceEvents = mutableListOf<AgentTraceEvent>()
 
         // --- Search First ---
-        val searchResult = searchPipeline.search(question, treeUri, onStatus, dateRange)
+        val searchResult = searchPipeline.search(question, treeUri, onStatus, dateRange, cache)
         traceEvents += searchResult.traceEvents
         var citations: List<Citation> = searchResult.citations
         Log.d(TAG, "SearchPipeline returned ${citations.size} citations")
@@ -69,14 +75,14 @@ class AgentPipeline(
         // ReAct ループはフォールバック専用 (SearchPipeline が空 or CoverageCheck 失敗の場合)
         if (citations.isEmpty()) {
             Log.d(TAG, "falling back to ReAct loop (explorerHint=$explorerHint)")
-            citations = runReActLoop(question, treeUri, traceEvents, onStatus, explorerHint, dateRange)
+            citations = runReActLoop(question, treeUri, traceEvents, onStatus, explorerHint, dateRange, cache)
         }
 
         // 最終セーフティネット: RRF 強制実行
         if (citations.isEmpty()) {
             Log.d(TAG, "citations still empty — forced RRF fallback")
             onStatus("フォールバック検索中...")
-            citations = ragPipeline.retrieveTopChunks(question, treeUri)
+            citations = ragPipeline.retrieveTopChunks(question, treeUri, cache = cache)
             traceEvents += ToolCallEvent(MAX_ITERATIONS + 1, "rrf_search", "\"$question\"")
             traceEvents += ObservationEvent(MAX_ITERATIONS + 1, "${citations.size} citations returned (safety fallback)")
         }
@@ -108,9 +114,10 @@ class AgentPipeline(
         onStatus: (String) -> Unit,
         explorerHint: String? = null,
         dateRange: DateRange? = null,
+        cache: SearchRequestCache,
     ): List<Citation> {
         val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri, llmService)
-        val baseHint = buildPlannerHint(question, treeUri, dateRange)
+        val baseHint = buildPlannerHint(question, dateRange, cache)
         val plannerHint = when {
             explorerHint != null && baseHint != null -> "$explorerHint / $baseHint"
             explorerHint != null -> explorerHint
@@ -151,7 +158,7 @@ class AgentPipeline(
                     if (consecutiveParseErrors >= 2) {
                         Log.d(TAG, "2 consecutive parse errors — RRF fallback")
                         onStatus("フォールバック検索中...")
-                        val fallbackCitations = ragPipeline.retrieveTopChunks(question, treeUri)
+                        val fallbackCitations = ragPipeline.retrieveTopChunks(question, treeUri, cache = cache)
                         val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(question))
                         toolResults += ToolResult(fallbackCall, "fallback", fallbackCitations)
                         traceEvents += ToolCallEvent(iteration, "rrf_search", "\"$question\"")
@@ -177,9 +184,13 @@ class AgentPipeline(
         return CitationIntegrator.integrate(toolResults)
     }
 
-    private suspend fun buildPlannerHint(question: String, treeUri: String, dateRange: DateRange?): String? {
+    private suspend fun buildPlannerHint(
+        question: String,
+        dateRange: DateRange?,
+        cache: SearchRequestCache,
+    ): String? {
         val parts = mutableListOf<String>()
-        val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
+        val allDocs = cache.documents()
 
         // 期間クエリ: resolveDateRange が成功していたら timeline_search を推奨
         if (dateRange != null) {

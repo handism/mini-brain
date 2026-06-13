@@ -39,10 +39,15 @@ class RagPipeline(
     private val documentDao: DocumentDao,
     private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
-    suspend fun retrieveTopChunks(question: String, treeUri: String? = null, topK: Int = 20): List<Citation> =
+    suspend fun retrieveTopChunks(
+        question: String,
+        treeUri: String? = null,
+        topK: Int = 20,
+        cache: SearchRequestCache? = null,
+    ): List<Citation> =
         coroutineScope {
             val vecJob = async {
-                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k = 50) }
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k = 50, cache) }
                     ?: run { Log.w("RagPipeline", "vectorSearch timed out"); emptyList() }
             }
             val bm25Job = async {
@@ -61,15 +66,19 @@ class RagPipeline(
             Log.d("RagPipeline", "vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
 
             val allDocIds = (vecResults.map { it.second.docId } + bm25Results.map { it.docId }).distinct()
-            val docIdToDate: Map<Long, LocalDate?> = withContext(Dispatchers.IO) {
-                documentDao.getDocDatesByIds(allDocIds)
-            }.associate { row ->
-                row.id to row.documentDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            val docIdToDate: Map<Long, LocalDate?> = if (cache != null) {
+                cache.documents().associate { doc ->
+                    doc.id to doc.documentDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                }
+            } else {
+                withContext(Dispatchers.IO) {
+                    documentDao.getDocDatesByIds(allDocIds)
+                }.associate { row ->
+                    row.id to row.documentDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                }
             }
 
-            val docCache = mutableMapOf<Long, String?>()
-            suspend fun relativePath(docId: Long): String? =
-                docCache.getOrPut(docId) { documentDao.getById(docId)?.relativePath }
+            val docPathMap = resolveDocPaths(allDocIds, cache)
 
             val chunkCitations = rrf(bm25Results, vecResults.map { it.second }, topK, docIdToDate = docIdToDate)
                 .map { (score, chunk) ->
@@ -79,7 +88,7 @@ class RagPipeline(
                         snippet = chunk.text,
                         score = score,
                         docId = chunk.docId,
-                        relativePath = relativePath(chunk.docId),
+                        relativePath = docPathMap[chunk.docId],
                         source = SourceType.RRF,
                     )
                 }
@@ -108,27 +117,39 @@ class RagPipeline(
     }
 
     // ベクトル検索のみで Citation 化（SearchPipeline の Parallel Retrieval から呼ぶ）
-    suspend fun vectorOnlyTopK(question: String, treeUri: String, k: Int = 20): List<Citation> {
-        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k) }
+    suspend fun vectorOnlyTopK(
+        question: String,
+        treeUri: String,
+        k: Int = 20,
+        cache: SearchRequestCache? = null,
+    ): List<Citation> {
+        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k, cache) }
             ?: run { Log.w("RagPipeline", "vectorOnlyTopK timed out"); return emptyList() }
-        val docCache = mutableMapOf<Long, String?>()
-        suspend fun relativePath(docId: Long): String? =
-            docCache.getOrPut(docId) { documentDao.getById(docId)?.relativePath }
+        val docPathMap = resolveDocPaths(hits.map { it.second.docId }, cache)
         return hits.map { (score, chunk) ->
             Citation(
                 headingPath = chunk.headingPath,
                 snippet = chunk.text,
                 score = score,
                 docId = chunk.docId,
-                relativePath = relativePath(chunk.docId),
+                relativePath = docPathMap[chunk.docId],
                 source = SourceType.VECTOR,
             )
         }
     }
 
-    private suspend fun vectorSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, ChunkEntity>> =
+    private suspend fun vectorSearch(
+        question: String,
+        treeUri: String?,
+        k: Int,
+        cache: SearchRequestCache? = null,
+    ): List<Pair<Float, ChunkEntity>> =
         withContext(Dispatchers.Default) {
             val queryVec = embedderService.embed(question, EmbedType.QUERY)
+            // 同一 treeUri のキャッシュがあればロード+デコード済みベクトルを再利用する
+            if (cache != null && treeUri != null && cache.treeUri == treeUri) {
+                return@withContext cache.cosineTopK(queryVec, k)
+            }
             val chunks = if (treeUri != null) {
                 chunkDao.getAllByTree(treeUri)
             } else {
@@ -141,6 +162,21 @@ class RagPipeline(
             CosineSimilarity.topK(queryVec, candidates as List<Pair<FloatArray, Any>>, k)
                 .map { (score, meta) -> Pair(score, meta as ChunkEntity) }
         }
+
+    private suspend fun resolveDocPaths(
+        docIds: List<Long>,
+        cache: SearchRequestCache?,
+    ): Map<Long, String?> {
+        if (cache != null) {
+            val byId = cache.documents().associateBy { it.id }
+            return docIds.distinct().associateWith { byId[it]?.relativePath }
+        }
+        val out = mutableMapOf<Long, String?>()
+        for (id in docIds.distinct()) {
+            out[id] = documentDao.getById(id)?.relativePath
+        }
+        return out
+    }
 
     private suspend fun folderSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =
         withContext(Dispatchers.Default) {
