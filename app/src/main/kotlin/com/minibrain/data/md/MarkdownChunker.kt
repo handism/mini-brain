@@ -8,20 +8,33 @@ data class Chunk(
 object MarkdownChunker {
 
     private const val MAX_CHUNK_CHARS = 800
-    private const val OVERLAP_CHARS = 50
+    // OVERLAP_CHARS: 隣接チャンクで重複させる文字数。境界での文脈断絶（先行する代名詞・主語の欠落）を
+    // 緩和し、Recall を底上げするためのトレードオフ。大きくするとインデックスサイズが増える。
+    // 旧 50 → 120。日本語の 1〜2 文程度が収まる長さ。
+    private const val OVERLAP_CHARS = 120
+    // セクション境界（見出し直前）に直前セクション末尾の文脈を付け足す。0 で無効。
+    private const val SECTION_TAIL_CARRY = 80
     private val HEADING_REGEX = Regex("^(#{1,6})\\s+(.+)$", RegexOption.MULTILINE)
 
     fun chunk(markdown: String, fileName: String): List<Chunk> {
         if (markdown.isBlank()) return emptyList()
 
         val sections = splitBySections(markdown, fileName)
-        return sections.flatMap { (headingPath, body) ->
-            if (body.length <= MAX_CHUNK_CHARS) {
-                listOf(Chunk(headingPath, body.trim()))
+        val raw = sections.flatMapIndexed { idx, pair ->
+            val (headingPath, body) = pair
+            // 直前セクションの末尾を tail として付け足し、見出しまたぎの文脈断絶を緩和する。
+            val tail = if (SECTION_TAIL_CARRY > 0 && idx > 0) {
+                val prevBody = sections[idx - 1].second
+                prevBody.takeLast(SECTION_TAIL_CARRY).trim()
+            } else ""
+            val carried = if (tail.isNotEmpty()) "$tail\n\n$body" else body
+            if (carried.length <= MAX_CHUNK_CHARS) {
+                listOf(Chunk(headingPath, carried.trim()))
             } else {
-                splitLongSection(headingPath, body)
+                splitLongSection(headingPath, carried)
             }
-        }.filter { it.text.isNotBlank() }
+        }
+        return raw.filter { it.text.isNotBlank() }
     }
 
     private fun splitBySections(markdown: String, fileName: String): List<Pair<String, String>> {

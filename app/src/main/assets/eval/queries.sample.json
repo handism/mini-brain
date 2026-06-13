@@ -1,0 +1,17 @@
+[
+  {
+    "id": "sample-1",
+    "query": "TOKIUMについて教えて",
+    "expected": ["companies/TOKIUM.md"]
+  },
+  {
+    "id": "sample-2",
+    "query": "サウナしきじにいつ行ったっけ？",
+    "expected": ["sauna/サウナしきじ.md"]
+  },
+  {
+    "id": "sample-3",
+    "query": "5年前の3月何してた？",
+    "expected": ["journal/2021-03.md"]
+  }
+]

@@ -69,6 +69,7 @@ import com.minibrain.ai.agent.MetadataSearchHitEvent
 import com.minibrain.ai.agent.VectorSearchHitEvent
 import com.minibrain.ai.agent.ObservationEvent
 import com.minibrain.ai.agent.PlannerDecisionEvent
+import com.minibrain.ai.agent.HyDeGeneratedEvent
 import com.minibrain.ai.agent.QueryExpansionEvent
 import com.minibrain.ai.agent.CoverageCheckEvent
 import com.minibrain.ai.agent.ExplorerStrategyEvent
@@ -418,6 +419,18 @@ private fun AgentTraceSection(events: List<com.minibrain.ai.agent.AgentTraceEven
                         )
                         Text(
                             event.queries.joinToString(" / "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    is HyDeGeneratedEvent -> {
+                        Text(
+                            "HyDE",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            event.hypothetical,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -906,3 +906,50 @@ SearchPipeline の Candidate Merge は、ソース別の固定擬似スコア（
 
 - 候補の最終順位は LlmReranker が決めるため、マージ方式変更の影響は「上位 50 件に何が残るか」に限定される
 - ベクトル検索の実類似度の絶対値情報は捨てられ rank のみ使う（RRF の標準的性質）
+
+## ADR-023: Precision/Recall 向上施策パッケージ
+
+**日付:** 2026-06-13  
+**ステータス:** 採用
+
+### 背景
+
+ADR-022 で RRF rank 融合に切り替え、SearchPipeline の基本骨格は安定した。次の改善余地として:
+
+- 元クエリのみのベクトル検索: 字面の言い換えは BM25/Metadata 側だけで吸収していた
+- 全ソース均等の RRF: METADATA 完全一致と低類似度の VECTOR ノイズが同じ rank コストになる
+- Reranker への投入情報が `[i] headingPath: snippet` のみで、path や文書日付が陽に渡っていない
+- 見出し境界の文脈断絶: チャンクが見出し直下に切れているため、見出しまたぎの文意（代名詞・主語）が落ちる
+- 評価指標が無い: 改善を主観でしか判断できず、退行も検出できない
+
+### 決定
+
+以下を一括導入する（Recall + Precision の両軸を同時に底上げするパッケージ）。
+
+**Recall 向上**
+
+1. **展開クエリ × Vector** — `SearchPipeline.multiVectorSearch` で元クエリ + 展開クエリ + HyDE 仮想回答を順にベクトル検索し、(docId, headingPath) 重複を除いた rank リストを RRF に渡す。Embedder は Mutex で直列化されているため、N 件のサブクエリは順次実行（≈ 30ms × N）
+2. **HyDE（Hypothetical Document Embeddings）** — `HyDE` クラスが LLM で「ありそうな回答」を 1〜2 文生成し、それを `query: ` でなく `passage: ` 近傍として再検索。query↔passage 表現非対称の緩和。タイムアウト 6 秒、失敗時は元クエリのみにフォールバック
+3. **オーバーラップ強化** — `MarkdownChunker.OVERLAP_CHARS` を 50 → 120。さらにセクション境界に直前セクション末尾 80 文字を `SECTION_TAIL_CARRY` として付け足し、見出しまたぎの文脈断絶を緩和
+
+**Precision 向上**
+
+4. **VECTOR_MIN_SCORE 閾値** — `SearchPipeline.vectorSearch` でコサイン類似度 0.45 未満を除外。Reranker のノイズ源を断つ。E5（L2 正規化）でこの値以下はほぼ無関係
+5. **RRF ソース別重み付け** — `mergeCandidatesRrf(weights=...)` で META=1.5 / VECTOR=1.0 / BM25=1.2 を適用。Metadata 完全一致を優先しつつ、VECTOR を最下位にして低類似度のノイズが上位に来づらくする
+6. **Reranker 入力強化** — `LlmReranker` のプロンプトを `[i] path=... heading=... date=... source=... snippet=...` 構造化形式に変更。snippet 上限 100 → 140 文字。`source` を渡すことで「METADATA 完全一致を優先」「VECTOR は意味類似だがノイズあり」を LLM が判断材料にできる
+
+**評価フレーム**
+
+7. **EvalRunner / EvalMetrics** — `app/src/main/kotlin/com/minibrain/eval/` に P@K, R@K, MRR を計測する純 Kotlin 評価フレームを追加。assets の `eval/queries.sample.json` をテンプレとして、ユーザーが「質問→正解 relativePath」を JSON で足すだけで P/R 指標が得られる。docId ではなく relativePath を採用し、再インデックス耐性を持たせる
+
+### 付随変更
+
+- `AgentTraceEvent` に `HyDeGeneratedEvent` を追加し、ChatScreen のトレース表示にも反映
+- `MiniBrainApp` の SearchPipeline 生成で HyDE をシングルトンとして注入
+- `mergeCandidatesRrf` に `weights: List<Float>?` パラメータを追加（null で従来挙動と互換）
+
+### トレードオフ
+
+- LLM 呼び出しが 1 件増える（QueryExpander → HyDE → Reranker → CoverageCheck）。タイムアウトでフォールバック保証
+- インデックスサイズが OVERLAP 増 + SECTION_TAIL_CARRY で約 10〜15% 増（個人ノートのスケールでは無視可）
+- 重み・閾値の定数は実評価セットで調整する想定。EvalRunner を使ったオフライン計測がチューニング基盤
