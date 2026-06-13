@@ -1,0 +1,17 @@
+[
+  {
+    "id": "sample-1",
+    "query": "ソラリスについて教えて",
+    "expected": ["companies/ソラリス.md"]
+  },
+  {
+    "id": "sample-2",
+    "query": "スパイス堂にいつ行ったっけ？",
+    "expected": ["food/スパイス堂.md"]
+  },
+  {
+    "id": "sample-3",
+    "query": "5年前の3月何してた？",
+    "expected": ["journal/2021-03.md"]
+  }
+]
