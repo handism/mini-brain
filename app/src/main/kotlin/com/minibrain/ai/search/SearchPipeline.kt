@@ -121,29 +121,37 @@ class SearchPipeline(
     }
 
     private suspend fun metadataSearch(queries: List<String>, treeUri: String): List<Citation> {
-        val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
         val tokens = queries.flatMap { q ->
             q.split(Regex("[\\s　、。・]+")).filter { it.length >= 2 }
         }.distinct()
 
-        return allDocs.filter { doc ->
-            val fields = listOfNotNull(
-                doc.fileName,
-                doc.relativePath,
-                doc.tags,
-                doc.documentDate,
-            )
-            val tokenMatch = tokens.any { token ->
-                fields.any { field -> field.contains(token, ignoreCase = true) }
+        // 1. SQL によるトークン検索
+        val tokenDocs = if (tokens.isNotEmpty()) {
+            val sb = StringBuilder("SELECT * FROM documents WHERE treeUri = ? AND (")
+            val args = mutableListOf<Any?>(treeUri)
+            tokens.forEachIndexed { i, token ->
+                if (i > 0) sb.append(" OR ")
+                sb.append("(fileName LIKE ? OR relativePath LIKE ? OR tags LIKE ? OR documentDate LIKE ?)")
+                val pattern = "%$token%"
+                args.addAll(listOf(pattern, pattern, pattern, pattern))
             }
-            // ファイル名逆引き: fileName(拡張子除く) が query の substring として含まれるか
-            // 日本語助詞でトークン化されないクエリ（例: 「サウナしきじにいつ行ったっけ？」）でも
-            // 固有名詞ファイル（「サウナしきじ.md」）を確実に拾うための保険
+            sb.append(")")
+            withContext(Dispatchers.IO) {
+                documentDao.findByMetadataRaw(SimpleSQLiteQuery(sb.toString(), args.toTypedArray()))
+            }
+        } else emptyList()
+
+        // 2. ファイル名逆引き (SQL での全文 substring 比較は難しいため、全件の fileName のみ取得して判定)
+        val minimalDocs = withContext(Dispatchers.IO) { documentDao.getMinimalByTree(treeUri) }
+        val reverseMatches = minimalDocs.filter { doc ->
             val fileStem = doc.fileName.removeSuffix(".md").removeSuffix(".MD")
-            val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
+            fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
                 queries.any { q -> q.contains(fileStem, ignoreCase = true) }
-            tokenMatch || fileNameInQuery
-        }.map { doc ->
+        }
+
+        // TokenDocs (DocumentEntity) と reverseMatches (DocumentMinimal) を統合。
+        // Citation に変換してからマージする。
+        val tokenCitations = tokenDocs.map { doc ->
             Citation(
                 headingPath = doc.relativePath,
                 snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
@@ -153,6 +161,18 @@ class SearchPipeline(
                 source = SourceType.METADATA,
             )
         }
+        val reverseCitations = reverseMatches.map { doc ->
+            Citation(
+                headingPath = doc.relativePath,
+                snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
+                score = 0.6f,
+                docId = doc.id,
+                relativePath = doc.relativePath,
+                source = SourceType.METADATA,
+            )
+        }
+
+        return (tokenCitations + reverseCitations).distinctBy { "${it.docId}::${it.headingPath}" }
     }
 
     private fun buildSnippetWithDate(documentDate: String?, firstParagraph: String?): String = buildString {
@@ -194,8 +214,8 @@ class SearchPipeline(
         if (DateResolver.isDiaryQuery(query)) {
             val dateStrings = DateResolver.resolveToDateStrings(query)
             if (dateStrings.isNotEmpty()) {
-                val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
-                val matched = allDocs.filter { doc ->
+                val minimalDocs = withContext(Dispatchers.IO) { documentDao.getMinimalByTree(treeUri) }
+                val matched = minimalDocs.filter { doc ->
                     val docDate = doc.documentDate ?: return@filter false
                     val docDigits = docDate.replace("-", "")
                     dateStrings.any { date ->
