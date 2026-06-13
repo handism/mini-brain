@@ -15,6 +15,7 @@ object CitationIntegrator {
         SourceType.READ_FILE,
         SourceType.GREP,
         SourceType.METADATA,
+        SourceType.BM25,
         SourceType.VECTOR,
         SourceType.RRF,
         SourceType.GLOB,

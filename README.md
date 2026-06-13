@@ -134,7 +134,7 @@ app/src/main/kotlin/com/minibrain/
      │                              + fileName 逆引き（fileName が query の substring）
      │                              snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込む
      └─ 元クエリ × Vector（Embedding コサイン類似）
-  3. Candidate Merge: 重複排除 → 上位 50 件
+  3. Candidate Merge: RRF（rank ベース融合、k=60）で重複排除 → 上位 50 件
   4. LlmReranker（LLM）: 上位 10 件に絞り込み
      ※ 日付クエリは日付情報を含む候補を優先
 
@@ -151,7 +151,7 @@ app/src/main/kotlin/com/minibrain/
   → パース失敗 2 回連続 → RRF 即時フォールバック
 
 ↓ CitationIntegrator
-  優先度: READ_FILE > GREP > METADATA > VECTOR > RRF > GLOB > FOLDER
+  優先度: READ_FILE > GREP > METADATA > BM25 > VECTOR > RRF > GLOB > FOLDER
   重複除去（docId + headingPath キー）・トークン budget（chars/3 推定、上限 1200 tokens）
   citations 空 → RRF 強制フォールバック（セーフティネット）
 ↓ LLM 回答生成（ストリーミング）

@@ -17,13 +17,35 @@ class CoverageChecker(private val llmService: LlmService) {
         private const val MAX_CANDIDATES = 5
         private const val DATE_PREFIX = "[日付:"
         private val DATE_QUERY_REGEX = Regex("""いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで""")
+
+        // 日付クエリで上位候補に日付プレフィックス付き snippet があるか（LLM 短絡判定）
+        internal fun isDateShortCircuit(query: String, candidates: List<Citation>): Boolean =
+            DATE_QUERY_REGEX.containsMatchIn(query) &&
+                candidates.take(MAX_CANDIDATES).any { it.snippet.trimStart().startsWith(DATE_PREFIX) }
+
+        internal fun parse(raw: String): CoverageResult {
+            // 最初の行のみ対象（余分なテキストを無視）
+            val line = raw.lines().firstOrNull { it.isNotBlank() } ?: return CoverageResult(true, emptyList())
+
+            return if (line.trimStart().startsWith("yes")) {
+                CoverageResult(canAnswer = true, missingInformation = emptyList())
+            } else if (line.trimStart().startsWith("no")) {
+                val parts = line.substringAfter("no").trimStart(',', ' ')
+                val missing = if (parts.isBlank()) emptyList()
+                else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                Log.d(TAG, "coverage=false missing=$missing")
+                CoverageResult(canAnswer = false, missingInformation = missing)
+            } else {
+                // 判定不能時は「回答可能」扱いにして余計なReActを起動しない
+                Log.d(TAG, "coverage parse unclear: $line — defaulting canAnswer=true")
+                CoverageResult(canAnswer = true, missingInformation = emptyList())
+            }
+        }
     }
 
     suspend fun check(query: String, candidates: List<Citation>): CoverageResult {
         // 日付クエリで日付プレフィックス付き候補があれば、LLM を呼ばずに即答可能と判定
-        if (DATE_QUERY_REGEX.containsMatchIn(query) &&
-            candidates.take(MAX_CANDIDATES).any { it.snippet.trimStart().startsWith(DATE_PREFIX) }
-        ) {
+        if (isDateShortCircuit(query, candidates)) {
             Log.d(TAG, "short-circuit: date query with dated candidate → canAnswer=true")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
@@ -57,24 +79,5 @@ class CoverageChecker(private val llmService: LlmService) {
         sb.appendLine("出力例: yes  /  no, visit_date  /  no, event_date, location")
         sb.append("出力:")
         return sb.toString()
-    }
-
-    private fun parse(raw: String): CoverageResult {
-        // 最初の行のみ対象（余分なテキストを無視）
-        val line = raw.lines().firstOrNull { it.isNotBlank() } ?: return CoverageResult(true, emptyList())
-
-        return if (line.trimStart().startsWith("yes")) {
-            CoverageResult(canAnswer = true, missingInformation = emptyList())
-        } else if (line.trimStart().startsWith("no")) {
-            val parts = line.substringAfter("no").trimStart(',', ' ')
-            val missing = if (parts.isBlank()) emptyList()
-            else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
-            Log.d(TAG, "coverage=false missing=$missing")
-            CoverageResult(canAnswer = false, missingInformation = missing)
-        } else {
-            // 判定不能時は「回答可能」扱いにして余計なReActを起動しない
-            Log.d(TAG, "coverage parse unclear: $line — defaulting canAnswer=true")
-            CoverageResult(canAnswer = true, missingInformation = emptyList())
-        }
     }
 }
