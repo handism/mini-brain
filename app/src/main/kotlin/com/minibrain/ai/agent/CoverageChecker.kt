@@ -60,21 +60,27 @@ class CoverageChecker(private val llmService: LlmService) {
     }
 
     private fun parse(raw: String): CoverageResult {
-        // 最初の行のみ対象（余分なテキストを無視）
-        val line = raw.lines().firstOrNull { it.isNotBlank() } ?: return CoverageResult(true, emptyList())
+        // 全体から "yes" または "no, ..." を探す。
+        // 行単位でスキャンして最初に見つかった妥当な方を採用。
+        for (rawLine in raw.lines()) {
+            val line = rawLine.trim().lowercase()
+            if (line.isEmpty()) continue
 
-        return if (line.trimStart().startsWith("yes")) {
-            CoverageResult(canAnswer = true, missingInformation = emptyList())
-        } else if (line.trimStart().startsWith("no")) {
-            val parts = line.substringAfter("no").trimStart(',', ' ')
-            val missing = if (parts.isBlank()) emptyList()
-            else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
-            Log.d(TAG, "coverage=false missing=$missing")
-            CoverageResult(canAnswer = false, missingInformation = missing)
-        } else {
-            // 判定不能時は「回答可能」扱いにして余計なReActを起動しない
-            Log.d(TAG, "coverage parse unclear: $line — defaulting canAnswer=true")
-            CoverageResult(canAnswer = true, missingInformation = emptyList())
+            if (line.startsWith("yes")) {
+                return CoverageResult(canAnswer = true, missingInformation = emptyList())
+            }
+            if (line.startsWith("no")) {
+                // "no, key1, key2" 形式を想定
+                val parts = line.substringAfter("no").trim().trimStart(',', ' ')
+                val missing = if (parts.isBlank()) emptyList()
+                else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                Log.d(TAG, "coverage=false missing=$missing")
+                return CoverageResult(canAnswer = false, missingInformation = missing)
+            }
         }
+
+        // 判定不能時は「回答可能」扱いにして余計なReActを起動しない
+        Log.d(TAG, "coverage parse unclear: $raw — defaulting canAnswer=true")
+        return CoverageResult(canAnswer = true, missingInformation = emptyList())
     }
 }
