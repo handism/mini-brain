@@ -4,7 +4,6 @@ import android.util.Log
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
-import com.minibrain.ai.llm.LlmService
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.daos.FolderEmbeddingDao
@@ -18,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 enum class SourceType { READ_FILE, GREP, METADATA, BM25, VECTOR, RRF, GLOB, FOLDER, UNKNOWN }
@@ -30,11 +28,14 @@ data class Citation(
     val docId: Long? = null,
     val relativePath: String? = null,
     val source: SourceType = SourceType.UNKNOWN,
+    // ファイル名が質問の substring として一致したことを示すフラグ。
+    // 「サウナしきじにいつ行ったっけ」のような固有名詞ヒットを、後段（Reranker / CoverageChecker /
+    // AnswerPrompt）が documentDate に頼らず最優先で残せるようにする（ADR-026）。
+    val topicMatch: Boolean = false,
 )
 
 class RagPipeline(
     private val embedderService: EmbedderService,
-    private val llmService: LlmService,
     private val chunkDao: ChunkDao,
     private val documentDao: DocumentDao,
     private val folderEmbeddingDao: FolderEmbeddingDao,
@@ -106,15 +107,6 @@ class RagPipeline(
 
             chunkCitations + folderCitations
         }
-
-    fun answer(
-        question: String,
-        citations: List<Citation>,
-        recentHistory: List<Pair<String, String>> = emptyList(),
-    ): Flow<String> {
-        val prompt = buildPrompt(question, citations, recentHistory)
-        return llmService.generateStream(prompt)
-    }
 
     // ベクトル検索のみで Citation 化（SearchPipeline の Parallel Retrieval から呼ぶ）
     suspend fun vectorOnlyTopK(
@@ -225,27 +217,19 @@ class RagPipeline(
         k: Int = 60,
         docIdToDate: Map<Long, LocalDate?> = emptyMap(),
     ): List<Pair<Float, ChunkEntity>> {
-        val scores = mutableMapOf<Long, Float>()
-        val chunks = mutableMapOf<Long, ChunkEntity>()
-
-        bm25Results.forEachIndexed { rank, chunk ->
-            scores[chunk.id] = (scores[chunk.id] ?: 0f) + 1f / (k + rank + 1)
-            chunks[chunk.id] = chunk
-        }
-        vecResults.forEachIndexed { rank, chunk ->
-            scores[chunk.id] = (scores[chunk.id] ?: 0f) + 1f / (k + rank + 1)
-            chunks[chunk.id] = chunk
-        }
-
+        val fused = RrfFuser.fuse(
+            rankLists = listOf(bm25Results, vecResults),
+            keyOf = { it.id },
+            k = k,
+        )
         val today = LocalDate.now()
-        return scores.entries
-            .map { (id, rrfScore) ->
-                val boost = freshnessBoost(docIdToDate[chunks[id]!!.docId], today)
-                Triple(id, rrfScore + boost, chunks[id]!!)
+        return fused
+            .map { entry ->
+                val boost = freshnessBoost(docIdToDate[entry.item.docId], today)
+                Pair(entry.score + boost, entry.item)
             }
-            .sortedByDescending { it.second }
+            .sortedByDescending { it.first }
             .take(topK)
-            .map { (_, score, chunk) -> Pair(score, chunk) }
     }
 
     companion object {
@@ -260,41 +244,5 @@ class RagPipeline(
             val days = ChronoUnit.DAYS.between(docDate, today).coerceAtLeast(0).toFloat()
             return (FRESHNESS_BOOST_MAX * exp(-days / FRESHNESS_DECAY_DAYS)).toFloat()
         }
-    }
-
-    private fun buildPrompt(
-        question: String,
-        citations: List<Citation>,
-        history: List<Pair<String, String>>,
-    ): String {
-        val contextBlock = if (citations.isNotEmpty()) {
-            val citationText = citations.joinToString("\n\n") { c ->
-                "### ${c.headingPath}\n${c.snippet}"
-            }
-            """
-あなたはユーザーのパーソナルアシスタントです。以下の「知識ベース（プライベートメモ）」の内容を参考にして、質問に答えてください。
-回答は、知識ベースにある情報を優先的に使用してください。もし情報が不足している場合は、一般的な知識で補足しても構いませんが、その際は知識ベース外の情報であることを明記してください。
-
-知識ベースの内容:
-$citationText
-
----
-""".trimIndent()
-        } else {
-            "知識ベースに関連する情報が見つかりませんでした。一般的な知識で回答してください。\n\n---"
-        }
-
-        val historyBlock = if (history.isNotEmpty()) {
-            history.takeLast(6).joinToString("\n") { (role, content) ->
-                "${if (role == "user") "ユーザー" else "アシスタント"}: $content"
-            } + "\n"
-        } else ""
-
-        return """
-$contextBlock
-
-$historyBlock
-ユーザー: $question
-アシスタント:""".trimStart()
     }
 }

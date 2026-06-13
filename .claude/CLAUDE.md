@@ -107,16 +107,20 @@ UI (Compose) → ViewModel → AgentPipeline → SearchPipeline → (QueryExpand
      ├─ 展開クエリ × BM25（FTS4）            : 並行実行
      ├─ 展開クエリ × Metadata Search         : fileName/path/tags/documentDate を検索
      │                                       + fileName(拡張子除く 3 字以上) が query の substring に含まれる逆引き
+     │                                       逆引きヒットは Citation.topicMatch=true を立て、snippet を先頭 chunk から 500 字採る（ADR-026）
      │                                       snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込む
      └─ multiVectorSearch                     : 元クエリ + 展開クエリ + HyDE 仮想回答で順次ベクトル検索
                                               コサイン類似度 < 0.45 は閾値カットで除外
   3. Candidate Merge: RRF rank 融合（重み META=1.5 / VECTOR=1.0 / BM25=1.2）→ 上位 50 件
   4. LlmReranker（LLM）: 候補をスコアリングし上位 10 件を選択
-     ※ Reranker 入力は `path=... heading=... date=... source=... snippet=...` 構造化形式
-     ※ 日付クエリ（いつ・何月 等）は date フィールドを持つ候補を優先するよう追記
+     ※ Reranker 入力は `path=... heading=... date=... topic=... source=... snippet=...` 構造化形式
+     ※ 日付クエリ（いつ・何月 等）は date フィールドを持つ候補 **と topic=match の候補** を両方優先する（ADR-026）
+  4.5 dateRange pin（ADR-025）: dateRange != null かつ dateRangeSearch ヒットあり →
+      上位 5 件を Reranker 結果の先頭に強制マージ（docId::headingPath で dedupe、RERANK_TOP_K=10 で切る）
 
 ↓ CoverageCheck（LLM）: query + top5 candidates を見て回答可能かを判定
   ※ 日付クエリ かつ snippet 先頭が `[日付:` で始まる候補があれば LLM を呼ばずに即 canAnswer=true で短絡
+  ※ 日付クエリ かつ topicMatch=true の候補が top5 にあれば同じく LLM 短絡 yes（ADR-026）
   canAnswer=true  → 回答生成へ
   canAnswer=false → ExplorerStrategy 決定 → ReAct ループへ
     EXPAND_TIME   : missing に date/visit/time → read_file で全文を読んで日付メタを確認するヒント（timeline_search は最終手段）
@@ -139,6 +143,8 @@ UI (Compose) → ViewModel → AgentPipeline → SearchPipeline → (QueryExpand
   優先度: READ_FILE > GREP > METADATA > VECTOR > RRF > GLOB > FOLDER
   citations 空 → RRF 強制フォールバック（セーフティネット）
 ↓ buildAnswerPrompt → LLM 回答生成（ストリーミング）
+  ※ dateRange != null または「いつ/何月/年前/去年/先月/先週」系の date クエリのとき、context block 直後に「日付を拾う優先順位」指示を注入（ADR-025 + ADR-026）:
+    (1) `[日付: YYYY-MM-DD]` プレフィックス → (2) 本文中の「初回訪問日:」「訪問日:」「日付:」ラベル行 → (3) 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
 ```
 
 ## モデルファイルのパス
@@ -217,3 +223,21 @@ context.filesDir/models/e5-tokenizer.json               # XLM-RoBERTa SentencePi
 - `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新する
 - 評価セットは `app/src/main/assets/eval/queries.sample.json` をテンプレに、ユーザーが自分の質問〜正解 relativePath を追加して使う。`EvalRunner.run(treeUri, cases, k)` で P@K / R@K / MRR を得る
 - DB マイグレーション: 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は次回差分インデックス時に自動補完される。強制補完は Settings → 再インデックスで可能
+- `DocumentRepository.Companion.extractDateFromPath` は完全日付（`YYYY[-/_.]MM[-/_.]DD` / `YYYY年MM月DD日` / 8桁 `YYYYMMDD`）と月のみ（`YYYY-MM` / `YYYY年MM月` / 6桁 `YYYYMM`）の両方を抽出する。月のみは月初 1 日（`YYYY-MM-01`）として登録。完全日付 → 月のみの順を厳守し、`LocalDate.of` validity + 年が `1990..今年` の範囲チェックで誤マッチを弾く。@VisibleForTesting で JVM テストから直接呼べる（ADR-025）
+- `MarkdownMetaExtractor.extractDateFromContent` の YAML frontmatter ラベルは `date / created / published / updated / 日付 / 作成日 / 記録日`（IGNORE_CASE、`'"` クォート可）。和暦パターン (`YYYY年MM月DD日` / `YYYY年MM月`) は **見出し限定** で検出する（本文中のカジュアル言及で誤って `documentDate` が付き Reranker の競合候補が増えて固有名詞ファイルが押し出される regression を防ぐ）。Western 形式 (`YYYY-MM-DD` / `YYYY/MM/DD`) は従来通り本文全行を走査
+- `AgentPipeline.buildAnswerPrompt` は `dateRange != null` のとき期間（start〜end）と「日付を拾う優先順位 3 段（`[日付:]` プレフィックス → 本文ラベル行 → 本文 YYYY/MM/DD・YYYY年MM月DD日）」の照合指示を context block 直後に差し込む（ADR-025 + ADR-026）。`citations` に日付プレフィックス付きが 1 件もない場合は「`[日付:]` 付きは無いが本文ラベル / 表記を期間と照合せよ」というフェールセーフ文に切り替える
+- `AgentPipeline.buildAnswerPrompt` は `dateRange == null` でも `DATE_QUERY_REGEX`（`いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで`）にマッチすれば「日付に関する質問」ブロックを差し込み、同じ 3 段優先順位で本文から日付を拾うよう LLM に指示する（ADR-026）。固有名詞 +「いつ」クエリ（例: 「サウナしきじにいつ行ったっけ」）で `documentDate` が無くても本文中の「初回訪問日: 2022/01/01」を回答に乗せられる
+- `Citation.topicMatch: Boolean` は SearchPipeline.metadataSearch でファイル名 stem が query の substring として一致したヒットだけ true（ADR-026）。RRF 融合は metaCandidates を先頭に置く既存挙動と `mergeCandidatesRrf` の first-wins により後段まで保持される
+- `LlmReranker` は候補プロンプトに `topic=match` タグを出し、「いつ」クエリでは date フィールド優先と並んで topic=match 候補も上位に残すよう指示する（ADR-026）。date 欄空の固有名詞ファイルが押し出される回路を塞ぐ
+- `CoverageChecker.check` は (1) 日付クエリ + `[日付:]` プレフィックス → 短絡 yes、(2) 日付クエリ + `topicMatch=true` 候補 → 短絡 yes、の 2 段で LLM 呼び出しを省く（ADR-026）。topic match 短絡が無いと固有名詞ヒットが「no, visit_date」でリセットされて ReAct に落ちる事故が起きる
+- `SearchPipeline.metadataSearch` は `topicMatch` ヒットだけ `TOPIC_MATCH_SNIPPET_CHARS = 500` で先頭 chunk テキストを採る（ADR-026）。「初回訪問日:」ラベル行や本文 YYYY/MM/DD を 200 字 firstParagraph から漏らさないため。chunks のロードは topicMatch がある場合のみ lazy で 1 回
+- `SearchPipeline.search` は `dateRange != null` かつ `dateRangeSearch` ヒットあり → 上位 `DATE_RANGE_PIN_COUNT = 5` 件を Reranker 結果の先頭に強制マージする（ADR-025）。`docId::headingPath` で dedupe、後段は Reranker 順を維持、最終的に `RERANK_TOP_K = 10` で切る。`RRF_WEIGHTS` は変更しない（他クエリの順位を壊さないため）
+- `dateRangeSearch` のスニペットは `firstParagraph` (200 字) ではなく **doc の先頭 chunk テキストから `DATE_RANGE_SNIPPET_CHARS = 600` 字** を採る（ADR-025）。chunk が空の場合のみ `firstParagraph` フォールバック。pin に乗るスニペットが薄すぎて LLM が「具体的な内容が記載されていません」と返す問題への対処
+- 期間クエリで「情報が含まれていません」と返答された場合の調査手順:
+  ```
+  adb logcat -s CoverageChecker:D SearchPipeline:D AgentPipeline:D DateResolver:D
+  # 1. DateResolver で dateRange が解決されているか
+  # 2. SearchPipeline で `dateRangeSearch range=... hits=N` の N が 0 になっていないか（0 なら documentDate が NULL の文書が多い → 再インデックス）
+  # 3. SearchPipeline で `dateRange pin: pinned=N final=M` が出ているか
+  # 4. CoverageChecker で `short-circuit: date query with dated candidate` が出ているか
+  ```

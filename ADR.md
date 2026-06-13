@@ -992,3 +992,107 @@ ADR-022 で RRF rank 融合に切り替え、SearchPipeline の基本骨格は�
 
 - ReAct ループの `ToolExecutor` は依然として独自に `cachedDocs` / `queryVecCache` を持つ。SearchRequestCache を共有すれば SearchPipeline 経由の結果を再利用できるが、ロジック変更幅が大きく別 PR で扱う（R3 領域）
 - `DocumentEntity` への `@Index(["treeUri", "documentDate"])` 追加（R5 領域）も別 PR。マイグレーションが伴うため独立させる
+
+## ADR-025: 期間クエリの documentDate Recall と回答 LLM 誘導の強化
+
+ステータス: 採用
+
+### 背景
+
+「去年の冬何してたっけ？」のような期間クエリで、検索段は `[日付: YYYY-MM-DD]` プレフィックス付き候補を Reranker 後段まで運べているにもかかわらず、回答 LLM が「知識ベースには情報が含まれていません」と返してしまう事象が再現した。原因は 2 層に分かれる:
+
+1. **回答プロンプトに dateRange が一切渡されていない** — `buildAnswerPrompt` は `question / citations / history` だけを受け取る設計で、LLM はスニペット先頭の `[日付:]` プレフィックスが「ユーザーの問いに対する根拠」であることを認識できなかった。これが支配的な原因（Search 段は機能しているのに回答が空振りする）。
+2. **`extractDateFromPath` が完全日付 (`YYYY-MM-DD` / `YYYY/MM/DD` / `YYYYMMDD`) しか拾わない** — 日記が月単位ファイル (`journal/2024-12.md`) や和暦混在 (`2024年12月.md`) の場合、`documentDate` が NULL のまま登録されて時系列 Recall の上限を下げていた。
+3. （副次）dateRangeSearch ヒットが RRF 融合 → 再採点の過程で他ソースの高スコア候補に圧縮されると Reranker 上位 10 から脱落し得る。
+
+### 決定
+
+1. **`buildAnswerPrompt` に dateRange を注入**（`AgentPipeline.kt`）
+   - `run` で解決済みの `dateRange` を `buildAnswerPrompt` へ渡し、`dateRange != null` のとき「質問は `<start>` 〜 `<end>` の期間に関するものです。各 snippet 先頭の `[日付:]` プレフィックスを照合し、該当 snippet を最優先で根拠にしてください」という指示を context block 直後に差し込む
+   - `citations` に `[日付:]` プレフィックス付きが 1 件もない場合は「該当期間の日記が見つからなかった旨を明記してください」というフェールセーフ文に切り替える（一般知識で誤魔化させない）
+2. **`extractDateFromPath` のパターン拡張**（`DocumentRepository.kt`、companion object に移動 + `@VisibleForTesting internal` 化）
+   - 完全日付パターンに `YYYY_MM_DD` / `YYYY.MM.DD` / `YYYY年MM月DD日` を追加
+   - 月のみパターン `YYYY-MM` / `YYYY年MM月` / `YYYYMM`（6 桁）を追加し、マッチ時は月初 1 日（`YYYY-MM-01`）として登録
+   - 完全日付 → 月のみ の順を厳守して `2024-12-15` が `2024-12` に食われないようにする
+   - `LocalDate.of` の validity + 年が `1990..今年` の範囲チェックを全パターンに適用（電話番号や ID との誤マッチ防止）
+3. **`MarkdownMetaExtractor.extractDateFromContent` の拡張**（`MarkdownMetaExtractor.kt`）
+   - YAML frontmatter で許容するラベルに `created` / `published` / `updated` / `日付` / `作成日` / `記録日` を追加（クォート文字 `'` `"` の前置も許容）
+   - **見出し** 中の `YYYY年MM月DD日` および `YYYY年MM月`（月のみ → 月初 1 日扱い）を新たに検出
+   - ※ 当初は本文全行を走査していたが、「2024年5月に行った」のようなカジュアル言及にも反応してしまい、日記でないノートに誤って `documentDate` が付き、Reranker の競合候補が増えて固有名詞ファイル（`サウナしきじ.md` 等）が押し出される regression が発生した。日記ファイルは date を見出し（`# 2024年12月15日` 等）に置く慣例が強いため見出し限定に絞り込んだ。本文中の Western 形式（`YYYY-MM-DD` / `YYYY/MM/DD`）は ADR-025 以前から本文全行を走査しており、今回は触らない
+4. **`SearchPipeline.search` で dateRange ヒットを Reranker 後段に pin**（`SearchPipeline.kt`）
+   - `dateRangeSearch` の結果を `metaCandidates` 構築用の式から分離して `dateRangeHits` 変数に保持
+   - `LlmReranker.rerank` 後、`dateRange != null` かつ `dateRangeHits` が非空なら上位 `DATE_RANGE_PIN_COUNT = 5` 件を結果の先頭に強制マージし、`docId::headingPath` で dedupe して `RERANK_TOP_K` で切る
+   - `RRF_WEIGHTS` には触らないため、他クエリの順位は変えない
+5. **`dateRangeSearch` のスニペットを doc 先頭 chunk から `DATE_RANGE_SNIPPET_CHARS = 600` 字採る**（`SearchPipeline.kt`、追加対応）
+   - 当初は `firstParagraph` (200 字) を使っていたが、ピンに乗るスニペットが薄く LLM が「具体的な活動内容が記載されていません」と返す事象が再現した
+   - `ctx.chunkVectors()` から該当 doc の chunks を取り、先頭 chunk のテキストを `[日付:]` プレフィックス付きで返す。chunks が無い場合のみ `firstParagraph` フォールバック
+   - 各 doc 1 件の citation を維持しつつスニペット内容を厚くする（5 docs × 600 字 ≈ 3000 字 ≈ 750 tokens で `CitationIntegrator` の 1200 tokens budget に収まる）
+6. **`buildAnswerPrompt` の期間クエリ指示文を強化**（`AgentPipeline.kt`、追加対応）
+   - 当初の指示文では LLM が「『去年』が具体的にどの年を指すのか不明確」と過剰に逡巡する事象があった
+   - 「相対表現は **${dateRange.start} 〜 ${dateRange.end}** の期間に解釈済み。年号の解釈で迷わないこと」を明示し、回答手順を 4 ステップで番号付き列挙にして「snippet 本文に活動内容が書かれていれば素直に紹介し『情報がない』と切り捨てない」を最後に強調
+
+### 影響
+
+- 「去年の冬何してたっけ？」「先月の振り返り」など期間クエリで、`[日付:]` 付き候補が引き出せていれば回答 LLM はそれを根拠として認識する。Search Trace 上では dateRange ヒットが Reranker 結果の先頭 5 件として明示的に観測できる。
+- 月単位ファイル名運用 (`journal/2024-12.md`) と和暦混在 (`日記/2024年12月.md`) で `documentDate` が自動補完されるようになるため、評価セット sample-3〜5 の R@10 改善を期待。
+- `extractDateFromPath` を `@VisibleForTesting internal` に格上げしたことで、Context / DAO の依存を持たない JVM ユニットテストが可能になり、`ExtractDateFromPathTest` / `MarkdownMetaExtractorTest` を新設できた。
+
+### トレードオフ
+
+- 月のみ抽出を月初 1 日として扱うため、`journal/2024-12.md` 内に「2024-12-25 のメモ」を含むようなケースでは時系列順位がやや粗くなる（月内日次の精度より、月単位ファイルが時系列メタを持つことを優先）。
+- `dateRangeSearch` の結果先頭 pin は Reranker の選別を一部上書きするため、Reranker が「この dateRange ヒットは関連性が薄い」と判断したケースでも 5 件は通る。`DATE_RANGE_PIN_COUNT = 5` は CoverageChecker / LlmReranker の `MAX_CANDIDATES` と揃えてあり、悪影響は限定的だが、評価セットで R@10 と P@10 のトレードを継続監視する。
+
+## ADR-026: 固有名詞 +「いつ」クエリの `documentDate` 非依存化（topicMatch ルート）
+
+ステータス: 採用
+
+### 背景
+
+「サウナしきじにいつ行ったっけ？」のように **固有名詞ヒット + 「いつ」** な質問で、対象ファイル（`サウナしきじ.md`）が引用にすら出ず、回答も生成できない事象が再現した。サウナしきじ.md の本文には「初回訪問日: 2022/01/01」が書かれているのに、それを LLM に届ける前段で詰まっていた。
+
+原因のカスケードは以下:
+
+1. ADR-025 で `MarkdownMetaExtractor` の和暦本文走査を見出し限定に絞ったため、見出しに日付を含まない topic ノート（`# サウナしきじ` だけのファイル）は `documentDate = null` になる
+2. `LlmReranker` は「いつ」クエリで `date` フィールドを持つ候補を優先する指示を入れるため、`date` 欄が空の topic ノートは上位 10 から押し出される
+3. 仮に残っても `CoverageChecker` は `[日付:]` プレフィックスが無い限り LLM に判定を委ねるため、LLM が「no, visit_date」を返して `citations = emptyList()` でリセットされる
+4. ReAct フォールバックは Planner がうまく当該ファイルを引いてくる保証が無く、最終的に引用ゼロで回答不能になる
+
+根本問題は **「いつ」クエリ = `documentDate` ありき** という設計仮定。一般公開時に多様な書き方（「初回訪問日: …」「YYYY/MM/DD」「YYYY年MM月DD日」「去年初めて行った」等）をするユーザーを救うには、`documentDate` 抽出をいくら強化しても穴が残る。
+
+### 検討した代替案
+
+- **B案: ディレクトリ選択時に LLM で per-doc メタ抽出**を行い、`documentDate` の Recall を最大化する。実装は素直だが LiteRT-LM 単一スレッド × Gemma E2B では 1 ノートに 5〜15 秒かかり、1000 ノートの初期セットアップで 1.5〜4 時間。一般公開アプリの初回体験として致命的。増分インデックスでも編集 → 再 LLM 抽出に数秒〜十数秒のレイテンシが乗る。**`documentDate` の精度向上で問題を解こうとせず、依存自体を減らす方向の方が筋がいい**と判断して却下。将来パワーユーザー向けのオプトイン機能（Settings → 高度なメタデータ抽出）として残せる余地はある。
+
+### 決定
+
+採用案 A: 固有名詞 / ファイル名一致の候補は「`documentDate` を持たなくても回答に到達できる」ルートを作り、Reranker / CoverageChecker / 回答プロンプトの 3 層で **date 優先フィルタの対象外** にする。
+
+1. **`Citation` に `topicMatch: Boolean = false` フラグを追加**（`RagPipeline.kt`）
+   - ファイル名 (stem) がユーザークエリの substring として一致した METADATA ヒットだけが `true`
+   - `mergeCandidatesRrf` は `first.getOrPut` で先頭ソースの Citation を保持するため、`metaCandidates` を rankLists の先頭に置く既存挙動と組み合わせて `topicMatch=true` が後段まで運ばれる
+2. **`SearchPipeline.metadataSearch` の改修**（`SearchPipeline.kt`）
+   - `fileNameInQuery` が成立する doc は `topicMatch = true` を立てる
+   - 同時にスニペットを `firstParagraph` (200 字) ではなく **先頭 chunk テキストから `TOPIC_MATCH_SNIPPET_CHARS = 500` 字** に置き換える。「初回訪問日: …」「YYYY/MM/DD」のようなラベル行を回答 LLM に届けるための前準備
+   - chunks のロードは `topicMatch` ヒットがある場合だけ lazy で 1 回（`ctx.chunkVectors()` 経由）
+3. **`LlmReranker` の date 偏向を緩める**（`LlmReranker.kt`）
+   - 候補プロンプトに `topic=match` タグを追加し、「いつ」クエリの指示文を *「date フィールドを持つ候補と topic=match の候補をどちらも上位に残す。topic=match は date 欄が空でも snippet 本文に日付がある可能性が高いので除外しない」* に書き換える
+   - これで `date` 欄空の topic ノートが ADR-025 由来の date 優先で押し出される回路を塞ぐ
+4. **`CoverageChecker` に `isTopicMatchShortCircuit` を追加**（`CoverageChecker.kt`）
+   - 既存の「日付クエリ + `[日付:]` プレフィックス → LLM 短絡 yes」と並列で、「日付クエリ + 上位 5 候補に `topicMatch=true` が 1 件以上 → LLM 短絡 yes」を追加
+   - 固有名詞ヒットが top に来ている時点で対象ファイルは確定しており、本文の日付抽出は回答 LLM に任せれば足る。ここで no を返して `citations` をリセットすると ReAct で固有名詞ファイルを取り直す保証が無いため、リセット事故を防ぐ
+5. **`AgentPipeline.buildAnswerPrompt` を date クエリ全般に拡張**（`AgentPipeline.kt`）
+   - `dateRange != null` の既存ブランチに加え、`dateRange == null` でも `DATE_QUERY_REGEX`（`いつ|何月|何日|何年|年前|月前|去年|先月|先週`）にマッチすれば「日付に関する質問」ブロックを差し込む
+   - 共通の「日付を拾う優先順位 3 段」を提示: (1) `[日付: YYYY-MM-DD]` プレフィックス → (2) 本文中の「初回訪問日: …」「訪問日: …」「日付: …」ラベル行 → (3) 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
+   - `dateRange != null` の指示文も同じ優先順位リストを採用するように書き直し、`[日付:]` プレフィックスだけに頼らない構造に変える
+
+### 影響
+
+- 「サウナしきじにいつ行ったっけ」「初回訪問日: …」「YYYY/MM/DD」のような書き方をしているユーザーは、`documentDate` 抽出が成功しなくてもファイル名ヒットで引用に残り、回答 LLM が本文のラベル行から日付を拾える。
+- 一般公開時のメタデータ書式依存が大幅に下がる。ユーザー側は普段の Markdown 書き方を変える必要が無く、「ファイル名 = topic」さえ守れば「いつ」系クエリに答えられる。
+- ADR-025 で導入した `MarkdownMetaExtractor` の見出し限定制約は維持されるため、純粋な期間クエリ（「去年の夏」など固有名詞なし）の precision は下がらない。
+
+### トレードオフ
+
+- topicMatch ヒットのスニペット長が 200 → 500 字に増えるため、5 件 ピン時の context 量は最大 2500 字（≈ 625 tokens）増。`CitationIntegrator` の `MAX_CONTEXT_TOKENS = 1200` budget には収まるが、他の citation を圧迫する可能性がある。評価セットの P@10 を継続監視する。
+- ファイル名 substring 一致は精度が荒い（短い stem や偶然の連続が誤マッチする）。`MIN_FILENAME_MATCH_CHARS = 3` で最低限の保険はかかっているが、たとえば `1月.md`（2 文字）は対象外。これは ADR-019 と同じ制約。
+- 「いつ」クエリ + topic match で `documentDate` も `[日付:]` プレフィックスも本文ラベルも一切無いファイルが top に来た場合、回答 LLM は「日付らしき表記が無い」と率直に返すことになる。これは仕様。前は ReAct に落ちて運良くファイルを引けば回答できたが、トータルでは安定度が上がる方向と判断。
