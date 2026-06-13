@@ -873,3 +873,36 @@ XLM-RoBERTa tokenizer (SentencePiece Unigram) の HuggingFace `tokenizer.json` �
 - HF tokenizers (Rust) との完全一致は理論保証されない（ユニットテストで主要ケースの一致を検証）。トークン列の微差は embedding 類似度にほぼ影響しない
 - APK サイズ約 9MB 減（libdjl_tokenizer.so 削除）、Moshi（~250KB）追加
 - tokenizer ロード時間は DJL native と同等オーダー（17MB JSON のストリーミングパース）
+
+## ADR-022: SearchPipeline の候補マージを RRF rank 融合に変更
+
+**日付:** 2026-06-13  
+**ステータス:** 採用
+
+### 背景
+
+SearchPipeline の Candidate Merge は、ソース別の固定擬似スコア（BM25=0.5 / METADATA=0.6 / 日付ヒット=0.8）とベクトル検索の実コサイン類似度を混ぜて降順 sort していた。この方式には次の問題があった:
+
+- 擬似スコアと実スコアの比較に意味がなく、マージ順がほぼ「ソース種別の固定優先度」で決まる
+- 複数ソースに出現する候補（= 信頼度が高い候補）が加点されない
+- 定数の根拠が説明できず、チューニングの議論が「0.6 を 0.7 にするか」という不毛な形になる
+
+### 決定
+
+ソース別の rank リストを RRF（Reciprocal Rank Fusion、k=60）で融合する方式に変更（`mergeCandidatesRrf`）。
+
+- score = Σ 1/(k + rank + 1)。複数ソースに出現する候補ほど加点される
+- 重複排除キーは従来同様 docId + headingPath。同キーは**最初に出現した Citation を保持**するため、rank リストは meta → vector → bm25 の順で渡す（メタデータの `[日付:]` プレフィックス付き snippet を CoverageChecker 短絡のために優先保持）
+- 日付範囲ヒットは meta リストの先頭に置くことで、従来の 0.8 加点と同等の優先度を rank で表現する
+- RagPipeline の ReAct 用 RRF（freshnessBoost 付き）はそのまま。変更は SearchPipeline の Candidate Merge のみ
+
+### 付随変更
+
+- `SourceType.BM25` を新設。SearchPipeline の BM25 候補が `RRF` と誤ラベルされていたのを修正（CitationIntegrator 優先度は METADATA と VECTOR の間）
+- `DateResolver.resolveDateRange` を `AgentPipeline.run` で一度だけ解決し、`QueryClassifier.classify` / `SearchPipeline.search` / `buildPlannerHint` に引数で共有（同一クエリの三重解決を解消）
+- dateRangeSearch の特定日付ヒットにも `[日付:]` プレフィックスを付与（範囲ヒットと挙動を統一し CoverageChecker 短絡を有効化）
+
+### トレードオフ
+
+- 候補の最終順位は LlmReranker が決めるため、マージ方式変更の影響は「上位 50 件に何が残るか」に限定される
+- ベクトル検索の実類似度の絶対値情報は捨てられ rank のみ使う（RRF の標準的性質）
