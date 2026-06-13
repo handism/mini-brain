@@ -24,22 +24,27 @@ class CoverageChecker(private val llmService: LlmService) {
                 candidates.take(MAX_CANDIDATES).any { it.snippet.trimStart().startsWith(DATE_PREFIX) }
 
         internal fun parse(raw: String): CoverageResult {
-            // 最初の行のみ対象（余分なテキストを無視）
-            val line = raw.lines().firstOrNull { it.isNotBlank() } ?: return CoverageResult(true, emptyList())
+            // LLM が「回答は: yes, ...」のように前置きを付けることがあるため、
+            // 全行をスキャンして最初に yes / no で始まる行を採用する。
+            for (rawLine in raw.lines()) {
+                val line = rawLine.trim()
+                if (line.isEmpty()) continue
 
-            return if (line.trimStart().startsWith("yes")) {
-                CoverageResult(canAnswer = true, missingInformation = emptyList())
-            } else if (line.trimStart().startsWith("no")) {
-                val parts = line.substringAfter("no").trimStart(',', ' ')
-                val missing = if (parts.isBlank()) emptyList()
-                else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                Log.d(TAG, "coverage=false missing=$missing")
-                CoverageResult(canAnswer = false, missingInformation = missing)
-            } else {
-                // 判定不能時は「回答可能」扱いにして余計なReActを起動しない
-                Log.d(TAG, "coverage parse unclear: $line — defaulting canAnswer=true")
-                CoverageResult(canAnswer = true, missingInformation = emptyList())
+                if (line.startsWith("yes")) {
+                    return CoverageResult(canAnswer = true, missingInformation = emptyList())
+                }
+                if (line.startsWith("no")) {
+                    val parts = line.substringAfter("no").trimStart(',', ' ')
+                    val missing = if (parts.isBlank()) emptyList()
+                    else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                    Log.d(TAG, "coverage=false missing=$missing")
+                    return CoverageResult(canAnswer = false, missingInformation = missing)
+                }
             }
+
+            // 判定不能時は「回答可能」扱いにして余計なReActを起動しない
+            Log.d(TAG, "coverage parse unclear: $raw — defaulting canAnswer=true")
+            return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
     }
 

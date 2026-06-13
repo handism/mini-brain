@@ -8,6 +8,27 @@ class QueryExpander(private val llmService: LlmService) {
     companion object {
         private const val TAG = "QueryExpander"
         private const val MAX_QUERIES = 8
+
+        // 簡易 JSON 配列パーサ。LLM 出力に前置きやコードフェンスが混ざる前提で、
+        // 最初に出現する [ から最後の ] までを切り出し、ダブル/シングルクォート両対応で要素を抽出する。
+        internal fun parseJsonArray(raw: String): List<String> {
+            val start = raw.indexOf('[')
+            val end = raw.lastIndexOf(']')
+            if (start < 0 || end <= start) return emptyList()
+            val jsonStr = raw.substring(start, end + 1)
+            return runCatching {
+                val result = mutableListOf<String>()
+                val regex = Regex(""""([^"]*)"|'([^']*)'""")
+                regex.findAll(jsonStr).forEach { match ->
+                    val value = match.groupValues[1].ifEmpty { match.groupValues[2] }
+                    if (value.isNotBlank()) result += value
+                }
+                result
+            }.getOrElse {
+                Log.w(TAG, "JSON parse failed: $it")
+                emptyList()
+            }
+        }
     }
 
     suspend fun expand(query: String): List<String> {
@@ -60,21 +81,4 @@ class QueryExpander(private val llmService: LlmService) {
         出力:
     """.trimIndent()
 
-    private fun parseJsonArray(raw: String): List<String> {
-        // 出力中から [...] を抽出
-        val start = raw.indexOf('[')
-        val end = raw.lastIndexOf(']')
-        if (start < 0 || end <= start) return emptyList()
-        val jsonStr = raw.substring(start, end + 1)
-        return runCatching {
-            // 簡易パーサ: "..." または '...' のクォート文字列を抽出
-            val result = mutableListOf<String>()
-            val regex = Regex(""""([^"]+)""")
-            regex.findAll(jsonStr).forEach { result += it.groupValues[1] }
-            result
-        }.getOrElse {
-            Log.w(TAG, "JSON parse failed: $it")
-            emptyList()
-        }
-    }
 }
