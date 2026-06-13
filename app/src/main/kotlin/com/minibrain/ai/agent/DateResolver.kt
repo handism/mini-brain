@@ -29,6 +29,12 @@ object DateResolver {
     // ドット/スラッシュ区切り日付: 2024.03.01 / 2024/03/01
     private val DOT_SLASH_DATE_RE = Regex("""(\d{4})[./](\d{1,2})[./](\d{1,2})""")
 
+    // 「いつ」「何月」など時期を尋ねるクエリの判定。
+    // AgentPipeline / CoverageChecker / LlmReranker でファイルをまたいで使うため、ここに一本化。
+    private val DATE_QUERY_RE = Regex("""いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで""")
+
+    fun isDateQuery(question: String): Boolean = DATE_QUERY_RE.containsMatchIn(question)
+
     // 元号: エントリを追加するだけで resolveEraYear / isDiaryQuery の両方に反映される
     private data class EraEntry(val pattern: Regex, val gregorianOffset: Int)
     private val ERA_LIST = listOf(

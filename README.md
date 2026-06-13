@@ -139,17 +139,20 @@ app/src/main/kotlin/com/minibrain/
   2. Parallel Retrieval:
      ├─ 展開クエリ × BM25（FTS4）
      ├─ 展開クエリ × Metadata Search（fileName / path / tags / documentDate）
-     │                              + fileName 逆引き（fileName が query の substring）
+     │                              + fileName 逆引き（fileName が query の substring）→ Citation.topicMatch=true
      │                              snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込む
+     │                              topicMatch ヒットは snippet を先頭 chunk から 500 字採る（本文の日付ラベル行を回答 LLM に届けるため）
      └─ Multi-Vector（元クエリ + 展開クエリ + HyDE 仮想回答）
                                     コサイン類似度 < 0.45 は閾値カット
   3. Candidate Merge: 重み付き RRF（k=60、META=1.5 / BM25=1.2 / VECTOR=1.0）で重複排除 → 上位 50 件
   4. LlmReranker（LLM）: 上位 10 件に絞り込み
-     ※ path / heading / date / source / snippet の構造化形式で投入
-     ※ 日付クエリは date フィールドを持つ候補を優先
+     ※ path / heading / date / topic / source / snippet の構造化形式で投入
+     ※ 日付クエリは date フィールドを持つ候補と topic=match の候補を両方優先（topicMatch は date 欄が空でも除外しない）
+  4.5 dateRange pin: 期間クエリで dateRangeSearch ヒットがあれば上位 5 件を結果の先頭に強制マージ
 
 ↓ CoverageCheck（LLM）
   ※ 日付クエリ かつ snippet 先頭が `[日付:` で始まる候補があれば LLM を呼ばずに即 canAnswer=true で短絡
+  ※ 日付クエリ かつ topicMatch=true の候補（固有名詞ヒット）が top5 にあれば同じく短絡 yes
   canAnswer=true  → 回答生成へ
   canAnswer=false → ExplorerStrategy を決定して ReAct ループへ
     EXPAND_TIME  : visit/date/time が不足 → read_file で全文を読んで日付メタを確認（timeline_search は最終手段）
@@ -165,7 +168,13 @@ app/src/main/kotlin/com/minibrain/
   重複除去（docId + headingPath キー）・トークン budget（chars/3 推定、上限 1200 tokens）
   citations 空 → RRF 強制フォールバック（セーフティネット）
 ↓ LLM 回答生成（ストリーミング）
+  ※ 期間クエリ または「いつ/何月/年前/去年/先月/先週」系の date クエリでは、context block 直後に日付の拾い方を指示:
+    (1) `[日付: YYYY-MM-DD]` プレフィックス → (2) 本文中の「初回訪問日:」「訪問日:」「日付:」ラベル行 → (3) 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
 ```
+
+ノートの命名: 日付付きファイル名（`2024-12-15.md` / `2024-12.md` / `2024年12月.md` 等）はインデックス時に自動で時系列メタ（`documentDate`）として取り込まれ、「去年の冬」「先月」のような期間クエリで `[日付:]` プレフィックス付きの引用として優先表示される。月のみの命名は月初 1 日として扱う。
+
+固有名詞質問（例: 「サウナしきじにいつ行ったっけ？」）は **ファイル名一致経路**で対象ファイルが必ず引用に残り、回答 LLM が本文中の「初回訪問日: 2022/01/01」のようなラベル行や YYYY/MM/DD 表記を直接読んで日付を答える。ユーザーは `documentDate` が抽出できる形式（ファイル名 / YAML frontmatter / 見出し）に揃えなくても、本文に日付を書いていれば「いつ」系クエリに回答できる。
 
 ### Recentness Ranking
 

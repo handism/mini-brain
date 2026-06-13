@@ -3,6 +3,7 @@ package com.minibrain.data.repo
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.AppDatabase
@@ -40,6 +41,45 @@ class DocumentRepository(
     private val db: AppDatabase,
     private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
+    companion object {
+        // パスやファイル名から日付メタを抽出する。完全日付（日まで揃う）を先に検査し、
+        // マッチしなかった場合は月単位ファイル（YYYY-MM など）を月初 1 日として扱う。
+        // ユニットテストから呼び出せるよう @VisibleForTesting に昇格。
+        @VisibleForTesting
+        internal fun extractDateFromPath(relativePath: String): String? {
+            val yearRange = 1990..LocalDate.now().year
+
+            val fullPatterns = listOf(
+                Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
+                Regex("""(\d{4})/(\d{1,2})/(\d{1,2})"""),
+                Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
+                Regex("""(\d{4})_(\d{1,2})_(\d{1,2})"""),
+                Regex("""(\d{4})\.(\d{1,2})\.(\d{1,2})"""),
+                Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日"""),
+            )
+            for (pattern in fullPatterns) {
+                val match = pattern.find(relativePath) ?: continue
+                val (y, m, d) = match.destructured
+                val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), d.toInt()) }.getOrNull()
+                if (date != null && date.year in yearRange) return date.toString()
+            }
+
+            val monthPatterns = listOf(
+                Regex("""(?<!\d)(\d{4})-(\d{1,2})(?!\d|-\d)"""),
+                Regex("""(\d{4})年(\d{1,2})月(?!\d)"""),
+                Regex("""(?<!\d)(\d{4})(\d{2})(?!\d)"""),
+            )
+            for (pattern in monthPatterns) {
+                val match = pattern.find(relativePath) ?: continue
+                val (y, m) = match.destructured
+                val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), 1) }.getOrNull()
+                if (date != null && date.year in yearRange) return date.toString()
+            }
+
+            return null
+        }
+    }
+
     private val _indexingState = MutableStateFlow<IndexingState>(IndexingState.Idle)
     val indexingState: StateFlow<IndexingState> = _indexingState
 
@@ -222,21 +262,8 @@ class DocumentRepository(
         )
     }
 
-    private fun extractDateFromPath(relativePath: String): String? {
-        val patterns = listOf(
-            Regex("""(\d{4})-(\d{2})-(\d{2})"""),
-            Regex("""(\d{4})/(\d{2})/(\d{2})"""),
-            Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
-        )
-        for (pattern in patterns) {
-            val match = pattern.find(relativePath) ?: continue
-            return runCatching {
-                val (y, m, d) = match.destructured
-                LocalDate.of(y.toInt(), m.toInt(), d.toInt()).toString()
-            }.getOrNull()
-        }
-        return null
-    }
+    private fun extractDateFromPath(relativePath: String): String? =
+        Companion.extractDateFromPath(relativePath)
 
     private fun deleteFtsByTree(treeUri: String) {
         db.openHelper.writableDatabase.execSQL(

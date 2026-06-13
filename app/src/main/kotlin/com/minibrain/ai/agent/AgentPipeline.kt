@@ -10,6 +10,9 @@ import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.util.DatePrefix
+import com.minibrain.util.PromptUtils
+import com.minibrain.util.TokenEstimator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -88,7 +91,7 @@ class AgentPipeline(
         }
 
         onStatus("")
-        val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory))
+        val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory, dateRange))
         AgentResult(citations, answerFlow, traceEvents)
     }
 
@@ -170,13 +173,17 @@ class AgentPipeline(
                 is PlannerDecision.Call -> {
                     consecutiveParseErrors = 0
                     val toolCall = ToolCall(iteration, decision.tool)
-                    traceEvents += ToolCallEvent(iteration, traceToolName(decision.tool), traceToolArgs(decision.tool))
-                    onStatus(toolProgressDescription(decision.tool))
+                    val tool = decision.tool
+                    traceEvents += ToolCallEvent(iteration, tool.traceName, tool.traceArgs)
+                    onStatus(tool.progressLabel)
                     val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
                     toolResults += result
-                    traceEvents += ObservationEvent(iteration, traceObservationSummary(decision.tool, result))
+                    traceEvents += ObservationEvent(
+                        iteration,
+                        tool.observationKind(result.citations.size, result.summary.length),
+                    )
                     addObservation(observations, toolCall, result.summary)
-                    Log.d(TAG, "tool=${decision.tool} citations=${result.citations.size}")
+                    Log.d(TAG, "tool=$tool citations=${result.citations.size}")
                 }
             }
         }
@@ -300,6 +307,7 @@ class AgentPipeline(
         question: String,
         citations: List<Citation>,
         history: List<Pair<String, String>>,
+        dateRange: DateRange? = null,
     ): String {
         // トークン推定上限 (chars / 3 で推定; CitationIntegrator と同一定数)
         val MAX_CONTEXT_TOKENS = 1200
@@ -327,13 +335,60 @@ $body
             "知識ベースに関連する情報が見つかりませんでした。一般的な知識で回答してください。\n\n---"
         }
 
+        // 日付関連の指示。dateRange があれば期間照合、無くても「いつ」系クエリなら本文中の日付を
+        // 拾うよう誘導する（ADR-026）。snippet から日付を抽出する優先順位は次の通り:
+        //   1. `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みの documentDate）
+        //   2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
+        //   3. 本文中の YYYY/MM/DD / YYYY-MM-DD / YYYY年MM月DD日 表記
+        val isDateQuery = DATE_QUERY_REGEX.containsMatchIn(question)
+        val temporalInstruction = when {
+            dateRange != null -> {
+                val hasDated = citations.any { it.snippet.trimStart().startsWith("[日付:") }
+                if (hasDated) {
+                    """
+【期間クエリの解釈】
+質問内の「去年」「先月」「今年の冬」などの相対表現は、システム側で既に **${dateRange.start} 〜 ${dateRange.end}** の期間に解釈済みです。
+年号の解釈で迷ったり「どの年を指すか不明」などと逡巡せず、この期間を所与の前提として回答してください。
+
+【回答の作り方】
+1. 各 snippet から日付を拾う優先順位:
+   - 先頭の `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みのファイル日付）
+   - 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
+   - 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
+2. 拾った日付を上記期間と照合し、該当する snippet を時系列順に整理して具体的に答える
+3. snippet 本文に活動内容が書かれていれば、それを「情報がない」と切り捨てず素直に紹介する
+""".trimIndent()
+                } else {
+                    """
+【期間クエリの解釈】
+質問内の相対表現は ${dateRange.start} 〜 ${dateRange.end} の期間に解釈済みです。
+`[日付:]` プレフィックス付き候補は見つかりませんでしたが、snippet 本文中の「初回訪問日: …」「訪問日: …」ラベル行や、YYYY/MM/DD・YYYY年MM月DD日 表記も日付として有効です。これらを期間と照合してください。
+該当する日付が一切見つからなければ、その旨を率直に伝えたうえで、関連しそうな snippet を補足として提示してください。
+""".trimIndent()
+                }
+            }
+            isDateQuery -> {
+                """
+【日付に関する質問】
+質問は時期・日付を尋ねています。snippet から日付を拾う優先順位:
+1. 先頭の `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みのファイル日付）
+2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
+3. 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
+
+該当ファイル名がクエリに含まれている場合は、そのファイルの本文中の日付を主な根拠として「いつ」かを具体的に答えてください。日付らしき表記が無ければ、その旨を率直に伝えてください。
+""".trimIndent()
+            }
+            else -> ""
+        }
+
         val historyBlock = history.takeLast(6)
             .joinToString("\n") { (role, content) ->
                 "${if (role == "user") "ユーザー" else "アシスタント"}: $content"
             }
             .let { if (it.isNotBlank()) "$it\n" else "" }
 
-        return "$contextBlock\n\n$historyBlock\nユーザー: $question\nアシスタント:"
+        val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
+        return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: $question\nアシスタント:"
     }
 
     // observation スライディングウィンドウ: 最新2件を full(詳細)、それ以前を compact(要約)に保つ

@@ -61,8 +61,9 @@ object MarkdownChunker {
             val title = match.groupValues[2].trim()
 
             // 同レベル以上のものを pop
+            // removeLast() は API 35 から java.util.List 由来に解決されるため、minSdk 31 では使えない
             while (headingStack.isNotEmpty() && headingStack.last().first >= level) {
-                headingStack.removeLast()
+                headingStack.removeAt(headingStack.lastIndex)
             }
             headingStack.add(Pair(level, title))
 

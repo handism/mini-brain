@@ -3,6 +3,7 @@ package com.minibrain.ai.agent
 import android.util.Log
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
+import com.minibrain.util.DatePrefix
 
 data class CoverageResult(
     val canAnswer: Boolean,
@@ -15,13 +16,18 @@ class CoverageChecker(private val llmService: LlmService) {
         private const val TAG = "CoverageChecker"
         private const val SNIPPET_MAX_CHARS = 300
         private const val MAX_CANDIDATES = 5
-        private const val DATE_PREFIX = "[日付:"
-        private val DATE_QUERY_REGEX = Regex("""いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで""")
 
         // 日付クエリで上位候補に日付プレフィックス付き snippet があるか（LLM 短絡判定）
         internal fun isDateShortCircuit(query: String, candidates: List<Citation>): Boolean =
-            DATE_QUERY_REGEX.containsMatchIn(query) &&
-                candidates.take(MAX_CANDIDATES).any { it.snippet.trimStart().startsWith(DATE_PREFIX) }
+            DateResolver.isDateQuery(query) &&
+                candidates.take(MAX_CANDIDATES).any { DatePrefix.hasPrefix(it.snippet) }
+
+        // 日付クエリ + 固有名詞ヒット (topicMatch) があれば、documentDate が空でも即答可能と判定する（ADR-026）。
+        // ファイル名が質問にそのまま入っている時点で対象ファイルは確定しており、本文中の日付は回答 LLM が拾えばよい。
+        // ここで no を返すと citations がリセットされて ReAct に落ち、当該ファイルが落ちる事故を防ぐ。
+        internal fun isTopicMatchShortCircuit(query: String, candidates: List<Citation>): Boolean =
+            DateResolver.isDateQuery(query) &&
+                candidates.take(MAX_CANDIDATES).any { it.topicMatch }
 
         internal fun parse(raw: String): CoverageResult {
             // LLM が「回答は: yes, ...」のように前置きを付けることがあるため、
@@ -52,6 +58,12 @@ class CoverageChecker(private val llmService: LlmService) {
         // 日付クエリで日付プレフィックス付き候補があれば、LLM を呼ばずに即答可能と判定
         if (isDateShortCircuit(query, candidates)) {
             Log.d(TAG, "short-circuit: date query with dated candidate → canAnswer=true")
+            return CoverageResult(canAnswer = true, missingInformation = emptyList())
+        }
+
+        // 日付クエリ + 固有名詞ヒットでも即答可能扱い（回答 LLM が snippet 本文の日付を拾う）
+        if (isTopicMatchShortCircuit(query, candidates)) {
+            Log.d(TAG, "short-circuit: date query with topic-match candidate → canAnswer=true")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
 

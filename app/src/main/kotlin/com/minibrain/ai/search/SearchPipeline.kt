@@ -14,12 +14,16 @@ import com.minibrain.ai.agent.RerankEvent
 import com.minibrain.ai.agent.VectorSearchHitEvent
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.ai.rag.RrfFuser
 import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.rag.SourceType
+import com.minibrain.ai.rag.dedupeKey
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.search.NGramTokenizer
+import com.minibrain.util.DatePrefix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -53,6 +57,15 @@ class SearchPipeline(
         private const val RRF_K = 60
         // RRF 重み（[meta, vector, bm25]）。Metadata 完全一致 > BM25 > Vector の順。
         private val RRF_WEIGHTS = listOf(1.5f, 1.0f, 1.2f)
+        // dateRange 検出時に Reranker 結果先頭へ強制注入する dateRangeSearch ヒット数（ADR-025）。
+        private const val DATE_RANGE_PIN_COUNT = 5
+        // dateRange ヒットのスニペット長。firstParagraph (200) では LLM が活動内容を読めず
+        // 「内容が記載されていません」と返してしまうため、chunk テキストから長めに採る。
+        private const val DATE_RANGE_SNIPPET_CHARS = 600
+        // ファイル名一致 (topicMatch) ヒットのスニペット長（ADR-026）。
+        // 「初回訪問日: YYYY/MM/DD」のようなラベル行が firstParagraph (200) からこぼれていても
+        // 拾えるよう、先頭 chunk テキストから長めに採る。
+        private const val TOPIC_MATCH_SNIPPET_CHARS = 500
     }
 
     suspend fun search(
@@ -84,6 +97,8 @@ class SearchPipeline(
 
         // 2. Parallel Retrieval
         onStatus("並行検索中...")
+        // dateRangeSearch は Reranker 後段の pin 注入でも再利用するため、別に保持する
+        var dateRangeHits: List<Citation> = emptyList()
         val (bm25Candidates, metaCandidates, vectorCandidates) = coroutineScope {
             // 展開クエリごとに BM25 を並行実行
             val bm25Job = async(Dispatchers.IO) {
@@ -92,7 +107,9 @@ class SearchPipeline(
             // 日付範囲検索（DateResolver 経由）+ メタデータ検索を合算
             // 日付ヒットを rank 先頭に置き、RRF 融合で優先されるようにする
             val metaJob = async(Dispatchers.IO) {
-                dateRangeSearch(query, treeUri, dateRange, ctx) + metadataSearch(expanded, ctx)
+                val dateHits = dateRangeSearch(query, treeUri, dateRange, ctx)
+                dateRangeHits = dateHits
+                dateHits + metadataSearch(expanded, ctx)
             }
             // ベクトル検索: 展開クエリ全件 + （任意）HyDE 仮想回答を投入し、Recall を底上げする。
             // EmbedderService は Mutex で直列化されるため、ここを async にしても並列実行はされないが、
@@ -125,7 +142,18 @@ class SearchPipeline(
         traceEvents += RerankEvent(before = merged.size, after = reranked.size)
         Log.d(TAG, "reranked=${reranked.size}")
 
-        return SearchPipelineResult(reranked, traceEvents)
+        // 4.5 dateRange 検出時は dateRangeSearch 上位 N 件を Reranker 結果の先頭に強制マージする（ADR-025）。
+        // Reranker が日付ヒットを下位に圧縮するケースを救う最小介入。後段は Reranker 順を維持する。
+        val final = if (dateRange != null && dateRangeHits.isNotEmpty()) {
+            val pinned = dateRangeHits.take(DATE_RANGE_PIN_COUNT)
+            val pinnedKeys = pinned.map { it.dedupeKey }.toHashSet()
+            val rest = reranked.filterNot { it.dedupeKey in pinnedKeys }
+            (pinned + rest).take(RERANK_TOP_K).also {
+                Log.d(TAG, "dateRange pin: pinned=${pinned.size} final=${it.size}")
+            }
+        } else reranked
+
+        return SearchPipelineResult(final, traceEvents)
     }
 
     private suspend fun bm25Search(query: String, treeUri: String): List<Citation> {
@@ -159,7 +187,15 @@ class SearchPipeline(
             q.split(Regex("[\\s　、。・]+")).filter { it.length >= 2 }
         }.distinct()
 
-        return allDocs.filter { doc ->
+        // topicMatch ヒットは先頭 chunk テキストでスニペットを組むため、必要なら 1 回だけロードする。
+        // 普通のトークン一致のみで終わる場合は chunkVectors() を触らずに済ませる。
+        var chunksByDocLazy: Map<Long, List<ChunkEntity>>? = null
+        suspend fun firstChunkOf(docId: Long): ChunkEntity? {
+            val map = chunksByDocLazy ?: ctx.chunkVectors().first.groupBy { it.docId }.also { chunksByDocLazy = it }
+            return map[docId]?.firstOrNull()
+        }
+
+        return allDocs.mapNotNull { doc ->
             val fields = listOfNotNull(
                 doc.fileName,
                 doc.relativePath,
@@ -175,21 +211,24 @@ class SearchPipeline(
             val fileStem = doc.fileName.removeSuffix(".md").removeSuffix(".MD")
             val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
                 queries.any { q -> q.contains(fileStem, ignoreCase = true) }
-            tokenMatch || fileNameInQuery
-        }.map { doc ->
+            if (!tokenMatch && !fileNameInQuery) return@mapNotNull null
+
+            // topicMatch ヒットは「初回訪問日: …」「YYYY/MM/DD」など本文の日付を後段の回答 LLM が
+            // 拾えるよう、先頭 chunk テキストから長めの snippet を採る（ADR-026）。
+            val snippetBody = if (fileNameInQuery) {
+                firstChunkOf(doc.id)?.text?.take(TOPIC_MATCH_SNIPPET_CHARS) ?: doc.firstParagraph
+            } else {
+                doc.firstParagraph
+            }
             Citation(
                 headingPath = doc.relativePath,
-                snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
+                snippet = DatePrefix.build(doc.documentDate, snippetBody),
                 docId = doc.id,
                 relativePath = doc.relativePath,
                 source = SourceType.METADATA,
+                topicMatch = fileNameInQuery,
             )
         }
-    }
-
-    private fun buildSnippetWithDate(documentDate: String?, firstParagraph: String?): String = buildString {
-        if (!documentDate.isNullOrBlank()) append("[日付: $documentDate] ")
-        append(firstParagraph ?: "")
     }
 
     private suspend fun vectorSearch(
@@ -232,8 +271,7 @@ class SearchPipeline(
         ordered.forEachIndexed { idx, q ->
             val k = if (idx == 0) VECTOR_LIMIT else VECTOR_LIMIT_PER_EXPANDED
             vectorSearch(q, treeUri, k = k, ctx = ctx).forEach { c ->
-                val key = "${c.docId}::${c.headingPath}"
-                if (seen.add(key)) out += c
+                if (seen.add(c.dedupeKey)) out += c
             }
         }
         return out
@@ -253,10 +291,19 @@ class SearchPipeline(
         if (dateRange != null) {
             val docs = filterDocsByDateRange(ctx, dateRange)
             Log.d(TAG, "dateRangeSearch range=${dateRange.start}〜${dateRange.end} hits=${docs.size}")
+            if (docs.isEmpty()) return emptyList()
+
+            // 各 doc の先頭 chunk テキストを使って「活動内容」を pin に乗せる。
+            // firstParagraph (200 文字) では LLM が「内容が記載されていません」と返す問題への対処（ADR-025）
+            val (chunks, _) = ctx.chunkVectors()
+            val chunksByDoc = chunks.groupBy { it.docId }
             return docs.map { doc ->
+                val firstChunk = chunksByDoc[doc.id]?.firstOrNull()
+                val body = firstChunk?.text?.take(DATE_RANGE_SNIPPET_CHARS)
+                    ?: doc.firstParagraph
                 Citation(
-                    headingPath = doc.relativePath,
-                    snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
+                    headingPath = firstChunk?.headingPath ?: doc.relativePath,
+                    snippet = DatePrefix.build(doc.documentDate, body),
                     docId = doc.id,
                     relativePath = doc.relativePath,
                     source = SourceType.METADATA,
@@ -282,7 +329,7 @@ class SearchPipeline(
                     Citation(
                         headingPath = doc.relativePath,
                         // CoverageChecker の [日付:] 短絡が効くよう日付プレフィックスを付与
-                        snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
+                        snippet = DatePrefix.build(doc.documentDate, doc.firstParagraph),
                         docId = doc.id,
                         relativePath = doc.relativePath,
                         source = SourceType.METADATA,
@@ -321,22 +368,11 @@ internal fun mergeCandidatesRrf(
     limit: Int,
     k: Int = 60,
     weights: List<Float>? = null,
-): List<Citation> {
-    require(weights == null || weights.size == rankLists.size) {
-        "weights.size must equal rankLists.size"
-    }
-    val scores = mutableMapOf<String, Float>()
-    val first = mutableMapOf<String, Citation>()
-    rankLists.forEachIndexed { listIdx, list ->
-        val w = weights?.get(listIdx) ?: 1f
-        list.forEachIndexed { rank, c ->
-            val key = "${c.docId}::${c.headingPath}"
-            scores[key] = (scores[key] ?: 0f) + w * (1f / (k + rank + 1))
-            first.getOrPut(key) { c }
-        }
-    }
-    return scores.entries
-        .sortedByDescending { it.value }
-        .take(limit)
-        .map { (key, score) -> first.getValue(key).copy(score = score) }
-}
+): List<Citation> = RrfFuser.fuse(
+    rankLists = rankLists,
+    keyOf = { it.dedupeKey },
+    k = k,
+    weights = weights,
+).sortedByDescending { it.score }
+    .take(limit)
+    .map { it.item.copy(score = it.score) }

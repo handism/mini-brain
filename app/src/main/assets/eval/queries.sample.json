@@ -13,5 +13,15 @@
     "id": "sample-3",
     "query": "5年前の3月何してた？",
     "expected": ["journal/2021-03.md"]
+  },
+  {
+    "id": "sample-4",
+    "query": "去年の冬何してたっけ？",
+    "expected": ["journal/2024-12.md", "journal/2025-01.md", "journal/2025-02.md"]
+  },
+  {
+    "id": "sample-5",
+    "query": "去年の夏に何かイベントあったっけ？",
+    "expected": ["journal/2024-07.md", "journal/2024-08.md"]
   }
 ]

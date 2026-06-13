@@ -1,8 +1,10 @@
 package com.minibrain.ai.search
 
 import android.util.Log
+import com.minibrain.ai.agent.DateResolver
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
+import com.minibrain.util.DatePrefix
 
 class LlmReranker(private val llmService: LlmService) {
 
@@ -11,7 +13,6 @@ class LlmReranker(private val llmService: LlmService) {
         private const val SNIPPET_MAX_CHARS = 140
         private const val CANDIDATE_LIMIT = 30
         private const val DEFAULT_TOP_K = 10
-        private val DATE_PREFIX_REGEX = Regex("""^\[日付:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})\]\s*""")
     }
 
     suspend fun rerank(
@@ -52,30 +53,28 @@ class LlmReranker(private val llmService: LlmService) {
         }
     }
 
-    private fun isDateQuery(query: String): Boolean =
-        Regex("""いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで""").containsMatchIn(query)
-
     private fun buildPrompt(query: String, candidates: List<Citation>, topK: Int): String {
         val sb = StringBuilder()
         sb.appendLine("以下の検索候補から、クエリに最も関連する上位${topK}件のインデックスを関連度の高い順にJSON配列で出力してください。")
         sb.appendLine("説明やコメントは不要で、JSON配列のみ出力してください。")
-        sb.appendLine("判断材料: path（ファイル位置）/ heading（見出し階層）/ date（文書日付があれば）/ source（METADATA は完全一致、VECTOR は意味類似）/ snippet（本文抜粋）を総合して関連度を採点してください。")
-        if (isDateQuery(query)) {
-            sb.appendLine("「いつ」に関する質問のため、date フィールドを持つ候補を優先してください。")
+        sb.appendLine("判断材料: path（ファイル位置）/ heading（見出し階層）/ date（文書日付があれば）/ topic（ファイル名がクエリと一致したか）/ source（METADATA は完全一致、VECTOR は意味類似）/ snippet（本文抜粋）を総合して関連度を採点してください。")
+        if (DateResolver.isDateQuery(query)) {
+            // date フィールドを優先しつつ、topic=match の候補は本文中に日付表記があるケースを
+            // 想定して同等以上に扱う（ADR-026）。「サウナしきじにいつ行ったっけ」のような固有名詞 +
+            // 「いつ」クエリで、date 欄が空のファイル名一致候補が押し出されないようにする。
+            sb.appendLine("「いつ」に関する質問のため、date フィールドを持つ候補と topic=match の候補をどちらも上位に残してください。topic=match の候補は date 欄が空でも snippet 本文に日付が書かれている可能性が高いので、date 無しを理由に除外しないでください。")
         }
         sb.appendLine()
         sb.appendLine("クエリ: \"$query\"")
         sb.appendLine()
         candidates.forEachIndexed { i, c ->
-            val rawSnippet = c.snippet
-            val dateMatch = DATE_PREFIX_REGEX.find(rawSnippet)
-            val date = dateMatch?.groupValues?.getOrNull(1)
-            val body = (if (dateMatch != null) rawSnippet.substring(dateMatch.range.last + 1) else rawSnippet)
-                .take(SNIPPET_MAX_CHARS).replace('\n', ' ')
+            val (date, rest) = DatePrefix.split(c.snippet)
+            val body = rest.take(SNIPPET_MAX_CHARS).replace('\n', ' ')
             val path = c.relativePath ?: "?"
             val source = c.source.name
             val datePart = if (date != null) " date=$date" else ""
-            sb.appendLine("[$i] path=$path heading=\"${c.headingPath}\"$datePart source=$source snippet=$body")
+            val topicPart = if (c.topicMatch) " topic=match" else ""
+            sb.appendLine("[$i] path=$path heading=\"${c.headingPath}\"$datePart$topicPart source=$source snippet=$body")
         }
         sb.appendLine()
         sb.appendLine("出力（JSON配列のみ、例: [3, 0, 7, ...]）:")
