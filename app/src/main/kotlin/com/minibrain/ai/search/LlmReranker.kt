@@ -8,9 +8,10 @@ class LlmReranker(private val llmService: LlmService) {
 
     companion object {
         private const val TAG = "LlmReranker"
-        private const val SNIPPET_MAX_CHARS = 100
+        private const val SNIPPET_MAX_CHARS = 140
         private const val CANDIDATE_LIMIT = 30
         private const val DEFAULT_TOP_K = 10
+        private val DATE_PREFIX_REGEX = Regex("""^\[日付:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})\]\s*""")
     }
 
     suspend fun rerank(
@@ -58,15 +59,23 @@ class LlmReranker(private val llmService: LlmService) {
         val sb = StringBuilder()
         sb.appendLine("以下の検索候補から、クエリに最も関連する上位${topK}件のインデックスを関連度の高い順にJSON配列で出力してください。")
         sb.appendLine("説明やコメントは不要で、JSON配列のみ出力してください。")
+        sb.appendLine("判断材料: path（ファイル位置）/ heading（見出し階層）/ date（文書日付があれば）/ source（METADATA は完全一致、VECTOR は意味類似）/ snippet（本文抜粋）を総合して関連度を採点してください。")
         if (isDateQuery(query)) {
-            sb.appendLine("「いつ」に関する質問のため、日付（YYYY-MM-DD, 年月日形式等）を含む候補を優先してください。")
+            sb.appendLine("「いつ」に関する質問のため、date フィールドを持つ候補を優先してください。")
         }
         sb.appendLine()
         sb.appendLine("クエリ: \"$query\"")
         sb.appendLine()
         candidates.forEachIndexed { i, c ->
-            val snippet = c.snippet.take(SNIPPET_MAX_CHARS).replace('\n', ' ')
-            sb.appendLine("[$i] ${c.headingPath}: $snippet")
+            val rawSnippet = c.snippet
+            val dateMatch = DATE_PREFIX_REGEX.find(rawSnippet)
+            val date = dateMatch?.groupValues?.getOrNull(1)
+            val body = (if (dateMatch != null) rawSnippet.substring(dateMatch.range.last + 1) else rawSnippet)
+                .take(SNIPPET_MAX_CHARS).replace('\n', ' ')
+            val path = c.relativePath ?: "?"
+            val source = c.source.name
+            val datePart = if (date != null) " date=$date" else ""
+            sb.appendLine("[$i] path=$path heading=\"${c.headingPath}\"$datePart source=$source snippet=$body")
         }
         sb.appendLine()
         sb.appendLine("出力（JSON配列のみ、例: [3, 0, 7, ...]）:")

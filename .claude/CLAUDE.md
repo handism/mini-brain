@@ -102,15 +102,18 @@ UI (Compose) → ViewModel → AgentPipeline → SearchPipeline → (QueryExpand
 
 ↓ SearchPipeline.search()
   1. QueryExpander（LLM）: クエリを 3〜8 件に展開
+  1.5 HyDE（LLM）: 仮想回答を 1〜2 文生成（タイムアウト 6 秒、失敗時はスキップ）
   2. Parallel Retrieval:
      ├─ 展開クエリ × BM25（FTS4）            : 並行実行
      ├─ 展開クエリ × Metadata Search         : fileName/path/tags/documentDate を検索
      │                                       + fileName(拡張子除く 3 字以上) が query の substring に含まれる逆引き
      │                                       snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込む
-     └─ 元クエリ × Vector（Embedding）       : ベクトル類似で意味的近傍を拾う
-  3. Candidate Merge: 重複排除（docId+headingPath キー）→ 上位 50 件
+     └─ multiVectorSearch                     : 元クエリ + 展開クエリ + HyDE 仮想回答で順次ベクトル検索
+                                              コサイン類似度 < 0.45 は閾値カットで除外
+  3. Candidate Merge: RRF rank 融合（重み META=1.5 / VECTOR=1.0 / BM25=1.2）→ 上位 50 件
   4. LlmReranker（LLM）: 候補をスコアリングし上位 10 件を選択
-     ※ 日付クエリ（いつ・何月 等）は日付情報を含む候補を優先するよう追記
+     ※ Reranker 入力は `path=... heading=... date=... source=... snippet=...` 構造化形式
+     ※ 日付クエリ（いつ・何月 等）は date フィールドを持つ候補を優先するよう追記
 
 ↓ CoverageCheck（LLM）: query + top5 candidates を見て回答可能かを判定
   ※ 日付クエリ かつ snippet 先頭が `[日付:` で始まる候補があれば LLM を呼ばずに即 canAnswer=true で短絡
@@ -154,7 +157,9 @@ context.filesDir/models/e5-tokenizer.json               # XLM-RoBERTa SentencePi
 | ------------------------------------ | ----------------------------------------------------- |
 | Search First フロー全体              | `ai/search/SearchPipeline.kt`                         |
 | クエリ展開                           | `ai/search/QueryExpander.kt`                          |
+| HyDE（仮想回答生成）                 | `ai/search/HyDE.kt`                                   |
 | LLM 再採点                           | `ai/search/LlmReranker.kt`                            |
+| 評価指標 / 評価セットローダ          | `eval/EvalMetrics.kt` / `eval/EvalRunner.kt`          |
 | Coverage Check・Explorer Strategy    | `ai/agent/CoverageChecker.kt`                         |
 | パイプライン統合・フォールバック制御 | `ai/agent/AgentPipeline.kt`                           |
 | ReAct ループ（フォールバック）       | `ai/agent/AgentPipeline.kt`（runReActLoop）           |
@@ -204,4 +209,10 @@ context.filesDir/models/e5-tokenizer.json               # XLM-RoBERTa SentencePi
 - `QueryClassifier` の `GENERAL_KNOWLEDGE_PATTERNS` に `について教えて` は含まない（個人ノートでも多用されるため MEMORY_SEARCH に倒す）
 - `QueryExpander` のプロンプトには「固有名詞を助詞・疑問詞を取り除いた単独名詞として 1 件以上含める」必須ルールを書いておく（日本語助詞でトークン化されない問題への対策）
 - `SearchPipeline.metadataSearch` はトークン一致と「fileName(拡張子除く) を query が substring として含む」逆引きの OR で候補抽出する（日本語形態素解析を使わずに固有名詞ファイルを拾う）
+- `SearchPipeline.multiVectorSearch` は Embedder の Mutex により実質直列で走る（並列ではない）。サブクエリ N 件 ≒ 30ms × N の追加コスト
+- `SearchPipeline.VECTOR_MIN_SCORE = 0.45f` 未満のベクトル候補は Reranker に渡る前に捨てる。閾値は評価セット (`EvalRunner`) で調整する
+- `mergeCandidatesRrf(weights=...)` の重みは [meta=1.5, vector=1.0, bm25=1.2]。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新する
+- `HyDE` は LiteRT-LM 単一スレッド制約のため `QueryExpander` の直後に逐次実行する（並列不可）。失敗・タイムアウトは null フォールバック
+- `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新する
+- 評価セットは `app/src/main/assets/eval/queries.sample.json` をテンプレに、ユーザーが自分の質問〜正解 relativePath を追加して使う。`EvalRunner.run(treeUri, cases, k)` で P@K / R@K / MRR を得る
 - DB マイグレーション: 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は次回差分インデックス時に自動補完される。強制補完は Settings → 再インデックスで可能

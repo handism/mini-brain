@@ -9,9 +9,11 @@
 - **完全プライベート** — 質問・回答・md の内容はクラウドに送信しない。ネットワーク通信は初回モデルダウンロードのみ
 - **Search First → Coverage Check → Agent** — Query Expansion で検索語を展開し BM25 / Metadata / Vector を並行検索、LLM Reranker で上位候補を選択。さらに Coverage Check で「証拠が揃っているか」を評価し、不足している場合は Explorer Strategy を決定して ReAct にエスカレーション
 - **Query Expansion** — LLM が元クエリを 3〜8 件の検索語群に展開。固有名詞（人名・地名・施設名・サービス名等）は助詞・疑問詞を取り除いた単独名詞として必ず保持し、日付表現・関連語も補完
+- **HyDE（Hypothetical Document Embeddings）** — LLM がクエリへの「ありそうな回答」を 1〜2 文生成し、その埋め込みでベクトル検索を追加実行。query↔passage の表現非対称を緩和して Recall を底上げ
 - **Metadata Search** — ファイル名・フォルダパス・タグ・documentDate を直接検索。本文にない情報（日付フォルダ・会社名）も Recall に貢献。ファイル名(拡張子除く)が質問に部分文字列として含まれる場合の逆引きも実施し、日本語助詞でトークン化されないクエリでも固有名詞ファイルを確実に拾う。snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込み、日付クエリでの回答可能性判定を高速化
-- **Vector Search** — 元クエリを Embedding に変換しコサイン類似度で意味的近傍を取得。字面が一致しない言い換えや概念質問を補完
-- **LLM Reranker** — 50 件の候補を LLM が関連度順に再採点し、上位 10 件を回答コンテキストに投入。日付クエリ（いつ・何月 等）は日付情報を含む候補を優先
+- **Multi-Vector Search** — 元クエリ + 展開クエリ + HyDE 仮想回答で順次ベクトル検索し、コサイン類似度 0.45 未満はノイズとして除外。字面が一致しない言い換えや概念質問を取り逃さない
+- **重み付き RRF** — Metadata=1.5 / BM25=1.2 / Vector=1.0 の重みで rank 融合。完全一致のメタデータを優先しつつ、低類似度のベクトルノイズを上位に来づらくする
+- **LLM Reranker** — 50 件の候補を LLM が関連度順に再採点し、上位 10 件を回答コンテキストに投入。`path / heading / date / source / snippet` の構造化形式で投入し、日付クエリでは date フィールドを持つ候補を優先
 - **Coverage Check** — Search First 後に LLM が「回答に必要な証拠が揃っているか」を評価。不足情報（`visit_date` 等）を特定し、Explorer Strategy（EXPAND_TIME / EXPAND_TOPIC）を決定して ReAct に指示を渡す。日付クエリ かつ 日付プレフィックス付き候補がある場合は LLM 呼び出しを短絡
 - **ReAct エージェント（Fallback）** — Search First + Coverage Check で証拠が揃わなかった場合のフォールバック。Explorer Strategy の hint を参照し、glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search を自由に組み合わせて多段探索。EXPAND_TIME は read_file での全文読解を優先
 - **Query Classifier** — 一般知識の質問は RAG をスキップして直接 LLM が回答。検索コストを削減
@@ -79,9 +81,10 @@ app/src/main/kotlin/com/minibrain/
 ├── MainActivity.kt
 ├── ai/
 │   ├── search/                  # Search First パイプライン（新規）
-│   │   ├── SearchPipeline.kt    # QueryExpansion→並行検索→Merge→Rerank のオーケストレーション
+│   │   ├── SearchPipeline.kt    # QueryExpansion→HyDE→並行検索→重み付き RRF→Rerank のオーケストレーション
 │   │   ├── QueryExpander.kt     # LLM によるクエリ展開（3〜8 件・JSON 配列出力）
-│   │   └── LlmReranker.kt       # LLM による候補再採点（インデックス出力方式）
+│   │   ├── HyDE.kt              # LLM による仮想回答生成（query↔passage 非対称の緩和）
+│   │   └── LlmReranker.kt       # LLM による候補再採点（path/heading/date/source/snippet 構造化）
 │   ├── agent/
 │   │   ├── AgentPipeline.kt     # Search First + CoverageCheck + ReAct フォールバック統合
 │   │   ├── AgentTypes.kt        # AgentTool / Observation / PlannerDecision 等の型定義
@@ -102,6 +105,10 @@ app/src/main/kotlin/com/minibrain/
 │   └── rag/
 │       ├── RagPipeline.kt       # RAG（RRF・Citation 型・SourceType 定義）
 │       └── CosineSimilarity.kt  # コサイン類似度（純 Kotlin）
+├── eval/                        # 検索評価フレーム（P@K / R@K / MRR）
+│   ├── EvalCase.kt              # 評価ケース型（質問 + 期待 relativePath）
+│   ├── EvalMetrics.kt           # P@K / R@K / MRR 計算（純 Kotlin）
+│   └── EvalRunner.kt            # 評価セットを SearchPipeline に流して指標化
 ├── data/
 │   ├── db/                      # Room スキーマ・DAO（v6: E5 Embedder への切替で chunks/folder_embeddings をリセット）
 │   ├── md/
@@ -128,15 +135,18 @@ app/src/main/kotlin/com/minibrain/
 
 ↓ SearchPipeline（Search First）
   1. QueryExpander（LLM）: クエリを 3〜8 件に展開
+  1.5 HyDE（LLM）: 仮想回答を 1〜2 文生成（タイムアウト 6 秒、失敗時はスキップ）
   2. Parallel Retrieval:
      ├─ 展開クエリ × BM25（FTS4）
      ├─ 展開クエリ × Metadata Search（fileName / path / tags / documentDate）
      │                              + fileName 逆引き（fileName が query の substring）
      │                              snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込む
-     └─ 元クエリ × Vector（Embedding コサイン類似）
-  3. Candidate Merge: RRF（rank ベース融合、k=60）で重複排除 → 上位 50 件
+     └─ Multi-Vector（元クエリ + 展開クエリ + HyDE 仮想回答）
+                                    コサイン類似度 < 0.45 は閾値カット
+  3. Candidate Merge: 重み付き RRF（k=60、META=1.5 / BM25=1.2 / VECTOR=1.0）で重複排除 → 上位 50 件
   4. LlmReranker（LLM）: 上位 10 件に絞り込み
-     ※ 日付クエリは日付情報を含む候補を優先
+     ※ path / heading / date / source / snippet の構造化形式で投入
+     ※ 日付クエリは date フィールドを持つ候補を優先
 
 ↓ CoverageCheck（LLM）
   ※ 日付クエリ かつ snippet 先頭が `[日付:` で始まる候補があれば LLM を呼ばずに即 canAnswer=true で短絡
@@ -165,6 +175,16 @@ RRF スコアに指数減衰の freshnessBoost を加算。ファイルパスか
 finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECAY_DAYS)
 // FRESHNESS_BOOST_MAX = 0.010, FRESHNESS_DECAY_DAYS = 90
 // 30日: +0.0072, 1年: +0.0017, 3年: +0.0001
+```
+
+### 評価フレーム
+
+`app/src/main/kotlin/com/minibrain/eval/` に Precision@K / Recall@K / MRR を計測する評価フレームを同梱。`assets/eval/queries.sample.json` をテンプレに「質問 → 正解ファイル」セットを記述し、`EvalRunner.run(treeUri, cases, k)` で検索パイプラインを走らせて指標を取得する。VECTOR_MIN_SCORE や RRF 重みなどのチューニングはこのフレームでオフライン計測しながら詰める想定。
+
+```kotlin
+val cases = EvalRunner.loadFromAssets(context, "eval/queries.sample.json")
+val result = EvalRunner(searchPipeline).run(treeUri, cases, k = 10)
+println("P@10=${result.precisionAtK}  R@10=${result.recallAtK}  MRR=${result.mrr}")
 ```
 
 ### Folder Embedding

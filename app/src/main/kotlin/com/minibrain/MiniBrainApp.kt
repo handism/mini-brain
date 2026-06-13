@@ -9,6 +9,7 @@ import com.minibrain.ai.llm.ModelDownloader
 import com.minibrain.ai.agent.AgentPipeline
 import com.minibrain.ai.agent.CoverageChecker
 import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.ai.search.HyDE
 import com.minibrain.ai.search.LlmReranker
 import com.minibrain.ai.search.QueryExpander
 import com.minibrain.ai.search.SearchPipeline
@@ -50,8 +51,10 @@ class MiniBrainApp : Application() {
 
     val llmReranker: LlmReranker by lazy { LlmReranker(llmService) }
 
+    val hyde: HyDE by lazy { HyDE(llmService) }
+
     val searchPipeline: SearchPipeline by lazy {
-        SearchPipeline(queryExpander, llmReranker, ragPipeline, database.chunkDao(), database.documentDao())
+        SearchPipeline(queryExpander, llmReranker, ragPipeline, database.chunkDao(), database.documentDao(), hyde)
     }
 
     val coverageChecker: CoverageChecker by lazy { CoverageChecker(llmService) }

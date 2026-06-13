@@ -9,6 +9,7 @@ import com.minibrain.ai.agent.MetadataSearchHitEvent
 import com.minibrain.ai.agent.QueryExpansionEvent
 import com.minibrain.ai.agent.DateRange
 import com.minibrain.ai.agent.DateResolver
+import com.minibrain.ai.agent.HyDeGeneratedEvent
 import com.minibrain.ai.agent.RerankEvent
 import com.minibrain.ai.agent.VectorSearchHitEvent
 import com.minibrain.ai.rag.Citation
@@ -33,6 +34,7 @@ class SearchPipeline(
     private val ragPipeline: RagPipeline,
     private val chunkDao: ChunkDao,
     private val documentDao: DocumentDao,
+    private val hyde: HyDE? = null,
 ) {
     companion object {
         private const val TAG = "SearchPipeline"
@@ -40,9 +42,16 @@ class SearchPipeline(
         private const val RERANK_TOP_K = 10
         private const val BM25_PER_QUERY_LIMIT = 20
         private const val VECTOR_LIMIT = 20
+        // 展開クエリ × Vector のサブクエリあたり件数（重い embed を抑えるため少し小さく）
+        private const val VECTOR_LIMIT_PER_EXPANDED = 10
+        // ベクトル候補の最低類似度スコア。E5（L2 正規化済）のコサインで概ね 0.40〜0.50 が境界。
+        // 低スコアは Reranker のノイズ源になるため、ここで除外する（ADR-023）。
+        private const val VECTOR_MIN_SCORE = 0.45f
         private const val SNIPPET_CHARS = 200
         private const val MIN_FILENAME_MATCH_CHARS = 3
         private const val RRF_K = 60
+        // RRF 重み（[meta, vector, bm25]）。Metadata 完全一致 > BM25 > Vector の順。
+        private val RRF_WEIGHTS = listOf(1.5f, 1.0f, 1.2f)
     }
 
     suspend fun search(
@@ -59,6 +68,15 @@ class SearchPipeline(
         traceEvents += QueryExpansionEvent(expanded)
         Log.d(TAG, "expanded=${expanded.size} queries")
 
+        // 1.5 HyDE: 仮想回答を生成し、その埋め込みでベクトル検索を補強する。
+        // LiteRT-LM は単一スレッドのため Query Expansion の直後に逐次実行する。
+        // HyDE が無効 / 失敗した場合は null （元クエリのみ）にフォールバック。
+        val hypothetical = hyde?.generateHypothetical(query)
+        if (hypothetical != null) {
+            traceEvents += HyDeGeneratedEvent(hypothetical.take(120))
+            Log.d(TAG, "hyde=${hypothetical.take(80)}")
+        }
+
         // 2. Parallel Retrieval
         onStatus("並行検索中...")
         val (bm25Candidates, metaCandidates, vectorCandidates) = coroutineScope {
@@ -71,9 +89,11 @@ class SearchPipeline(
             val metaJob = async(Dispatchers.IO) {
                 dateRangeSearch(query, treeUri, dateRange) + metadataSearch(expanded, treeUri)
             }
-            // ベクトル検索（元クエリのみ — 意味的近傍を拾う）
+            // ベクトル検索: 展開クエリ全件 + （任意）HyDE 仮想回答を投入し、Recall を底上げする。
+            // EmbedderService は Mutex で直列化されるため、ここを async にしても並列実行はされないが、
+            // 他ジョブ（BM25 / metadata）とは並列に走る。低スコアの候補は閾値カットで除外する。
             val vectorJob = async(Dispatchers.IO) {
-                vectorSearch(query, treeUri)
+                multiVectorSearch(query, expanded, hypothetical, treeUri)
             }
             Triple(bm25Job.await(), metaJob.await(), vectorJob.await())
         }
@@ -83,12 +103,13 @@ class SearchPipeline(
         traceEvents += VectorSearchHitEvent(query, vectorCandidates.size)
         Log.d(TAG, "bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
 
-        // 3. Candidate Merge (RRF rank 融合)
+        // 3. Candidate Merge (RRF rank 融合 + ソース別重み付け)
         // meta を先頭に置き、同キー衝突時に [日付:] snippet 付き Citation を残す
         val merged = mergeCandidatesRrf(
             listOf(metaCandidates, vectorCandidates, bm25Candidates),
             CANDIDATE_LIMIT,
             RRF_K,
+            weights = RRF_WEIGHTS,
         )
         traceEvents += CandidateMergeEvent(merged.size)
         Log.d(TAG, "merged=${merged.size} candidates")
@@ -166,13 +187,45 @@ class SearchPipeline(
         append(firstParagraph ?: "")
     }
 
-    private suspend fun vectorSearch(query: String, treeUri: String): List<Citation> =
+    private suspend fun vectorSearch(query: String, treeUri: String, k: Int = VECTOR_LIMIT): List<Citation> =
         runCatching {
-            ragPipeline.vectorOnlyTopK(query, treeUri, k = VECTOR_LIMIT)
+            ragPipeline.vectorOnlyTopK(query, treeUri, k = k)
+                .filter { it.score >= VECTOR_MIN_SCORE }
         }.getOrElse { e ->
             Log.w(TAG, "Vector search failed: ${e.message}")
             emptyList()
         }
+
+    // 元クエリ + 展開クエリ + HyDE 仮想回答でベクトル検索を実行し、重複排除した上で
+    // RRF rank として扱える順序リストを返す。
+    // - 元クエリの top 結果を優先するため最初に並べる
+    // - 続いて展開クエリ・HyDE 結果を順に並べ、(docId, headingPath) 重複は除外
+    private suspend fun multiVectorSearch(
+        originalQuery: String,
+        expanded: List<String>,
+        hypothetical: String?,
+        treeUri: String,
+    ): List<Citation> {
+        val seen = HashSet<String>()
+        val out = mutableListOf<Citation>()
+
+        suspend fun push(q: String, k: Int) {
+            vectorSearch(q, treeUri, k = k).forEach { c ->
+                val key = "${c.docId}::${c.headingPath}"
+                if (seen.add(key)) out += c
+            }
+        }
+
+        push(originalQuery, VECTOR_LIMIT)
+        // 元クエリは expanded[0] に含まれる想定だが、重複の場合は seen で弾かれる
+        expanded.filter { it != originalQuery }.forEach { q ->
+            push(q, VECTOR_LIMIT_PER_EXPANDED)
+        }
+        if (!hypothetical.isNullOrBlank()) {
+            push(hypothetical, VECTOR_LIMIT_PER_EXPANDED)
+        }
+        return out
+    }
 
     // 日付/期間クエリを DB の documentDate 範囲検索に変換する。
     // metadataSearch のトークン一致では "2021年3月" → "2021-03-15" が突合できないため専用で持つ。
@@ -228,20 +281,26 @@ class SearchPipeline(
 }
 
 // ソース別 rank リストを RRF（Reciprocal Rank Fusion）で融合する。
-// score = Σ 1/(k + rank + 1)。複数ソースに出現する候補ほど加点され、
+// score = Σ weight × 1/(k + rank + 1)。複数ソースに出現する候補ほど加点され、
 // ソースごとの擬似スコアの大小に依存しない（ADR-022）。
+// weights を渡すと「信頼度の高いソースを上位に寄せる」非対称重み付けが可能（ADR-023）。
 // docId + headingPath で重複排除し、同キーは最初に出現した Citation を保持する。
 internal fun mergeCandidatesRrf(
     rankLists: List<List<Citation>>,
     limit: Int,
     k: Int = 60,
+    weights: List<Float>? = null,
 ): List<Citation> {
+    require(weights == null || weights.size == rankLists.size) {
+        "weights.size must equal rankLists.size"
+    }
     val scores = mutableMapOf<String, Float>()
     val first = mutableMapOf<String, Citation>()
-    rankLists.forEach { list ->
+    rankLists.forEachIndexed { listIdx, list ->
+        val w = weights?.get(listIdx) ?: 1f
         list.forEachIndexed { rank, c ->
             val key = "${c.docId}::${c.headingPath}"
-            scores[key] = (scores[key] ?: 0f) + 1f / (k + rank + 1)
+            scores[key] = (scores[key] ?: 0f) + w * (1f / (k + rank + 1))
             first.getOrPut(key) { c }
         }
     }

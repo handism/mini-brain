@@ -24,6 +24,7 @@ data class FinalAnswerEvent(
 
 // Search First パイプライン用トレースイベント
 data class QueryExpansionEvent(val queries: List<String>) : AgentTraceEvent
+data class HyDeGeneratedEvent(val hypothetical: String) : AgentTraceEvent
 data class MetadataSearchHitEvent(val hitCount: Int) : AgentTraceEvent
 data class BM25SearchHitEvent(val query: String, val hitCount: Int) : AgentTraceEvent
 data class GrepSearchHitEvent(val query: String, val hitCount: Int) : AgentTraceEvent
