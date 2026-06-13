@@ -30,9 +30,14 @@ object QueryClassifier {
         Regex("""[A-Za-z][A-Za-z0-9_]{2,}\s*(と(は|って)|の使い方|の書き方)"""), // 英語識別子 + 使い方/書き方
     )
 
-    fun classify(question: String, today: LocalDate = LocalDate.now()): QueryType {
+    // dateRange は呼び出し側が解決済みの値を渡せる（AgentPipeline で SearchPipeline と共有し二重解決を避ける）
+    fun classify(
+        question: String,
+        today: LocalDate = LocalDate.now(),
+        dateRange: DateRange? = DateResolver.resolveDateRange(question, today),
+    ): QueryType {
         // 1. 期間表現があれば TEMPORAL_SUMMARIZATION
-        if (DateResolver.resolveDateRange(question, today) != null) {
+        if (dateRange != null) {
             return QueryType.TEMPORAL_SUMMARIZATION
         }
 

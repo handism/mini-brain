@@ -21,7 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
-enum class SourceType { READ_FILE, GREP, METADATA, VECTOR, RRF, GLOB, FOLDER, UNKNOWN }
+enum class SourceType { READ_FILE, GREP, METADATA, BM25, VECTOR, RRF, GLOB, FOLDER, UNKNOWN }
 
 data class Citation(
     val headingPath: String,

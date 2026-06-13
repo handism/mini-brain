@@ -7,6 +7,7 @@ import com.minibrain.ai.agent.AgentTraceEvent
 import com.minibrain.ai.agent.CandidateMergeEvent
 import com.minibrain.ai.agent.MetadataSearchHitEvent
 import com.minibrain.ai.agent.QueryExpansionEvent
+import com.minibrain.ai.agent.DateRange
 import com.minibrain.ai.agent.DateResolver
 import com.minibrain.ai.agent.RerankEvent
 import com.minibrain.ai.agent.VectorSearchHitEvent
@@ -41,12 +42,14 @@ class SearchPipeline(
         private const val VECTOR_LIMIT = 20
         private const val SNIPPET_CHARS = 200
         private const val MIN_FILENAME_MATCH_CHARS = 3
+        private const val RRF_K = 60
     }
 
     suspend fun search(
         query: String,
         treeUri: String,
         onStatus: (String) -> Unit = {},
+        dateRange: DateRange? = DateResolver.resolveDateRange(query),
     ): SearchPipelineResult {
         val traceEvents = mutableListOf<AgentTraceEvent>()
 
@@ -63,9 +66,10 @@ class SearchPipeline(
             val bm25Job = async(Dispatchers.IO) {
                 expanded.flatMap { q -> bm25Search(q, treeUri) }
             }
-            // メタデータ検索 + 日付範囲検索（DateResolver 経由）を合算
+            // 日付範囲検索（DateResolver 経由）+ メタデータ検索を合算
+            // 日付ヒットを rank 先頭に置き、RRF 融合で優先されるようにする
             val metaJob = async(Dispatchers.IO) {
-                metadataSearch(expanded, treeUri) + dateRangeSearch(query, treeUri)
+                dateRangeSearch(query, treeUri, dateRange) + metadataSearch(expanded, treeUri)
             }
             // ベクトル検索（元クエリのみ — 意味的近傍を拾う）
             val vectorJob = async(Dispatchers.IO) {
@@ -79,9 +83,13 @@ class SearchPipeline(
         traceEvents += VectorSearchHitEvent(query, vectorCandidates.size)
         Log.d(TAG, "bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
 
-        // 3. Candidate Merge
-        val allCandidates = bm25Candidates + metaCandidates + vectorCandidates
-        val merged = mergeCandidates(allCandidates, CANDIDATE_LIMIT)
+        // 3. Candidate Merge (RRF rank 融合)
+        // meta を先頭に置き、同キー衝突時に [日付:] snippet 付き Citation を残す
+        val merged = mergeCandidatesRrf(
+            listOf(metaCandidates, vectorCandidates, bm25Candidates),
+            CANDIDATE_LIMIT,
+            RRF_K,
+        )
         traceEvents += CandidateMergeEvent(merged.size)
         Log.d(TAG, "merged=${merged.size} candidates")
 
@@ -113,9 +121,8 @@ class SearchPipeline(
             Citation(
                 headingPath = chunk.headingPath,
                 snippet = chunk.text.take(SNIPPET_CHARS),
-                score = 0.5f,
                 docId = chunk.docId,
-                source = SourceType.RRF,
+                source = SourceType.BM25,
             )
         }
     }
@@ -147,7 +154,6 @@ class SearchPipeline(
             Citation(
                 headingPath = doc.relativePath,
                 snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
-                score = 0.6f,
                 docId = doc.id,
                 relativePath = doc.relativePath,
                 source = SourceType.METADATA,
@@ -168,11 +174,11 @@ class SearchPipeline(
             emptyList()
         }
 
-    // DateResolver を使って日付/期間クエリを DB の documentDate 範囲検索に変換する。
+    // 日付/期間クエリを DB の documentDate 範囲検索に変換する。
     // metadataSearch のトークン一致では "2021年3月" → "2021-03-15" が突合できないため専用で持つ。
-    private suspend fun dateRangeSearch(query: String, treeUri: String): List<Citation> {
+    // dateRange は AgentPipeline で一度だけ解決された値を受け取る（二重解決を避ける）
+    private suspend fun dateRangeSearch(query: String, treeUri: String, dateRange: DateRange?): List<Citation> {
         // 期間クエリ（去年の夏・5年前の3月 など）→ getByDateRange で一括取得
-        val dateRange = DateResolver.resolveDateRange(query)
         if (dateRange != null) {
             val docs = withContext(Dispatchers.IO) {
                 documentDao.getByDateRange(treeUri, dateRange.start.toString(), dateRange.end.toString())
@@ -182,7 +188,6 @@ class SearchPipeline(
                 Citation(
                     headingPath = doc.relativePath,
                     snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
-                    score = 0.8f,
                     docId = doc.id,
                     relativePath = doc.relativePath,
                     source = SourceType.METADATA,
@@ -207,8 +212,8 @@ class SearchPipeline(
                 return matched.map { doc ->
                     Citation(
                         headingPath = doc.relativePath,
-                        snippet = doc.firstParagraph ?: "",
-                        score = 0.8f,
+                        // CoverageChecker の [日付:] 短絡が効くよう日付プレフィックスを付与
+                        snippet = buildSnippetWithDate(doc.documentDate, doc.firstParagraph),
                         docId = doc.id,
                         relativePath = doc.relativePath,
                         source = SourceType.METADATA,
@@ -220,18 +225,28 @@ class SearchPipeline(
         return emptyList()
     }
 
-    private fun mergeCandidates(candidates: List<Citation>, limit: Int): List<Citation> {
-        // docId + headingPath で重複排除。同キーなら score 高い方を残す
-        val seen = mutableMapOf<String, Citation>()
-        candidates.forEach { c ->
+}
+
+// ソース別 rank リストを RRF（Reciprocal Rank Fusion）で融合する。
+// score = Σ 1/(k + rank + 1)。複数ソースに出現する候補ほど加点され、
+// ソースごとの擬似スコアの大小に依存しない（ADR-022）。
+// docId + headingPath で重複排除し、同キーは最初に出現した Citation を保持する。
+internal fun mergeCandidatesRrf(
+    rankLists: List<List<Citation>>,
+    limit: Int,
+    k: Int = 60,
+): List<Citation> {
+    val scores = mutableMapOf<String, Float>()
+    val first = mutableMapOf<String, Citation>()
+    rankLists.forEach { list ->
+        list.forEachIndexed { rank, c ->
             val key = "${c.docId}::${c.headingPath}"
-            val existing = seen[key]
-            if (existing == null || c.score > existing.score) {
-                seen[key] = c
-            }
+            scores[key] = (scores[key] ?: 0f) + 1f / (k + rank + 1)
+            first.getOrPut(key) { c }
         }
-        return seen.values
-            .sortedByDescending { it.score }
-            .take(limit)
     }
+    return scores.entries
+        .sortedByDescending { it.value }
+        .take(limit)
+        .map { (key, score) -> first.getValue(key).copy(score = score) }
 }

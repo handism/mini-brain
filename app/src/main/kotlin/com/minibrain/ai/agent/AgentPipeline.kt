@@ -32,8 +32,11 @@ class AgentPipeline(
         recentHistory: List<Pair<String, String>> = emptyList(),
         onStatus: (String) -> Unit = {},
     ): AgentResult = withContext(Dispatchers.Default) {
+        // 日付範囲はここで一度だけ解決し、classify / search / plannerHint で共有する
+        val dateRange = DateResolver.resolveDateRange(question)
+
         // 一般知識の場合は RAG をスキップして直接 LLM に回答させる
-        val queryType = QueryClassifier.classify(question)
+        val queryType = QueryClassifier.classify(question, dateRange = dateRange)
         if (queryType == QueryType.GENERAL_KNOWLEDGE) {
             Log.d(TAG, "GENERAL_KNOWLEDGE — skip RAG")
             return@withContext AgentResult(emptyList(), llmService.generateStream(buildDirectAnswerPrompt(question, recentHistory)))
@@ -42,7 +45,7 @@ class AgentPipeline(
         val traceEvents = mutableListOf<AgentTraceEvent>()
 
         // --- Search First ---
-        val searchResult = searchPipeline.search(question, treeUri, onStatus)
+        val searchResult = searchPipeline.search(question, treeUri, onStatus, dateRange)
         traceEvents += searchResult.traceEvents
         var citations: List<Citation> = searchResult.citations
         Log.d(TAG, "SearchPipeline returned ${citations.size} citations")
@@ -66,7 +69,7 @@ class AgentPipeline(
         // ReAct ループはフォールバック専用 (SearchPipeline が空 or CoverageCheck 失敗の場合)
         if (citations.isEmpty()) {
             Log.d(TAG, "falling back to ReAct loop (explorerHint=$explorerHint)")
-            citations = runReActLoop(question, treeUri, traceEvents, onStatus, explorerHint)
+            citations = runReActLoop(question, treeUri, traceEvents, onStatus, explorerHint, dateRange)
         }
 
         // 最終セーフティネット: RRF 強制実行
@@ -104,9 +107,10 @@ class AgentPipeline(
         traceEvents: MutableList<AgentTraceEvent>,
         onStatus: (String) -> Unit,
         explorerHint: String? = null,
+        dateRange: DateRange? = null,
     ): List<Citation> {
         val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri, llmService)
-        val baseHint = buildPlannerHint(question, treeUri)
+        val baseHint = buildPlannerHint(question, treeUri, dateRange)
         val plannerHint = when {
             explorerHint != null && baseHint != null -> "$explorerHint / $baseHint"
             explorerHint != null -> explorerHint
@@ -173,12 +177,11 @@ class AgentPipeline(
         return CitationIntegrator.integrate(toolResults)
     }
 
-    private suspend fun buildPlannerHint(question: String, treeUri: String): String? {
+    private suspend fun buildPlannerHint(question: String, treeUri: String, dateRange: DateRange?): String? {
         val parts = mutableListOf<String>()
         val allDocs = withContext(Dispatchers.IO) { documentDao.getAllByTree(treeUri) }
 
-        // 期間クエリ: resolveDateRange が成功したら timeline_search を推奨
-        val dateRange = DateResolver.resolveDateRange(question)
+        // 期間クエリ: resolveDateRange が成功していたら timeline_search を推奨
         if (dateRange != null) {
             parts += "期間クエリ検出: ${dateRange.start} 〜 ${dateRange.end} / timeline_search を推奨"
         }
