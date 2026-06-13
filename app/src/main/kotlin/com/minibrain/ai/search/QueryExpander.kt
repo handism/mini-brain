@@ -61,16 +61,21 @@ class QueryExpander(private val llmService: LlmService) {
     """.trimIndent()
 
     private fun parseJsonArray(raw: String): List<String> {
-        // 出力中から [...] を抽出
+        // 出力中から最長と思われる [...] を抽出（入れ子はない前提）
         val start = raw.indexOf('[')
         val end = raw.lastIndexOf(']')
         if (start < 0 || end <= start) return emptyList()
         val jsonStr = raw.substring(start, end + 1)
+
         return runCatching {
-            // 簡易パーサ: "..." または '...' のクォート文字列を抽出
             val result = mutableListOf<String>()
-            val regex = Regex(""""([^"]+)""")
-            regex.findAll(jsonStr).forEach { result += it.groupValues[1] }
+            // "..." または '...' のクォート文字列を抽出。
+            // エスケープされたクォートは簡易的に考慮外とするが、通常の出力ならこれで十分。
+            val regex = Regex(""""([^"]*)"|'([^']*)'""")
+            regex.findAll(jsonStr).forEach { match ->
+                val value = match.groupValues[1].ifEmpty { match.groupValues[2] }
+                if (value.isNotBlank()) result += value
+            }
             result
         }.getOrElse {
             Log.w(TAG, "JSON parse failed: $it")

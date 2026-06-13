@@ -14,12 +14,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class LlmService(private val context: Context) {
+open class LlmService(private val context: Context?) {
 
     private var engine: Engine? = null
     private val mutex = Mutex()
 
-    suspend fun initialize(modelFile: File, forceCpu: Boolean = false) = withContext(Dispatchers.Default) {
+    open suspend fun initialize(modelFile: File, forceCpu: Boolean = false) = withContext(Dispatchers.Default) {
         mutex.withLock {
             if (!modelFile.exists() || modelFile.length() < 100_000_000L) {
                 throw IllegalArgumentException("モデルファイルが不完全または存在しません (現在のサイズ: ${modelFile.length()} bytes)")
@@ -56,7 +56,7 @@ class LlmService(private val context: Context) {
         }
     }
 
-    fun generateStream(prompt: String): Flow<String> = flow {
+    open fun generateStream(prompt: String): Flow<String> = flow {
         val eng = requireNotNull(engine) { "LlmService not initialized. Call initialize() first." }
         eng.createConversation().use { conversation ->
             conversation.sendMessageAsync(prompt).collect { message ->
@@ -68,7 +68,7 @@ class LlmService(private val context: Context) {
         }
     }.flowOn(Dispatchers.Default)
 
-    suspend fun summarize(text: String): String {
+    open suspend fun summarize(text: String): String {
         if (!isReady()) return text.take(500)
         val prompt = "以下のテキストを500文字以内で簡潔に要約してください。重要な情報を落とさないようにしてください。\n\n$text\n\n要約:"
         val sb = StringBuilder()
@@ -78,7 +78,7 @@ class LlmService(private val context: Context) {
         return sb.toString().ifBlank { text.take(500) }
     }
 
-    fun isReady(): Boolean = engine != null
+    open fun isReady(): Boolean = engine != null
 
     fun close() {
         engine?.close()
