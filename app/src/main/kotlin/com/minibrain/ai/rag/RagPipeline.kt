@@ -163,11 +163,13 @@ class RagPipeline(
             val byId = cache.documents().associateBy { it.id }
             return docIds.distinct().associateWith { byId[it]?.relativePath }
         }
-        val out = mutableMapOf<Long, String?>()
-        for (id in docIds.distinct()) {
-            out[id] = documentDao.getById(id)?.relativePath
+        val distinctIds = docIds.distinct()
+        if (distinctIds.isEmpty()) return emptyMap()
+        return withContext(Dispatchers.IO) {
+            documentDao.getDocPathsByIds(distinctIds)
+        }.associate { row ->
+            row.id to row.relativePath
         }
-        return out
     }
 
     private suspend fun folderSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =

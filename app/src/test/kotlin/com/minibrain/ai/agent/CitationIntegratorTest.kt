@@ -5,6 +5,7 @@ import com.minibrain.ai.rag.SourceType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.minibrain.util.TokenEstimator
 
 class CitationIntegratorTest {
 
@@ -35,8 +36,8 @@ class CitationIntegratorTest {
 
     @Test
     fun `budget limits total tokens`() {
-        // 1 citation ≒ (2 + 1000) / 3 + 5 ≒ 339 tokens
-        // MAX_CONTEXT_TOKENS = 1200 なので最大 3〜4 件に制限される
+        // 1 citation ≒ TokenEstimator.estimate("hi", longSnippet) + 5 ≒ 260 tokens
+        // MAX_CONTEXT_TOKENS = 1200 なので最大 4〜5 件に制限される
         val longSnippet = "a".repeat(1000)
         val citations = (1..20).map { i ->
             Citation("h$i", longSnippet, score = 1f, docId = i.toLong(), source = SourceType.READ_FILE)
@@ -45,8 +46,8 @@ class CitationIntegratorTest {
         val integrated = CitationIntegrator.integrate(results)
         assertTrue("budget should limit citations, got ${integrated.size}", integrated.size < 20)
         // トークン推定: 合計が MAX_CONTEXT_TOKENS (1200) + 1 citation 分のコスト以内
-        val totalTokens = integrated.sumOf { (it.headingPath.length + it.snippet.length) / 3 + 5 }
-        assertTrue("total tokens $totalTokens should be near MAX_CONTEXT_TOKENS", totalTokens <= 1200 + 340)
+        val totalTokens = integrated.sumOf { TokenEstimator.estimate(it.headingPath, it.snippet) + 5 }
+        assertTrue("total tokens $totalTokens should be near MAX_CONTEXT_TOKENS", totalTokens <= TokenEstimator.MAX_CONTEXT_TOKENS + 260)
     }
 
     @Test

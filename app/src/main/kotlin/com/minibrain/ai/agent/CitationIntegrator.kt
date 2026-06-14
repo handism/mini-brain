@@ -3,14 +3,11 @@ package com.minibrain.ai.agent
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.SourceType
 import com.minibrain.ai.rag.dedupeKey
+import com.minibrain.util.TokenEstimator
 
 object CitationIntegrator {
 
-    // トークン推定上限 (chars / 3 で推定; 日英混合の中間値)
-    // 例: 1200 tokens ≒ 3600 文字相当
-    private const val MAX_CONTEXT_TOKENS = 1200
 
-    private fun estimateTokens(text: String): Int = text.length / 3
 
     private val SOURCE_PRIORITY = listOf(
         SourceType.READ_FILE,
@@ -44,9 +41,9 @@ object CitationIntegrator {
         )
 
         val budgeted = mutableListOf<Citation>()
-        var remainingTokens = MAX_CONTEXT_TOKENS
+        var remainingTokens = TokenEstimator.MAX_CONTEXT_TOKENS
         for (c in sorted) {
-            val cost = estimateTokens(c.headingPath + c.snippet) + 5
+            val cost = TokenEstimator.estimate(c.headingPath, c.snippet) + 5
             if (remainingTokens <= 0) break
             budgeted += c
             remainingTokens -= cost

@@ -14,6 +14,11 @@ data class DocDateRow(
     @ColumnInfo(name = "documentDate") val documentDate: String?,
 )
 
+data class DocPathRow(
+    @ColumnInfo(name = "id") val id: Long,
+    @ColumnInfo(name = "relativePath") val relativePath: String?,
+)
+
 @Dao
 interface DocumentDao {
     @Query("SELECT * FROM documents WHERE treeUri = :treeUri")
@@ -51,6 +56,9 @@ interface DocumentDao {
 
     @Query("SELECT id, documentDate FROM documents WHERE id IN (:ids)")
     suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow>
+
+    @Query("SELECT id, relativePath FROM documents WHERE id IN (:ids)")
+    suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow>
 
     @Query("SELECT * FROM documents WHERE treeUri = :treeUri AND documentDate >= :start AND documentDate <= :end ORDER BY documentDate ASC")
     suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity>
