@@ -309,13 +309,11 @@ class AgentPipeline(
         history: List<Pair<String, String>>,
         dateRange: DateRange? = null,
     ): String {
-        // トークン推定上限 (chars / 3 で推定; CitationIntegrator と同一定数)
-        val MAX_CONTEXT_TOKENS = 1200
         val contextBlock = if (citations.isNotEmpty()) {
             val budgeted = mutableListOf<Citation>()
-            var remainingTokens = MAX_CONTEXT_TOKENS
+            var remainingTokens = TokenEstimator.MAX_CONTEXT_TOKENS
             for (c in citations) {
-                val cost = estimateTokens(c.headingPath + c.snippet)
+                val cost = TokenEstimator.estimate(c.headingPath, c.snippet)
                 if (remainingTokens <= 0) break
                 budgeted += c
                 remainingTokens -= cost
@@ -403,11 +401,5 @@ $body
         }
     }
 
-    // 日本語(非ASCII)は約3文字/トークン、英語(ASCII)は約4文字/トークンで推定
-    private fun estimateTokens(text: String): Int {
-        var jpChars = 0
-        for (c in text) if (c.code > 127) jpChars++
-        val enChars = text.length - jpChars
-        return jpChars / 3 + enChars / 4 + 5
-    }
+
 }
