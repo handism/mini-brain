@@ -340,7 +340,7 @@ $body
         //   1. `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みの documentDate）
         //   2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
         //   3. 本文中の YYYY/MM/DD / YYYY-MM-DD / YYYY年MM月DD日 表記
-        val isDateQuery = DATE_QUERY_REGEX.containsMatchIn(question)
+        val isDateQuery = DateResolver.isDateQuery(question)
         val temporalInstruction = when {
             dateRange != null -> {
                 val hasDated = citations.any { it.snippet.trimStart().startsWith("[日付:") }
