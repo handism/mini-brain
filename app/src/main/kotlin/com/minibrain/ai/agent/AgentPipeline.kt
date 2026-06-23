@@ -119,7 +119,7 @@ class AgentPipeline(
         dateRange: DateRange? = null,
         cache: SearchRequestCache,
     ): List<Citation> {
-        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri, llmService)
+        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri, llmService, cache)
         val baseHint = buildPlannerHint(question, dateRange, cache)
         val plannerHint = when {
             explorerHint != null && baseHint != null -> "$explorerHint / $baseHint"

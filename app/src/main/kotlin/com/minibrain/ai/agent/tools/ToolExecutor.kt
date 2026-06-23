@@ -11,6 +11,7 @@ import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.CosineSimilarity
 import com.minibrain.ai.rag.RagPipeline
+import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.rag.SourceType
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
@@ -36,14 +37,11 @@ class ToolExecutor(
     private val ragPipeline: RagPipeline,
     private val treeUri: String,
     private val llmService: LlmService,
+    private val cache: SearchRequestCache,
 ) {
-    private var cachedDocs: List<DocumentEntity>? = null
     private val queryVecCache = mutableMapOf<String, FloatArray>()
 
-    private suspend fun allDocs(): List<DocumentEntity> =
-        cachedDocs ?: withContext(Dispatchers.IO) {
-            documentDao.getAllByTree(treeUri).also { cachedDocs = it }
-        }
+    private suspend fun allDocs(): List<DocumentEntity> = cache.documents()
 
     suspend fun execute(call: ToolCall): ToolResult = when (val tool = call.tool) {
         is AgentTool.Glob -> executeGlob(call, tool)
@@ -233,22 +231,28 @@ class ToolExecutor(
     }
 
     private suspend fun executeVectorSearch(call: ToolCall, tool: AgentTool.VectorSearch): ToolResult {
-        val filtered = withContext(Dispatchers.IO) {
-            if (tool.scope != null) {
-                chunkDao.getByScope(treeUri, tool.scope)
-            } else {
-                chunkDao.getAllByTree(treeUri)
-            }
-        }
-
         val vec = queryVecCache.getOrPut(tool.query) { embedderService.embed(tool.query, EmbedType.QUERY) }
-        @Suppress("UNCHECKED_CAST")
-        val topChunks = CosineSimilarity.topK(
-            vec,
-            filtered.map { Pair(EmbedderService.bytesToFloatArray(it.embedding), it) }
-                as List<Pair<FloatArray, Any>>,
-            tool.k,
-        ).map { (score, meta) -> Pair(score, meta as com.minibrain.data.db.entities.ChunkEntity) }
+
+        val topChunks = if (tool.scope == null) {
+            cache.cosineTopK(vec, tool.k)
+        } else {
+            val (chunks, vectors) = cache.chunkVectors()
+            val docsMap = cache.documents().associateBy { it.id }
+            val filteredCandidates = ArrayList<Pair<FloatArray, com.minibrain.data.db.entities.ChunkEntity>>()
+            for (i in chunks.indices) {
+                val chunk = chunks[i]
+                val doc = docsMap[chunk.docId]
+                if (doc != null && doc.relativePath.startsWith(tool.scope)) {
+                    filteredCandidates.add(Pair(vectors[i], chunk))
+                }
+            }
+            @Suppress("UNCHECKED_CAST")
+            CosineSimilarity.topK(
+                vec,
+                filteredCandidates as List<Pair<FloatArray, Any>>,
+                tool.k
+            ).map { (score, meta) -> Pair(score, meta as com.minibrain.data.db.entities.ChunkEntity) }
+        }
 
         val docCache2 = mutableMapOf<Long, DocumentEntity?>()
         suspend fun getDoc(docId: Long) = docCache2.getOrPut(docId) {
@@ -279,7 +283,7 @@ class ToolExecutor(
     }
 
     private suspend fun executeRrfSearch(call: ToolCall, tool: AgentTool.RrfSearch): ToolResult {
-        val citations = ragPipeline.retrieveTopChunks(tool.query, treeUri, tool.k)
+        val citations = ragPipeline.retrieveTopChunks(tool.query, treeUri, tool.k, cache = cache)
         val lines = citations.joinToString("\n") { c ->
             "- [d=${c.docId} p=${c.relativePath}] ${c.headingPath} (score=%.4f): ${c.snippet.take(GREP_SNIPPET_CHARS)}".format(c.score)
         }

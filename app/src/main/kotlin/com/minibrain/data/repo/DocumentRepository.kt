@@ -216,7 +216,7 @@ class DocumentRepository(
     suspend fun ensureFtsIndex() = withContext(Dispatchers.IO) {
         val chunkCount = chunkDao.count()
         val ftsCount = ftsCount()
-        if (ftsCount >= chunkCount) return@withContext
+        if (ftsCount == chunkCount) return@withContext
 
         val allChunks = chunkDao.getAll()
         val writableDb = db.openHelper.writableDatabase
