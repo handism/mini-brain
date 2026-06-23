@@ -990,7 +990,7 @@ ADR-022 で RRF rank 融合に切り替え、SearchPipeline の基本骨格は�
 
 ### 既知の未解決領域（別 ADR 候補）
 
-- ReAct ループの `ToolExecutor` は依然として独自に `cachedDocs` / `queryVecCache` を持つ。SearchRequestCache を共有すれば SearchPipeline 経由の結果を再利用できるが、ロジック変更幅が大きく別 PR で扱う（R3 領域）
+- ReAct ループの `ToolExecutor` への `SearchRequestCache` 共有（ADR-027 にて解決・統合済み）
 - `DocumentEntity` への `@Index(["treeUri", "documentDate"])` 追加（R5 領域）も別 PR。マイグレーションが伴うため独立させる
 
 ## ADR-025: 期間クエリの documentDate Recall と回答 LLM 誘導の強化
@@ -1096,3 +1096,39 @@ ADR-022 で RRF rank 融合に切り替え、SearchPipeline の基本骨格は�
 - topicMatch ヒットのスニペット長が 200 → 500 字に増えるため、5 件 ピン時の context 量は最大 2500 字（≈ 625 tokens）増。`CitationIntegrator` の `MAX_CONTEXT_TOKENS = 1200` budget には収まるが、他の citation を圧迫する可能性がある。評価セットの P@10 を継続監視する。
 - ファイル名 substring 一致は精度が荒い（短い stem や偶然の連続が誤マッチする）。`MIN_FILENAME_MATCH_CHARS = 3` で最低限の保険はかかっているが、たとえば `1月.md`（2 文字）は対象外。これは ADR-019 と同じ制約。
 - 「いつ」クエリ + topic match で `documentDate` も `[日付:]` プレフィックスも本文ラベルも一切無いファイルが top に来た場合、回答 LLM は「日付らしき表記が無い」と率直に返すことになる。これは仕様。前は ReAct に落ちて運良くファイルを引けば回答できたが、トータルでは安定度が上がる方向と判断。
+
+## ADR-027: ReAct ツール実行における SearchRequestCache 統合と FTS 同期確認の修正
+
+ステータス: 採用
+
+### 背景
+
+1. **ReAct ツール実行におけるキャッシュの未共有**:
+   ADR-024 にてリクエストスコープの `SearchRequestCache` を導入し、`SearchPipeline` / `RagPipeline` で活用していた。しかし、ReAct ループを担当する `ToolExecutor` にはキャッシュが渡されず、イテレーションごとに `vector_search` ツールや `rrf_search` ツールを実行するたびに、全チャンクデータを DB から再ロードし、`embedding` バイト配列から `FloatArray`（384次元）へのデコード（`bytesToFloatArray`）を繰り返し計算していた。オンデバイス RAG では数千チャンクに及ぶ場合があり、これを毎イテレーションでデコードすることは、CPU およびバッテリーの大きな無駄使いと、応答遅延（レイテンシ）を招いていた。
+
+2. **FTS 同期確認処理における不整合判定の甘さ**:
+   `DocumentRepository.ensureFtsIndex()` における FTS インデックス再構成の条件が `if (ftsCount >= chunkCount)` となっていた。もし一部のインデックスが破損・欠落しているにもかかわらず総数が上回っている（あるいは不整合がある）場合、正しく同期再インデックス処理が走らず、検索漏れの原因になり得ていた。
+
+### 決定
+
+1. **`ToolExecutor` に `SearchRequestCache` をコンストラクタ引数として追加**
+   - [ToolExecutor.kt](file:///Users/mac/git/mini-brain/app/src/main/kotlin/com/minibrain/ai/agent/tools/ToolExecutor.kt) のコンストラクタに `cache: SearchRequestCache` を追加する。
+   - `allDocs()` (ドキュメントリスト) を `cache.documents()` を直接呼び出すように簡略化し、DB アクセス数を削減する。
+
+2. **各ツールのキャッシュ活用**
+   - **`executeVectorSearch`**:
+     - `scope == null` (スコープ制限なし) の場合、`cache.cosineTopK(vec, tool.k)` をそのまま呼び出し、コサイン類似度を高速に取得する。
+     - `scope != null` (スコープ制限あり) の場合、`cache.chunkVectors()` から取得した `chunks` と `vectors` を走査し、`relativePath` がスコープに前方一致するチャンクとそのベクトルを抽出して `CosineSimilarity.topK` で計算する。これにより `bytesToFloatArray` のデコード処理を **0回** にする。
+   - **`executeRrfSearch`**:
+     - `ragPipeline.retrieveTopChunks` に `cache = cache` を引き渡し、RRF 検索時のチャンク取得をキャッシュから行う。
+
+3. **`AgentPipeline` からの `SearchRequestCache` 伝搬**
+   - [AgentPipeline.kt](file:///Users/mac/git/mini-brain/app/src/main/kotlin/com/minibrain/ai/agent/AgentPipeline.kt) の `runReActLoop` 内で `ToolExecutor` を生成する際に、リクエスト単位で生成された `cache` インスタンスを渡すように更新する。
+
+4. **FTS インデックス同期確認の厳格化**
+   - [DocumentRepository.kt](file:///Users/mac/git/mini-brain/app/src/main/kotlin/com/minibrain/data/repo/DocumentRepository.kt) の `ensureFtsIndex` における判定を `if (ftsCount == chunkCount)` に修正し、件数の一致を以て完全同期と判定するようにする。
+
+### 影響
+
+- ReAct ループが最大イテレーション（6回）回った場合でも、DB 読み込みやデコード処理の再計算が発生しなくなり、オンデバイスでの検索実行時の CPU 負荷、メモリ使用量、およびバッテリー消費が劇的に改善した。
+- すべての単体テストが正常にパスすることを確認した。
