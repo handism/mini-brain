@@ -1,6 +1,5 @@
 package com.minibrain.ai.agent
 
-import android.util.Log
 import com.minibrain.ai.agent.tools.ToolExecutor
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
@@ -15,6 +14,7 @@ import com.minibrain.util.PromptUtils
 import com.minibrain.util.TokenEstimator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 class AgentPipeline(
     private val llmService: LlmService,
@@ -42,7 +42,7 @@ class AgentPipeline(
         // 一般知識の場合は RAG をスキップして直接 LLM に回答させる
         val queryType = QueryClassifier.classify(question, dateRange = dateRange)
         if (queryType == QueryType.GENERAL_KNOWLEDGE) {
-            Log.d(TAG, "GENERAL_KNOWLEDGE — skip RAG")
+            Timber.tag(TAG).d("GENERAL_KNOWLEDGE — skip RAG")
             return@withContext AgentResult(emptyList(), llmService.generateStream(buildDirectAnswerPrompt(question, recentHistory)))
         }
 
@@ -57,7 +57,7 @@ class AgentPipeline(
         val searchResult = searchPipeline.search(question, treeUri, onStatus, dateRange, cache)
         traceEvents += searchResult.traceEvents
         var citations: List<Citation> = searchResult.citations
-        Log.d(TAG, "SearchPipeline returned ${citations.size} citations")
+        Timber.tag(TAG).d("SearchPipeline returned ${citations.size} citations")
 
         // CoverageCheck: candidates があっても質問に答えられない場合を検出
         var explorerHint: String? = null
@@ -65,25 +65,25 @@ class AgentPipeline(
             onStatus("回答可能性を確認中...")
             val coverage = coverageChecker.check(question, citations)
             traceEvents += CoverageCheckEvent(coverage.canAnswer, coverage.missingInformation)
-            Log.d(TAG, "CoverageCheck canAnswer=${coverage.canAnswer} missing=${coverage.missingInformation}")
+            Timber.tag(TAG).d("CoverageCheck canAnswer=${coverage.canAnswer} missing=${coverage.missingInformation}")
             if (!coverage.canAnswer) {
                 val strategy = resolveExplorerStrategy(coverage.missingInformation)
                 traceEvents += ExplorerStrategyEvent(strategy.first, strategy.second)
                 explorerHint = strategy.third
-                Log.d(TAG, "ExplorerStrategy=${strategy.first}")
+                Timber.tag(TAG).d("ExplorerStrategy=${strategy.first}")
                 citations = emptyList()
             }
         }
 
         // ReAct ループはフォールバック専用 (SearchPipeline が空 or CoverageCheck 失敗の場合)
         if (citations.isEmpty()) {
-            Log.d(TAG, "falling back to ReAct loop (explorerHint=$explorerHint)")
+            Timber.tag(TAG).d("falling back to ReAct loop (explorerHint=$explorerHint)")
             citations = runReActLoop(question, treeUri, traceEvents, onStatus, explorerHint, dateRange, cache)
         }
 
         // 最終セーフティネット: RRF 強制実行
         if (citations.isEmpty()) {
-            Log.d(TAG, "citations still empty — forced RRF fallback")
+            Timber.tag(TAG).d("citations still empty — forced RRF fallback")
             onStatus("フォールバック検索中...")
             citations = ragPipeline.retrieveTopChunks(question, treeUri, cache = cache)
             traceEvents += ToolCallEvent(MAX_ITERATIONS + 1, "rrf_search", "\"$question\"")
@@ -132,10 +132,10 @@ class AgentPipeline(
 
         for (iteration in 1..MAX_ITERATIONS) {
             onStatus("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
-            Log.d(TAG, "ReAct iteration=$iteration hint=$plannerHint obs=${observations.size}")
+            Timber.tag(TAG).d("ReAct iteration=$iteration hint=$plannerHint obs=${observations.size}")
 
             if (!llmService.isReady()) {
-                Log.d(TAG, "LLM not ready — exit ReAct loop")
+                Timber.tag(TAG).d("LLM not ready — exit ReAct loop")
                 break
             }
 
@@ -143,23 +143,23 @@ class AgentPipeline(
             val sb = StringBuilder()
             runCatching {
                 llmService.generateStream(prompt).collect { token -> sb.append(token) }
-            }.onFailure { Log.w(TAG, "planner LLM failed", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "planner LLM failed") }
 
             val decision = PlannerPrompt.parseDecision(sb.toString())
-            Log.d(TAG, "decision=$decision raw=${sb.take(200)}")
+            Timber.tag(TAG).d("decision=$decision raw=${sb.take(200)}")
 
             when (decision) {
                 is PlannerDecision.Finalize -> {
-                    Log.d(TAG, "finalize: ${decision.reason}")
+                    Timber.tag(TAG).d("finalize: ${decision.reason}")
                     traceEvents += PlannerDecisionEvent(iteration, "finalize: ${decision.reason}")
                     break
                 }
                 is PlannerDecision.ParseError -> {
                     consecutiveParseErrors++
-                    Log.w(TAG, "parse error ($consecutiveParseErrors)")
+                    Timber.tag(TAG).w("parse error ($consecutiveParseErrors)")
                     traceEvents += PlannerDecisionEvent(iteration, "parse_error")
                     if (consecutiveParseErrors >= 2) {
-                        Log.d(TAG, "2 consecutive parse errors — RRF fallback")
+                        Timber.tag(TAG).d("2 consecutive parse errors — RRF fallback")
                         onStatus("フォールバック検索中...")
                         val fallbackCitations = ragPipeline.retrieveTopChunks(question, treeUri, cache = cache)
                         val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(question))
@@ -183,7 +183,7 @@ class AgentPipeline(
                         tool.observationKind(result.citations.size, result.summary.length),
                     )
                     addObservation(observations, toolCall, result.summary)
-                    Log.d(TAG, "tool=$tool citations=${result.citations.size}")
+                    Timber.tag(TAG).d("tool=$tool citations=${result.citations.size}")
                 }
             }
         }

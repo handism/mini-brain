@@ -1,8 +1,8 @@
 package com.minibrain.ai.search
 
-import android.util.Log
 import com.minibrain.ai.llm.LlmService
 import kotlinx.coroutines.withTimeoutOrNull
+import timber.log.Timber
 
 // Hypothetical Document Embeddings (Gao et al. 2022).
 // クエリに対する「ありそうな回答（仮想 passage）」を LLM に生成させ、その埋め込みで
@@ -27,9 +27,9 @@ class HyDE(private val llmService: LlmService) {
             runCatching {
                 llmService.generateStream(prompt).collect { token -> sb.append(token) }
                 true
-            }.onFailure { Log.w(TAG, "HyDE generation failed", it) }.getOrDefault(false)
+            }.onFailure { Timber.tag(TAG).w(it, "HyDE generation failed") }.getOrDefault(false)
         } ?: run {
-            Log.w(TAG, "HyDE generation timed out")
+            Timber.tag(TAG).w("HyDE generation timed out")
             false
         }
         if (!ok) return null

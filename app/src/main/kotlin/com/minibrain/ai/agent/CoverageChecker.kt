@@ -1,9 +1,9 @@
 package com.minibrain.ai.agent
 
-import android.util.Log
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import com.minibrain.util.DatePrefix
+import timber.log.Timber
 
 data class CoverageResult(
     val canAnswer: Boolean,
@@ -43,13 +43,13 @@ class CoverageChecker(private val llmService: LlmService) {
                     val parts = line.substringAfter("no").trimStart(',', ' ')
                     val missing = if (parts.isBlank()) emptyList()
                     else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                    Log.d(TAG, "coverage=false missing=$missing")
+                    Timber.tag(TAG).d("coverage=false missing=$missing")
                     return CoverageResult(canAnswer = false, missingInformation = missing)
                 }
             }
 
             // 判定不能時は「回答可能」扱いにして余計なReActを起動しない
-            Log.d(TAG, "coverage parse unclear: $raw — defaulting canAnswer=true")
+            Timber.tag(TAG).d("coverage parse unclear: $raw — defaulting canAnswer=true")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
     }
@@ -57,13 +57,13 @@ class CoverageChecker(private val llmService: LlmService) {
     suspend fun check(query: String, candidates: List<Citation>): CoverageResult {
         // 日付クエリで日付プレフィックス付き候補があれば、LLM を呼ばずに即答可能と判定
         if (isDateShortCircuit(query, candidates)) {
-            Log.d(TAG, "short-circuit: date query with dated candidate → canAnswer=true")
+            Timber.tag(TAG).d("short-circuit: date query with dated candidate → canAnswer=true")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
 
         // 日付クエリ + 固有名詞ヒットでも即答可能扱い（回答 LLM が snippet 本文の日付を拾う）
         if (isTopicMatchShortCircuit(query, candidates)) {
-            Log.d(TAG, "short-circuit: date query with topic-match candidate → canAnswer=true")
+            Timber.tag(TAG).d("short-circuit: date query with topic-match candidate → canAnswer=true")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
 
@@ -74,7 +74,7 @@ class CoverageChecker(private val llmService: LlmService) {
         runCatching {
             llmService.generateStream(prompt).collect { token -> sb.append(token) }
         }.onFailure {
-            Log.w(TAG, "coverage check LLM failed", it)
+            Timber.tag(TAG).w(it, "coverage check LLM failed")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
 

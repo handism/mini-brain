@@ -1,6 +1,5 @@
 package com.minibrain.ai.search
 
-import android.util.Log
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.BM25SearchHitEvent
 import com.minibrain.ai.agent.AgentTraceEvent
@@ -27,6 +26,7 @@ import com.minibrain.util.DatePrefix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import timber.log.Timber
 
 data class SearchPipelineResult(
     val citations: List<Citation>,
@@ -84,7 +84,7 @@ class SearchPipeline(
         onStatus("クエリ展開中...")
         val expanded = queryExpander.expand(query)
         traceEvents += QueryExpansionEvent(expanded)
-        Log.d(TAG, "expanded=${expanded.size} queries")
+        Timber.tag(TAG).d("expanded=${expanded.size} queries")
 
         // 1.5 HyDE: 仮想回答を生成し、その埋め込みでベクトル検索を補強する。
         // LiteRT-LM は単一スレッドのため Query Expansion の直後に逐次実行する。
@@ -92,7 +92,7 @@ class SearchPipeline(
         val hypothetical = hyde?.generateHypothetical(query)
         if (hypothetical != null) {
             traceEvents += HyDeGeneratedEvent(hypothetical.take(120))
-            Log.d(TAG, "hyde=${hypothetical.take(80)}")
+            Timber.tag(TAG).d("hyde=${hypothetical.take(80)}")
         }
 
         // 2. Parallel Retrieval
@@ -123,7 +123,7 @@ class SearchPipeline(
         traceEvents += BM25SearchHitEvent(query, bm25Candidates.size)
         traceEvents += MetadataSearchHitEvent(metaCandidates.size)
         traceEvents += VectorSearchHitEvent(query, vectorCandidates.size)
-        Log.d(TAG, "bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
+        Timber.tag(TAG).d("bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
 
         // 3. Candidate Merge (RRF rank 融合 + ソース別重み付け)
         // meta を先頭に置き、同キー衝突時に [日付:] snippet 付き Citation を残す
@@ -134,13 +134,13 @@ class SearchPipeline(
             weights = RRF_WEIGHTS,
         )
         traceEvents += CandidateMergeEvent(merged.size)
-        Log.d(TAG, "merged=${merged.size} candidates")
+        Timber.tag(TAG).d("merged=${merged.size} candidates")
 
         // 4. LLM Rerank (LLM 呼び出し — 逐次)
         onStatus("候補を絞り込み中...")
         val reranked = llmReranker.rerank(query, merged, RERANK_TOP_K)
         traceEvents += RerankEvent(before = merged.size, after = reranked.size)
-        Log.d(TAG, "reranked=${reranked.size}")
+        Timber.tag(TAG).d("reranked=${reranked.size}")
 
         // 4.5 dateRange 検出時は dateRangeSearch 上位 N 件を Reranker 結果の先頭に強制マージする（ADR-025）。
         // Reranker が日付ヒットを下位に圧縮するケースを救う最小介入。後段は Reranker 順を維持する。
@@ -149,7 +149,7 @@ class SearchPipeline(
             val pinnedKeys = pinned.map { it.dedupeKey }.toHashSet()
             val rest = reranked.filterNot { it.dedupeKey in pinnedKeys }
             (pinned + rest).take(RERANK_TOP_K).also {
-                Log.d(TAG, "dateRange pin: pinned=${pinned.size} final=${it.size}")
+                Timber.tag(TAG).d("dateRange pin: pinned=${pinned.size} final=${it.size}")
             }
         } else reranked
 
@@ -168,7 +168,7 @@ class SearchPipeline(
         val chunks = runCatching {
             chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, arrayOf<Any?>(matchQuery, treeUri)))
         }.getOrElse { e ->
-            Log.w(TAG, "BM25 search failed for '$query': ${e.message}")
+            Timber.tag(TAG).w("BM25 search failed for '$query': ${e.message}")
             emptyList()
         }
         return chunks.map { chunk ->
@@ -241,7 +241,7 @@ class SearchPipeline(
             ragPipeline.vectorOnlyTopK(query, treeUri, k = k, cache = ctx)
                 .filter { it.score >= VECTOR_MIN_SCORE }
         }.getOrElse { e ->
-            Log.w(TAG, "Vector search failed: ${e.message}")
+            Timber.tag(TAG).w("Vector search failed: ${e.message}")
             emptyList()
         }
 
@@ -290,7 +290,7 @@ class SearchPipeline(
         // documents() がキャッシュ済みなら DB を叩かずに同等のフィルタを実行する
         if (dateRange != null) {
             val docs = filterDocsByDateRange(ctx, dateRange)
-            Log.d(TAG, "dateRangeSearch range=${dateRange.start}〜${dateRange.end} hits=${docs.size}")
+            Timber.tag(TAG).d("dateRangeSearch range=${dateRange.start}〜${dateRange.end} hits=${docs.size}")
             if (docs.isEmpty()) return emptyList()
 
             // 各 doc の先頭 chunk テキストを使って「活動内容」を pin に乗せる。
@@ -324,7 +324,7 @@ class SearchPipeline(
                         docDigits.startsWith(digits) || digits.startsWith(docDigits)
                     }
                 }
-                Log.d(TAG, "dateRangeSearch specific dates=${dateStrings} hits=${matched.size}")
+                Timber.tag(TAG).d("dateRangeSearch specific dates=${dateStrings} hits=${matched.size}")
                 return matched.map { doc ->
                     Citation(
                         headingPath = doc.relativePath,

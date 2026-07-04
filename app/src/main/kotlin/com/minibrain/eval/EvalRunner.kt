@@ -1,11 +1,11 @@
 package com.minibrain.eval
 
 import android.content.Context
-import android.util.Log
 import com.minibrain.ai.search.SearchPipeline
 import com.squareup.moshi.JsonReader
 import okio.buffer
 import okio.source
+import timber.log.Timber
 
 // 評価セットを SearchPipeline に流し込み、P@K / R@K / MRR を算出する。
 // 呼び出し例（デバッグメニュー等から）:
@@ -83,7 +83,7 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
             onProgress(idx, cases.size)
             val result = runCatching {
                 searchPipeline.search(case.query, treeUri).citations
-            }.onFailure { Log.w(TAG, "eval case '${case.id}' failed", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "eval case '${case.id}' failed") }
                 .getOrDefault(emptyList())
             collected += case to result
         }
