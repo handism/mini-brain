@@ -50,6 +50,7 @@ class SearchRequestCacheTest {
         override suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow> = TODO()
         override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = TODO()
         override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = TODO()
+        override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = TODO()
     }
 
     class FakeChunkDao : ChunkDao {
@@ -73,6 +74,7 @@ class SearchRequestCacheTest {
         override suspend fun deleteByDoc(docId: Long) = TODO()
         override suspend fun deleteAllByTree(treeUri: String) = TODO()
         override suspend fun bm25SearchRaw(query: SupportSQLiteQuery): List<ChunkEntity> = TODO()
+        override fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity> = TODO()
     }
 
     @Test
