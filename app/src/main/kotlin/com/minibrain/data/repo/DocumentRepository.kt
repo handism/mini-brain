@@ -93,13 +93,21 @@ class DocumentRepository(
         val total = mdFiles.size
         var totalChunks = 0
 
+        // 既存のドキュメントのチャンク数をキャッシュしてN+1問題を回避する
+        val existingDocs = documentDao.getAllByTree(treeUri.toString())
+        val chunkCountsMap = chunkDao.getChunkCountsGroupedByDoc().associateBy({ it.docId }, { it.chunkCount })
+
         mdFiles.forEachIndexed { index, mdFile ->
             _indexingState.value = IndexingState.Progress(index + 1, total, mdFile.name)
 
-            val existing = documentDao.getByFileUri(mdFile.uri.toString())
+            val existing = existingDocs.find { it.fileUri == mdFile.uri.toString() }
             // チャンク 0 件は過去のインデックスで embed が全滅した痕跡なので、ハッシュ一致でも再処理する
+            var existingChunkCount = 0
+            if (existing != null && existing.contentHash == mdFile.contentHash) {
+                existingChunkCount = chunkCountsMap[existing.id] ?: 0
+            }
             if (existing != null && existing.contentHash == mdFile.contentHash &&
-                chunkDao.getByDoc(existing.id).isNotEmpty()
+                existingChunkCount > 0
             ) {
                 if (existing.headings == null || existing.documentDate == null) {
                     documentDao.update(
@@ -116,7 +124,7 @@ class DocumentRepository(
                         )
                     )
                 }
-                totalChunks += chunkDao.getByDoc(existing.id).size
+                totalChunks += existingChunkCount
                 return@forEachIndexed
             }
 
