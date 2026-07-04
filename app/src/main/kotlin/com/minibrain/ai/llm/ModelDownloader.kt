@@ -123,7 +123,7 @@ class ModelDownloader(private val context: Context) {
             java.nio.file.StandardCopyOption.REPLACE_EXISTING,
         )
         null
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
         "ファイルの移動に失敗しました: ${e.localizedMessage}"
     }
 
