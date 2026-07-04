@@ -71,7 +71,7 @@ class SearchPipeline(
     suspend fun search(
         query: String,
         treeUri: String,
-        onStatus: (String) -> Unit = {},
+        onStatus: ((String) -> Unit)? = null,
         dateRange: DateRange? = DateResolver.resolveDateRange(query),
         cache: SearchRequestCache? = null,
     ): SearchPipelineResult {
@@ -81,7 +81,7 @@ class SearchPipeline(
         val traceEvents = mutableListOf<AgentTraceEvent>()
 
         // 1. Query Expansion (LLM 呼び出し — 単一スレッドのため逐次)
-        onStatus("クエリ展開中...")
+        onStatus?.invoke("クエリ展開中...")
         val expanded = queryExpander.expand(query)
         traceEvents += QueryExpansionEvent(expanded)
         Timber.tag(TAG).d("expanded=${expanded.size} queries")
@@ -96,7 +96,7 @@ class SearchPipeline(
         }
 
         // 2. Parallel Retrieval
-        onStatus("並行検索中...")
+        onStatus?.invoke("並行検索中...")
         // dateRangeSearch は Reranker 後段の pin 注入でも再利用するため、別に保持する
         var dateRangeHits: List<Citation> = emptyList()
         val (bm25Candidates, metaCandidates, vectorCandidates) = coroutineScope {
@@ -137,7 +137,7 @@ class SearchPipeline(
         Timber.tag(TAG).d("merged=${merged.size} candidates")
 
         // 4. LLM Rerank (LLM 呼び出し — 逐次)
-        onStatus("候補を絞り込み中...")
+        onStatus?.invoke("候補を絞り込み中...")
         val reranked = llmReranker.rerank(query, merged, RERANK_TOP_K)
         traceEvents += RerankEvent(before = merged.size, after = reranked.size)
         Timber.tag(TAG).d("reranked=${reranked.size}")
