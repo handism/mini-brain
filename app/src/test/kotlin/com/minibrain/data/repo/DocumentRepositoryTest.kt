@@ -81,12 +81,12 @@ class DocumentRepositoryTest {
             text = "Chunk Text",
             embedding = ByteArray(0)
         )
-        io.mockk.coEvery { chunkDao.getAll() } returns listOf(chunkEntity)
+        io.mockk.every { chunkDao.getBatchSync(any(), any()) } returns listOf(chunkEntity) andThen emptyList()
 
         // Force an exception during insertion
-        io.mockk.every {
-            writableDb.execSQL(any(), any())
-        } throws RuntimeException("DB insertion failed")
+        val stmt = io.mockk.mockk<androidx.sqlite.db.SupportSQLiteStatement>(relaxed = true)
+        io.mockk.every { writableDb.compileStatement(any()) } returns stmt
+        io.mockk.every { stmt.executeInsert() } throws RuntimeException("DB insertion failed")
 
         try {
             repository.ensureFtsIndex()
@@ -131,13 +131,11 @@ class DocumentRepositoryTest {
         io.mockk.every { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
 
         io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
+        io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
         io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
         io.mockk.coEvery { documentDao.insert(any()) } returns 1L
 
-        // Mock static Log to prevent test failures
-        io.mockk.mockkStatic(android.util.Log::class)
-        io.mockk.every { android.util.Log.e(any(), any(), any()) } returns 0
-        io.mockk.every { android.util.Log.d(any(), any()) } returns 0
+        // Log is now Timber, no mock needed as it no-ops without a planted Tree
 
         // The md chunker splits into multiple chunks.
         // We throw an exception on the first embed call, but normal on the subsequent ones
@@ -161,10 +159,8 @@ class DocumentRepositoryTest {
             // It should have inserted at least one chunk even though the first failed
             io.mockk.coVerify { chunkDao.insertAll(match<List<com.minibrain.data.db.entities.ChunkEntity>> { it.isNotEmpty() }) }
 
-            io.mockk.verify { android.util.Log.e("DocumentRepository", match { it.contains("embed failed") }, any<RuntimeException>()) }
         } finally {
             io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
-            io.mockk.unmockkStatic(android.util.Log::class)
             io.mockk.unmockkStatic(android.net.Uri::class)
         }
     }
