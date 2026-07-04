@@ -33,6 +33,9 @@ interface DocumentDao {
     @Query("SELECT * FROM documents WHERE fileUri = :fileUri LIMIT 1")
     suspend fun getByFileUri(fileUri: String): DocumentEntity?
 
+    @Query("SELECT * FROM documents WHERE fileUri IN (:fileUris)")
+    suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(doc: DocumentEntity): Long
 
