@@ -1,8 +1,5 @@
 package com.minibrain.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,26 +11,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,7 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,37 +38,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import android.content.ClipData
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.minibrain.ai.agent.BM25SearchHitEvent
-import com.minibrain.ai.agent.CandidateMergeEvent
-import com.minibrain.ai.agent.FinalAnswerEvent
-import com.minibrain.ai.agent.GrepSearchHitEvent
-import com.minibrain.ai.agent.MetadataSearchHitEvent
-import com.minibrain.ai.agent.VectorSearchHitEvent
-import com.minibrain.ai.agent.ObservationEvent
-import com.minibrain.ai.agent.PlannerDecisionEvent
-import com.minibrain.ai.agent.HyDeGeneratedEvent
-import com.minibrain.ai.agent.QueryExpansionEvent
-import com.minibrain.ai.agent.CoverageCheckEvent
-import com.minibrain.ai.agent.ExplorerStrategyEvent
-import com.minibrain.ai.agent.RerankEvent
-import com.minibrain.ai.agent.ToolCallEvent
-import com.minibrain.data.db.entities.MessageRole
-import com.minibrain.ui.components.MarkdownText
-import com.minibrain.ui.vm.ChatMessage
+import com.minibrain.ui.components.MessageBubble
 import com.minibrain.ui.vm.ChatViewModel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -211,289 +175,3 @@ fun ChatScreen(
     }
 }
 
-@Composable
-private fun MessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
-    val isUser = msg.role == MessageRole.USER
-    var citationsExpanded by remember { mutableStateOf(false) }
-    var traceExpanded by remember { mutableStateOf(false) }
-    var copied by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboard.current
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(copied) {
-        if (copied) {
-            delay(1500)
-            copied = false
-        }
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Column(
-            modifier = Modifier.widthIn(max = 300.dp),
-            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-        ) {
-            Card(
-                shape = RoundedCornerShape(
-                    topStart = 16.dp,
-                    topEnd = 16.dp,
-                    bottomStart = if (isUser) 16.dp else 4.dp,
-                    bottomEnd = if (isUser) 4.dp else 16.dp,
-                ),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isUser)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    if (msg.isStreaming && msg.content.isEmpty()) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else if (isUser) {
-                        Text(
-                            text = msg.content,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    } else {
-                        MarkdownText(
-                            text = msg.content,
-                            textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            // コピーボタン + 引用元（ストリーミング中は非表示）
-            if (!msg.isStreaming && msg.content.isNotEmpty()) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(0.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("", msg.content)))
-                            }
-                            copied = true
-                        },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                            contentDescription = "コピー",
-                            modifier = Modifier.size(15.dp),
-                            tint = if (copied) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    if (!isUser && msg.citations.isNotEmpty()) {
-                        TextButton(onClick = { citationsExpanded = !citationsExpanded }) {
-                            Icon(
-                                if (citationsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Text(
-                                "引用元 (${msg.citations.size})",
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (!isUser && msg.citations.isNotEmpty() && !msg.isStreaming) {
-                AnimatedVisibility(visible = citationsExpanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        msg.citations.forEach { citation ->
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceContainerLow,
-                                        RoundedCornerShape(8.dp),
-                                    )
-                                    .padding(8.dp),
-                            ) {
-                                Column {
-                                    Text(
-                                        citation.headingPath,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                    Text(
-                                        citation.snippet,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 3,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (!isUser && !msg.isStreaming && showSearchLog && msg.traceEvents.isNotEmpty()) {
-                TextButton(
-                    onClick = { traceExpanded = !traceExpanded },
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                ) {
-                    Icon(
-                        if (traceExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text("検索ログ", style = MaterialTheme.typography.labelSmall)
-                }
-                AnimatedVisibility(visible = traceExpanded) {
-                    AgentTraceSection(msg.traceEvents)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AgentTraceSection(events: List<com.minibrain.ai.agent.AgentTraceEvent>) {
-    Box(
-        modifier = Modifier
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest, RoundedCornerShape(8.dp))
-            .padding(8.dp)
-            .fillMaxWidth(),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            events.forEach { event ->
-                when (event) {
-                    is ToolCallEvent -> {
-                        Text(
-                            "Planner",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            "${event.toolName}(\n${event.arguments}\n)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            softWrap = false,
-                        )
-                    }
-                    is ObservationEvent -> {
-                        Text(
-                            "Observation",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary,
-                        )
-                        Text(
-                            event.summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is PlannerDecisionEvent -> {
-                        if (event.decision.startsWith("finalize")) {
-                            Text(
-                                "完了",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.tertiary,
-                            )
-                        }
-                    }
-                    is FinalAnswerEvent -> {
-                        Text(
-                            "回答 ${event.answerLength}字",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.tertiary,
-                        )
-                    }
-                    is QueryExpansionEvent -> {
-                        Text(
-                            "Query Expansion",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            event.queries.joinToString(" / "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is HyDeGeneratedEvent -> {
-                        Text(
-                            "HyDE",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            event.hypothetical,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is BM25SearchHitEvent -> {
-                        Text(
-                            "BM25  ${event.hitCount} hits",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is MetadataSearchHitEvent -> {
-                        Text(
-                            "Metadata  ${event.hitCount} hits",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is GrepSearchHitEvent -> {
-                        Text(
-                            "Grep  ${event.hitCount} hits",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is VectorSearchHitEvent -> {
-                        Text(
-                            "Vector  ${event.hitCount} hits",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is CandidateMergeEvent -> {
-                        Text(
-                            "Merge  ${event.totalCount} candidates",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    is RerankEvent -> {
-                        Text(
-                            "Rerank  ${event.before} → ${event.after}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary,
-                        )
-                    }
-                    is CoverageCheckEvent -> {
-                        val label = if (event.canAnswer) "Coverage  OK" else "Coverage  NG — missing: ${event.missingInformation.joinToString(", ")}"
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (event.canAnswer) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    is ExplorerStrategyEvent -> {
-                        Text(
-                            "Explorer  ${event.strategy}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
