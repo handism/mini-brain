@@ -9,6 +9,80 @@ class MarkdownMetaExtractorTest {
     private fun extract(content: String): String? =
         MarkdownMetaExtractor.extractDateFromContent(content)
 
+    private fun extractFirstParagraph(content: String, maxChars: Int = 200): String =
+        MarkdownMetaExtractor.extractFirstParagraph(content, maxChars)
+
+    @Test
+    fun testExtractFirstParagraph_basic() {
+        val md = """
+
+            This is the first paragraph.
+            It has two lines.
+
+            This is the second paragraph.
+        """.trimIndent()
+        assertEquals("This is the first paragraph. It has two lines.", extractFirstParagraph(md))
+    }
+
+    @Test
+    fun testExtractFirstParagraph_skipYaml() {
+        val md = """
+            ---
+            title: Hello
+            date: 2024-01-01
+            ---
+            This is the first paragraph after YAML.
+        """.trimIndent()
+        assertEquals("This is the first paragraph after YAML.", extractFirstParagraph(md))
+    }
+
+    @Test
+    fun testExtractFirstParagraph_skipHeadingsAndImages() {
+        val md = """
+            # Heading 1
+            ## Heading 2
+            ![Image](image.jpg)
+
+            This is the actual first paragraph.
+        """.trimIndent()
+        assertEquals("This is the actual first paragraph.", extractFirstParagraph(md))
+    }
+
+    @Test
+    fun testExtractFirstParagraph_emptyLinesBeforeParagraph() {
+        val md = """
+
+
+
+            Paragraph text.
+        """.trimIndent()
+        assertEquals("Paragraph text.", extractFirstParagraph(md))
+    }
+
+    @Test
+    fun testExtractFirstParagraph_maxChars() {
+        val md = """
+            This is a very long paragraph that will definitely exceed the twenty character limit we set for this test.
+        """.trimIndent()
+        assertEquals("This is a very long ", extractFirstParagraph(md, 20))
+    }
+
+    @Test
+    fun testExtractFirstParagraph_emptyString() {
+        assertEquals("", extractFirstParagraph(""))
+    }
+
+    @Test
+    fun testExtractFirstParagraph_onlyYamlAndHeadings() {
+        val md = """
+            ---
+            title: Title
+            ---
+            # Heading
+        """.trimIndent()
+        assertEquals("", extractFirstParagraph(md))
+    }
+
     @Test
     fun yamlDateLabel() {
         val md = """
