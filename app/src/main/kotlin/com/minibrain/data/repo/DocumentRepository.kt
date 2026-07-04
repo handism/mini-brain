@@ -226,18 +226,37 @@ class DocumentRepository(
         val ftsCount = ftsCount()
         if (ftsCount == chunkCount) return@withContext
 
-        val allChunks = chunkDao.getAll()
         val writableDb = db.openHelper.writableDatabase
 
         writableDb.beginTransaction()
         try {
-            allChunks.forEach { chunk ->
-                writableDb.execSQL(
-                    "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)",
-                    arrayOf<Any?>(chunk.id, NGramTokenizer.toBigrams(chunk.text), NGramTokenizer.toBigrams(chunk.headingPath))
-                )
+            // Using compileStatement provides better performance than multiple execSQL
+            // Also process in batches to prevent OutOfMemory issues for large datasets
+            val limit = 1000
+            var lastId = 0L
+            val sql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
+            val stmt = writableDb.compileStatement(sql)
+            try {
+                while (true) {
+                    val chunksBatch = chunkDao.getBatchSync(lastId, limit)
+                    if (chunksBatch.isEmpty()) break
+
+                    chunksBatch.forEach { chunk ->
+                        stmt.bindLong(1, chunk.id)
+                        val textBigrams = NGramTokenizer.toBigrams(chunk.text)
+                        stmt.bindString(2, textBigrams)
+
+                        val headingBigrams = NGramTokenizer.toBigrams(chunk.headingPath)
+                        stmt.bindString(3, headingBigrams)
+                        stmt.executeInsert()
+                        stmt.clearBindings()
+                        lastId = maxOf(lastId, chunk.id)
+                    }
+                }
+                writableDb.setTransactionSuccessful()
+            } finally {
+                stmt.close()
             }
-            writableDb.setTransactionSuccessful()
         } finally {
             writableDb.endTransaction()
         }
@@ -255,11 +274,21 @@ class DocumentRepository(
 
     private fun insertFts(ids: List<Long>, entities: List<ChunkEntity>) {
         val writableDb = db.openHelper.writableDatabase
-        ids.zip(entities).forEach { (id, entity) ->
-            writableDb.execSQL(
-                "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)",
-                arrayOf<Any?>(id, NGramTokenizer.toBigrams(entity.text), NGramTokenizer.toBigrams(entity.headingPath))
-            )
+        val sql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
+        val stmt = writableDb.compileStatement(sql)
+        try {
+            ids.zip(entities).forEach { (id, entity) ->
+                stmt.bindLong(1, id)
+                val textBigrams = NGramTokenizer.toBigrams(entity.text)
+                stmt.bindString(2, textBigrams)
+
+                val headingBigrams = NGramTokenizer.toBigrams(entity.headingPath)
+                stmt.bindString(3, headingBigrams)
+                stmt.executeInsert()
+                stmt.clearBindings()
+            }
+        } finally {
+            stmt.close()
         }
     }
 
