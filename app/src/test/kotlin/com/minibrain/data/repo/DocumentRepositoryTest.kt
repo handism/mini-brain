@@ -126,7 +126,7 @@ class DocumentRepositoryTest {
             relativePath = "file1.md",
             lastModified = 0L,
             contentHash = "hash1",
-            content = "# Heading 1\nThis is paragraph 1.\n\nThis is paragraph 2."
+            content = "# Heading 1\nThis is paragraph 1.\n# Heading 2\nThis is paragraph 2."
         )
         io.mockk.every { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
 
@@ -159,7 +159,7 @@ class DocumentRepositoryTest {
             repository.indexFolder(treeUri)
 
             // It should have inserted at least one chunk even though the first failed
-            io.mockk.coVerify { chunkDao.insertAll(any<List<com.minibrain.data.db.entities.ChunkEntity>>()) }
+            io.mockk.coVerify { chunkDao.insertAll(match<List<com.minibrain.data.db.entities.ChunkEntity>> { it.isNotEmpty() }) }
 
             io.mockk.verify { android.util.Log.e("DocumentRepository", match { it.contains("embed failed") }, any<RuntimeException>()) }
         } finally {
