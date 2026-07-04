@@ -1,7 +1,6 @@
 package com.minibrain.ai.llm
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -10,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.concurrent.TimeUnit
+import timber.log.Timber
 
 data class DownloadProgress(
     val fileName: String,
@@ -54,7 +54,7 @@ class ModelDownloader(private val context: Context) {
                         result is DownloadResult.Done -> {
                             val err = moveFile(tempFile, embedderModelFile)
                             if (err != null) {
-                                Log.e(TAG, "Failed to move embedder temp file: $err")
+                                Timber.tag(TAG).e("Failed to move embedder temp file: $err")
                                 tempFile.delete()
                                 emit(DownloadResult.Error(err))
                                 errorOccurred = true
@@ -74,7 +74,7 @@ class ModelDownloader(private val context: Context) {
                         result is DownloadResult.Done -> {
                             val err = moveFile(tempFile, tokenizerModelFile)
                             if (err != null) {
-                                Log.e(TAG, "Failed to move tokenizer temp file: $err")
+                                Timber.tag(TAG).e("Failed to move tokenizer temp file: $err")
                                 tempFile.delete()
                                 emit(DownloadResult.Error(err))
                                 errorOccurred = true
@@ -94,7 +94,7 @@ class ModelDownloader(private val context: Context) {
                         result is DownloadResult.Done -> {
                             val err = moveFile(tempFile, llmModelFile)
                             if (err != null) {
-                                Log.e(TAG, "Failed to move LLM temp file: $err")
+                                Timber.tag(TAG).e("Failed to move LLM temp file: $err")
                                 tempFile.delete()
                                 emit(DownloadResult.Error(err))
                                 errorOccurred = true

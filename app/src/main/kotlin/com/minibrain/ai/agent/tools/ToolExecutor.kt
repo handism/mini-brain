@@ -1,6 +1,5 @@
 package com.minibrain.ai.agent.tools
 
-import android.util.Log
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.AgentTool
 import com.minibrain.ai.agent.ToolCall
@@ -20,6 +19,7 @@ import com.minibrain.data.search.NGramTokenizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import timber.log.Timber
 
 private const val TAG = "ToolExecutor"
 private const val MAX_GLOB_RESULTS = 30
@@ -148,7 +148,7 @@ class ToolExecutor(
         val citations = if (fullText.length > SUMMARIZE_THRESHOLD_CHARS) {
             // 巨大ファイルは要約してから単一の citation として投入
             val summary = runCatching { llmService.summarize(fullText) }
-                .onFailure { Log.w(TAG, "summarize failed for ${doc.relativePath}, truncating", it) }
+                .onFailure { Timber.tag(TAG).w(it, "summarize failed for ${doc.relativePath}, truncating") }
                 .getOrElse { fullText.take(SUMMARIZE_THRESHOLD_CHARS) }
             listOf(Citation(
                 headingPath = doc.relativePath,
@@ -188,7 +188,7 @@ class ToolExecutor(
                         arrayOf<Any?>(matchQuery),
                     )
                 )
-            }.onFailure { Log.w(TAG, "bm25SearchRaw failed for query: $matchQuery", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "bm25SearchRaw failed for query: $matchQuery") }
              .getOrElse { emptyList() }
         }
 
@@ -330,12 +330,12 @@ class ToolExecutor(
     private fun parseFirstHeadings(json: String, count: Int): String = runCatching {
         val arr = JSONArray(json)
         (0 until minOf(arr.length(), count)).joinToString(", ") { i -> arr.getString(i) }
-    }.onFailure { Log.w(TAG, "parseFirstHeadings failed: $json", it) }
+    }.onFailure { Timber.tag(TAG).w(it, "parseFirstHeadings failed: $json") }
      .getOrElse { "" }
 
     private fun parseJsonArray(json: String): List<String> = runCatching {
         val arr = JSONArray(json)
         (0 until arr.length()).map { i -> arr.getString(i) }
-    }.onFailure { Log.w(TAG, "parseJsonArray failed: $json", it) }
+    }.onFailure { Timber.tag(TAG).w(it, "parseJsonArray failed: $json") }
      .getOrElse { emptyList() }
 }

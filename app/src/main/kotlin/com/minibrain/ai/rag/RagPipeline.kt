@@ -1,6 +1,5 @@
 package com.minibrain.ai.rag
 
-import android.util.Log
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
@@ -18,6 +17,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 enum class SourceType { READ_FILE, GREP, METADATA, BM25, VECTOR, RRF, GLOB, FOLDER, UNKNOWN }
 
@@ -49,22 +49,22 @@ class RagPipeline(
         coroutineScope {
             val vecJob = async {
                 withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k = 50, cache) }
-                    ?: run { Log.w("RagPipeline", "vectorSearch timed out"); emptyList() }
+                    ?: run { Timber.tag("RagPipeline").w("vectorSearch timed out"); emptyList() }
             }
             val bm25Job = async {
                 withTimeoutOrNull(SEARCH_TIMEOUT_MS) { bm25Search(question, treeUri, k = 50) }
-                    ?: run { Log.w("RagPipeline", "bm25Search timed out"); emptyList() }
+                    ?: run { Timber.tag("RagPipeline").w("bm25Search timed out"); emptyList() }
             }
             val folderJob = async {
                 withTimeoutOrNull(SEARCH_TIMEOUT_MS) { folderSearch(question, treeUri, k = 5) }
-                    ?: run { Log.w("RagPipeline", "folderSearch timed out"); emptyList() }
+                    ?: run { Timber.tag("RagPipeline").w("folderSearch timed out"); emptyList() }
             }
 
             val vecResults = vecJob.await()
             val bm25Results = bm25Job.await()
             val folderResults = folderJob.await()
 
-            Log.d("RagPipeline", "vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
+            Timber.tag("RagPipeline").d("vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
 
             val allDocIds = (vecResults.map { it.second.docId } + bm25Results.map { it.docId }).distinct()
             val docIdToDate: Map<Long, LocalDate?> = if (cache != null) {
@@ -83,7 +83,7 @@ class RagPipeline(
 
             val chunkCitations = rrf(bm25Results, vecResults.map { it.second }, topK, docIdToDate = docIdToDate)
                 .map { (score, chunk) ->
-                    Log.d("RagPipeline", "rrf=%.4f path=${chunk.headingPath}".format(score))
+                    Timber.tag("RagPipeline").d("rrf=%.4f path=${chunk.headingPath}".format(score))
                     Citation(
                         headingPath = chunk.headingPath,
                         snippet = chunk.text,
@@ -116,7 +116,7 @@ class RagPipeline(
         cache: SearchRequestCache? = null,
     ): List<Citation> {
         val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k, cache) }
-            ?: run { Log.w("RagPipeline", "vectorOnlyTopK timed out"); return emptyList() }
+            ?: run { Timber.tag("RagPipeline").w("vectorOnlyTopK timed out"); return emptyList() }
         val docPathMap = resolveDocPaths(hits.map { it.second.docId }, cache)
         return hits.map { (score, chunk) ->
             Citation(
@@ -207,7 +207,7 @@ class RagPipeline(
         return runCatching {
             chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, args))
         }.getOrElse { e ->
-            Log.w("RagPipeline", "BM25 search failed: ${e.message}")
+            Timber.tag("RagPipeline").w("BM25 search failed: ${e.message}")
             emptyList()
         }
     }

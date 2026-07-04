@@ -1,7 +1,7 @@
 package com.minibrain.ai.search
 
-import android.util.Log
 import com.minibrain.ai.llm.LlmService
+import timber.log.Timber
 
 class QueryExpander(private val llmService: LlmService) {
 
@@ -25,7 +25,7 @@ class QueryExpander(private val llmService: LlmService) {
                 }
                 result
             }.getOrElse {
-                Log.w(TAG, "JSON parse failed: $it")
+                Timber.tag(TAG).w("JSON parse failed: $it")
                 emptyList()
             }
         }
@@ -39,7 +39,7 @@ class QueryExpander(private val llmService: LlmService) {
         runCatching {
             llmService.generateStream(prompt).collect { token -> sb.append(token) }
         }.onFailure {
-            Log.w(TAG, "LLM failed during expansion", it)
+            Timber.tag(TAG).w(it, "LLM failed during expansion")
             return listOf(query)
         }
 
@@ -51,7 +51,7 @@ class QueryExpander(private val llmService: LlmService) {
         // 元クエリが含まれていない場合は先頭に追加
         val withOriginal = if (parsed.any { it == query }) parsed else listOf(query) + parsed
         val result = withOriginal.take(MAX_QUERIES)
-        Log.d(TAG, "expanded: ${result.joinToString(" | ")}")
+        Timber.tag(TAG).d("expanded: ${result.joinToString(" | ")}")
         return result
     }
 

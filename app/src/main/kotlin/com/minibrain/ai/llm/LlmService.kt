@@ -13,6 +13,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import timber.log.Timber
 
 class LlmService(private val context: Context) {
 
@@ -38,7 +39,7 @@ class LlmService(private val context: Context) {
                     return@withLock
                 } catch (e: Throwable) {
                     lastError = e
-                    android.util.Log.e("LlmService", "GPU initialization failed, falling back to CPU", e)
+                    Timber.tag("LlmService").e(e, "GPU initialization failed, falling back to CPU")
                 }
             }
 
@@ -49,7 +50,7 @@ class LlmService(private val context: Context) {
                 eng.initialize()
                 engine = eng
             } catch (e: Throwable) {
-                android.util.Log.e("LlmService", "CPU initialization failed", e)
+                Timber.tag("LlmService").e(e, "CPU initialization failed")
                 val msg = if (forceCpu) "CPUモードでの初期化に失敗しました" else "GPU/CPU 両方で失敗しました"
                 throw Exception("$msg: ${e.localizedMessage}", e)
             }

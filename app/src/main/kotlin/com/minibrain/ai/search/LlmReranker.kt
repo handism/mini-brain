@@ -1,10 +1,10 @@
 package com.minibrain.ai.search
 
-import android.util.Log
 import com.minibrain.ai.agent.DateResolver
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import com.minibrain.util.DatePrefix
+import timber.log.Timber
 
 class LlmReranker(private val llmService: LlmService) {
 
@@ -29,12 +29,12 @@ class LlmReranker(private val llmService: LlmService) {
         runCatching {
             llmService.generateStream(prompt).collect { token -> sb.append(token) }
         }.onFailure {
-            Log.w(TAG, "LLM rerank failed", it)
+            Timber.tag(TAG).w(it, "LLM rerank failed")
             return candidates.take(topK)
         }
 
         val indices = parseIndices(sb.toString())
-        Log.d(TAG, "rerank indices=$indices from ${limited.size} candidates")
+        Timber.tag(TAG).d("rerank indices=$indices from ${limited.size} candidates")
 
         if (indices.isEmpty()) return candidates.take(topK)
 
@@ -94,7 +94,7 @@ class LlmReranker(private val llmService: LlmService) {
             }
             result
         }.getOrElse {
-            Log.w(TAG, "index parse failed: $it")
+            Timber.tag(TAG).w("index parse failed: $it")
             emptyList()
         }
     }
