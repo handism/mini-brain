@@ -1,0 +1,7 @@
+<<<<<<< SEARCH
+    @Query("SELECT * FROM chunks LIMIT :limit OFFSET :offset")
+    suspend fun getBatch(limit: Int, offset: Int): List<ChunkEntity>
+=======
+    @Query("SELECT * FROM chunks WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity>
+>>>>>>> REPLACE
