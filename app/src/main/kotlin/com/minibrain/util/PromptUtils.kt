@@ -6,6 +6,10 @@ package com.minibrain.util
 object PromptUtils {
     private const val MAX_HISTORY_TURNS = 6
 
+    /**
+     * Renders the conversation history block, keeping only the last [MAX_HISTORY_TURNS].
+     * Maps "user" role to "ユーザー" and other roles to "アシスタント".
+     */
     fun renderHistoryBlock(history: List<Pair<String, String>>): String {
         if (history.isEmpty()) return ""
         val rendered = history.takeLast(MAX_HISTORY_TURNS)
