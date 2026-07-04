@@ -192,21 +192,18 @@ class ToolExecutor(
              .getOrElse { emptyList() }
         }
 
-        val docCache = mutableMapOf<Long, DocumentEntity?>()
-        suspend fun getDoc(docId: Long) = docCache.getOrPut(docId) {
-            withContext(Dispatchers.IO) { documentDao.getById(docId) }
-        }
+        val docsMapForGrep = cache.documents().associateBy { it.id }
 
         val filtered = if (tool.scope != null) {
             rawChunks.filter { chunk ->
-                val doc = getDoc(chunk.docId)
+                val doc = docsMapForGrep[chunk.docId]
                 doc?.relativePath?.startsWith(tool.scope) == true
             }
         } else rawChunks
 
         val hits = filtered.take(MAX_GREP_RESULTS)
         val citations = hits.map { chunk ->
-            val doc = getDoc(chunk.docId)
+            val doc = docsMapForGrep[chunk.docId]
             Citation(
                 headingPath = chunk.headingPath,
                 snippet = chunk.text,
@@ -218,7 +215,7 @@ class ToolExecutor(
         }
 
         val lines = hits.joinToString("\n") { chunk ->
-            val doc = docCache[chunk.docId]
+            val doc = docsMapForGrep[chunk.docId]
             val path = doc?.relativePath ?: "d=${chunk.docId}"
             "- [d=${chunk.docId} p=$path] ${chunk.headingPath}: ${chunk.text.take(GREP_SNIPPET_CHARS)}"
         }
@@ -254,13 +251,9 @@ class ToolExecutor(
             ).map { (score, meta) -> Pair(score, meta as com.minibrain.data.db.entities.ChunkEntity) }
         }
 
-        val docCache2 = mutableMapOf<Long, DocumentEntity?>()
-        suspend fun getDoc(docId: Long) = docCache2.getOrPut(docId) {
-            withContext(Dispatchers.IO) { documentDao.getById(docId) }
-        }
-
+        val docsMapForVector = cache.documents().associateBy { it.id }
         val citations = topChunks.map { (score, chunk) ->
-            val doc = getDoc(chunk.docId)
+            val doc = docsMapForVector[chunk.docId]
             Citation(
                 headingPath = chunk.headingPath,
                 snippet = chunk.text,
@@ -310,10 +303,9 @@ class ToolExecutor(
 
         val citations = mutableListOf<Citation>()
         val lines = mutableListOf<String>()
+        val cachedChunksList = cache.chunkVectors().first
         for (doc in docs) {
-            val snippet = withContext(Dispatchers.IO) {
-                chunkDao.getByDoc(doc.id).firstOrNull()?.text
-            } ?: doc.firstParagraph ?: ""
+            val snippet = cachedChunksList.firstOrNull { it.docId == doc.id }?.text ?: doc.firstParagraph ?: ""
             citations.add(Citation(
                 headingPath = doc.relativePath,
                 snippet = snippet.take(GREP_SNIPPET_CHARS),
