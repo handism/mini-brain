@@ -32,6 +32,9 @@ interface ChunkDao {
     @Query("SELECT * FROM chunks")
     suspend fun getAll(): List<ChunkEntity>
 
+    @Query("SELECT * FROM chunks WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
+    fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity>
+
     @Query("""
         SELECT chunks.* FROM chunks 
         INNER JOIN documents ON chunks.docId = documents.id 
