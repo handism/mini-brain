@@ -2,7 +2,6 @@ package com.minibrain.data.repo
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.annotation.VisibleForTesting
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
@@ -25,6 +24,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 sealed class IndexingState {
     object Idle : IndexingState()
@@ -153,7 +153,7 @@ class DocumentRepository(
                         embedding = EmbedderService.floatArrayToBytes(embedding),
                     )
                 }.onFailure { e ->
-                    Log.e("DocumentRepository", "embed failed: ${mdFile.relativePath} / ${chunk.headingPath}", e)
+                    Timber.tag("DocumentRepository").e(e, "embed failed: ${mdFile.relativePath} / ${chunk.headingPath}")
                 }.getOrNull()
             }
 

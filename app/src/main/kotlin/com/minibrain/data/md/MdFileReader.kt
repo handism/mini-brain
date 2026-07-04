@@ -2,9 +2,9 @@ package com.minibrain.data.md
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.security.MessageDigest
+import timber.log.Timber
 
 data class MdFile(
     val uri: Uri,
@@ -42,7 +42,7 @@ object MdFileReader {
                 file.isFile && name.endsWith(".md", ignoreCase = true) -> {
                     val fileSize = file.length()
                     if (fileSize > MAX_FILE_SIZE_BYTES) {
-                        Log.w(TAG, "Skipping $name: file too large ($fileSize bytes)")
+                        Timber.tag(TAG).w("Skipping $name: file too large ($fileSize bytes)")
                         continue
                     }
                     val content = readText(context, file.uri) ?: continue

@@ -1,10 +1,10 @@
 package com.minibrain.ai.agent
 
-import android.util.Log
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
+import timber.log.Timber
 
 data class DateRange(val start: LocalDate, val end: LocalDate)
 
@@ -89,7 +89,7 @@ object DateResolver {
             val day = match.groupValues[3].toInt()
             return runCatching {
                 listOf(LocalDate.of(year, month, day).format(FORMATTER))
-            }.onFailure { Log.w(TAG, "Invalid dot/slash date: $year/$month/$day", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "Invalid dot/slash date: $year/$month/$day") }
              .getOrElse { emptyList() }
         }
 
@@ -99,7 +99,7 @@ object DateResolver {
             val lastWeekMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1)
             val target = lastWeekMonday.with(TemporalAdjusters.nextOrSame(dow))
             return runCatching { listOf(target.format(FORMATTER)) }
-                .onFailure { Log.w(TAG, "Failed to resolve last week day: $dow", it) }
+                .onFailure { Timber.tag(TAG).w(it, "Failed to resolve last week day: $dow") }
                 .getOrElse { emptyList() }
         }
 
@@ -110,7 +110,7 @@ object DateResolver {
             val target = thisWeekMonday.with(TemporalAdjusters.nextOrSame(dow))
             if (!target.isAfter(today)) {
                 return runCatching { listOf(target.format(FORMATTER)) }
-                    .onFailure { Log.w(TAG, "Failed to resolve this week day: $dow", it) }
+                    .onFailure { Timber.tag(TAG).w(it, "Failed to resolve this week day: $dow") }
                     .getOrElse { emptyList() }
             }
         }
@@ -167,7 +167,7 @@ object DateResolver {
             val year = resolveYear(question, today, month)
             return runCatching {
                 listOf(LocalDate.of(year, month, day).format(FORMATTER))
-            }.onFailure { Log.w(TAG, "Invalid month/day: $year/$month/$day", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "Invalid month/day: $year/$month/$day") }
              .getOrElse { emptyList() }
         }
 
@@ -182,7 +182,7 @@ object DateResolver {
                     .takeWhile { !it.isAfter(end) }
                     .map { it.format(FORMATTER) }
                     .toList()
-            }.onFailure { Log.w(TAG, "Invalid month-only: $year/$month", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "Invalid month-only: $year/$month") }
              .getOrElse { emptyList() }
         }
 
@@ -199,14 +199,14 @@ object DateResolver {
                     val start = LocalDate.of(year, month, 1)
                     val end = minOf(start.withDayOfMonth(start.lengthOfMonth()), today)
                     DateRange(start, end)
-                }.onFailure { Log.w(TAG, "Invalid era year+month: $year/$month", it) }
+                }.onFailure { Timber.tag(TAG).w(it, "Invalid era year+month: $year/$month") }
                  .getOrNull()
             } else {
                 runCatching {
                     val start = LocalDate.of(year, 1, 1)
                     val end = if (year == today.year) today else LocalDate.of(year, 12, 31)
                     DateRange(start, end)
-                }.onFailure { Log.w(TAG, "Invalid era year: $year", it) }
+                }.onFailure { Timber.tag(TAG).w(it, "Invalid era year: $year") }
                  .getOrNull()
             }
         }
@@ -240,7 +240,7 @@ object DateResolver {
             return runCatching {
                 val start = LocalDate.of(year, month, 1)
                 DateRange(start, start.withDayOfMonth(start.lengthOfMonth()))
-            }.onFailure { Log.w(TAG, "Invalid N-years-ago month: $year/$month", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "Invalid N-years-ago month: $year/$month") }
              .getOrNull()
         }
 
@@ -258,7 +258,7 @@ object DateResolver {
                 val start = LocalDate.of(year, month, 1)
                 val end = minOf(start.withDayOfMonth(start.lengthOfMonth()), today)
                 DateRange(start, end)
-            }.onFailure { Log.w(TAG, "Invalid year+month: $year/$month", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "Invalid year+month: $year/$month") }
              .getOrNull()
         }
 
@@ -310,7 +310,7 @@ object DateResolver {
                 val start = LocalDate.of(year, 1, 1)
                 val end = if (year == today.year) today else LocalDate.of(year, 12, 31)
                 DateRange(start, end)
-            }.onFailure { Log.w(TAG, "Invalid year-only: $year", it) }
+            }.onFailure { Timber.tag(TAG).w(it, "Invalid year-only: $year") }
              .getOrNull()
         }
 
@@ -332,7 +332,7 @@ object DateResolver {
             LocalDate.of(year, endMonth, 1).lengthOfMonth()
         )
         DateRange(start, minOf(end, today))
-    }.onFailure { Log.w(TAG, "Invalid quarter: Q$q $year", it) }
+    }.onFailure { Timber.tag(TAG).w(it, "Invalid quarter: Q$q $year") }
      .getOrNull()
 
     private fun seasonRange(season: String, year: Int, today: LocalDate): DateRange? = runCatching {
@@ -347,7 +347,7 @@ object DateResolver {
             else -> return@runCatching null
         }
         if (range.end.isAfter(today)) DateRange(range.start, today) else range
-    }.onFailure { Log.w(TAG, "Invalid season: $season $year", it) }
+    }.onFailure { Timber.tag(TAG).w(it, "Invalid season: $season $year") }
      .getOrNull()
 
     private fun resolveYear(question: String, today: LocalDate, month: Int): Int = when {
