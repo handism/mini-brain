@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 val Context.dataStore by preferencesDataStore(name = "settings")
 
@@ -65,6 +66,7 @@ class MiniBrainApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Timber.plant(Timber.DebugTree())
         applicationScope.launch(Dispatchers.IO) {
             documentRepository.ensureFtsIndex()
         }
