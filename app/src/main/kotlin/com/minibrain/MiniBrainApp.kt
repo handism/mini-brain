@@ -31,7 +31,7 @@ class MiniBrainApp : Application() {
 
     val modelDownloader: ModelDownloader by lazy { ModelDownloader(this) }
 
-    val embedderService: EmbedderService by lazy { EmbedderService(this) }
+    val embedderService: EmbedderService by lazy { EmbedderService() }
 
     val llmService: LlmService by lazy { LlmService(this) }
 

@@ -3,7 +3,6 @@ package com.minibrain.ai.embed
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -16,7 +15,7 @@ import kotlin.math.sqrt
 
 enum class EmbedType { QUERY, PASSAGE }
 
-class EmbedderService(@Suppress("unused") private val context: Context) {
+class EmbedderService {
 
     private var ortEnv: OrtEnvironment? = null
     private var ortSession: OrtSession? = null
