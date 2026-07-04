@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 sealed class OnboardingUiState {
     object Checking : OnboardingUiState()
@@ -97,20 +98,20 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         // 初期化開始フラグを立てる（クラッシュ検知用）
         app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = true }
         try {
-            android.util.Log.d("Onboarding", "Initializing Embedder...")
+            Timber.tag("Onboarding").d("Initializing Embedder...")
             app.embedderService.initialize(downloader.embedderModelFile, downloader.tokenizerModelFile)
 
-            android.util.Log.d("Onboarding", "Initializing LLM (forceCpu=$forceCpu)...")
+            Timber.tag("Onboarding").d("Initializing LLM (forceCpu=$forceCpu)...")
             if (forceCpu) {
                 app.llmService.initialize(downloader.llmModelFile, forceCpu = true)
             } else {
                 app.llmService.initialize(downloader.llmModelFile)
             }
 
-            android.util.Log.d("Onboarding", "All services initialized")
+            Timber.tag("Onboarding").d("All services initialized")
             _state.value = OnboardingUiState.Ready
         } catch (e: Exception) {
-            android.util.Log.e("Onboarding", "Initialization failed", e)
+            Timber.tag("Onboarding").e(e, "Initialization failed")
             _state.value = OnboardingUiState.Failure(
                 "初期化に失敗しました: ${e.localizedMessage}\n" +
                 "端末のメモリ不足の可能性があります。",

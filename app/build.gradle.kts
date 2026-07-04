@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.moshi)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    implementation(libs.timber)
 
     testImplementation(libs.junit)
     // E5Tokenizer parity テスト用の参照実装（JVM のみ、APK には含まれない）
