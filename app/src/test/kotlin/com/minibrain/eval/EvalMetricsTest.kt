@@ -3,6 +3,7 @@ package com.minibrain.eval
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.SourceType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class EvalMetricsTest {
@@ -84,5 +85,19 @@ class EvalMetricsTest {
         assertEquals(0.5, result.precisionAtK, 1e-9)
         assertEquals(0.5, result.recallAtK, 1e-9)
         assertEquals(0.5, result.mrr, 1e-9)
+    }
+
+    @Test
+    fun `Kが0以下の場合はIllegalArgumentExceptionを投げる`() {
+        val case = EvalCase("c1", "q1", listOf("a.md"))
+        val citations = listOf(cit("a.md"))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            EvalMetrics.compute(listOf(case to citations), k = 0)
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            EvalMetrics.compute(listOf(case to citations), k = -1)
+        }
     }
 }
