@@ -295,25 +295,16 @@ class AgentPipeline(
         is AgentTool.TimelineSearch -> "タイムライン検索中..."
     }
 
-    private fun buildDirectAnswerPrompt(
-        question: String,
-        history: List<Pair<String, String>>,
-    ): String {
-        val historyBlock = history.takeLast(6)
+    private fun buildHistoryBlock(history: List<Pair<String, String>>): String {
+        return history.takeLast(6)
             .joinToString("\n") { (role, content) ->
                 "${if (role == "user") "ユーザー" else "アシスタント"}: $content"
             }
             .let { if (it.isNotBlank()) "$it\n" else "" }
-        return "${historyBlock}ユーザー: $question\nアシスタント:"
     }
 
-    private fun buildAnswerPrompt(
-        question: String,
-        citations: List<Citation>,
-        history: List<Pair<String, String>>,
-        dateRange: DateRange? = null,
-    ): String {
-        val contextBlock = if (citations.isNotEmpty()) {
+    private fun buildContextBlock(citations: List<Citation>): String {
+        return if (citations.isNotEmpty()) {
             val budgeted = mutableListOf<Citation>()
             var remainingTokens = TokenEstimator.MAX_CONTEXT_TOKENS
             for (c in citations) {
@@ -336,14 +327,16 @@ $body
         } else {
             "知識ベースに関連する情報が見つかりませんでした。一般的な知識で回答してください。\n\n---"
         }
+    }
 
+    private fun buildTemporalInstruction(question: String, citations: List<Citation>, dateRange: DateRange?): String {
         // 日付関連の指示。dateRange があれば期間照合、無くても「いつ」系クエリなら本文中の日付を
         // 拾うよう誘導する（ADR-026）。snippet から日付を抽出する優先順位は次の通り:
         //   1. `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みの documentDate）
         //   2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
         //   3. 本文中の YYYY/MM/DD / YYYY-MM-DD / YYYY年MM月DD日 表記
         val isDateQuery = DateResolver.isDateQuery(question)
-        val temporalInstruction = when {
+        return when {
             dateRange != null -> {
                 val hasDated = citations.any { it.snippet.trimStart().startsWith("[日付:") }
                 if (hasDated) {
@@ -382,12 +375,25 @@ $body
             }
             else -> ""
         }
+    }
 
-        val historyBlock = history.takeLast(6)
-            .joinToString("\n") { (role, content) ->
-                "${if (role == "user") "ユーザー" else "アシスタント"}: $content"
-            }
-            .let { if (it.isNotBlank()) "$it\n" else "" }
+    private fun buildDirectAnswerPrompt(
+        question: String,
+        history: List<Pair<String, String>>,
+    ): String {
+        val historyBlock = buildHistoryBlock(history)
+        return "${historyBlock}ユーザー: $question\nアシスタント:"
+    }
+
+    private fun buildAnswerPrompt(
+        question: String,
+        citations: List<Citation>,
+        history: List<Pair<String, String>>,
+        dateRange: DateRange? = null,
+    ): String {
+        val contextBlock = buildContextBlock(citations)
+        val temporalInstruction = buildTemporalInstruction(question, citations, dateRange)
+        val historyBlock = buildHistoryBlock(history)
 
         val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
         return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: $question\nアシスタント:"
