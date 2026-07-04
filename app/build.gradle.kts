@@ -83,6 +83,8 @@ dependencies {
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    testImplementation(libs.kotlinx.coroutines.test)
     // E5Tokenizer parity テスト用の参照実装（JVM のみ、APK には含まれない）
     testImplementation("ai.djl.huggingface:tokenizers:0.33.0")
     debugImplementation(libs.androidx.compose.ui.tooling)
