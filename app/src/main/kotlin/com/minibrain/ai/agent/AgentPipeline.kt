@@ -34,7 +34,7 @@ class AgentPipeline(
         question: String,
         treeUri: String,
         recentHistory: List<Pair<String, String>> = emptyList(),
-        onStatus: (String) -> Unit = {},
+        onStatus: ((String) -> Unit)? = null,
     ): AgentResult = withContext(Dispatchers.Default) {
         // 日付範囲はここで一度だけ解決し、classify / search / plannerHint で共有する
         val dateRange = DateResolver.resolveDateRange(question)
@@ -62,7 +62,7 @@ class AgentPipeline(
         // CoverageCheck: candidates があっても質問に答えられない場合を検出
         var explorerHint: String? = null
         if (citations.isNotEmpty()) {
-            onStatus("回答可能性を確認中...")
+            onStatus?.invoke("回答可能性を確認中...")
             val coverage = coverageChecker.check(question, citations)
             traceEvents += CoverageCheckEvent(coverage.canAnswer, coverage.missingInformation)
             Log.d(TAG, "CoverageCheck canAnswer=${coverage.canAnswer} missing=${coverage.missingInformation}")
@@ -84,13 +84,13 @@ class AgentPipeline(
         // 最終セーフティネット: RRF 強制実行
         if (citations.isEmpty()) {
             Log.d(TAG, "citations still empty — forced RRF fallback")
-            onStatus("フォールバック検索中...")
+            onStatus?.invoke("フォールバック検索中...")
             citations = ragPipeline.retrieveTopChunks(question, treeUri, cache = cache)
             traceEvents += ToolCallEvent(MAX_ITERATIONS + 1, "rrf_search", "\"$question\"")
             traceEvents += ObservationEvent(MAX_ITERATIONS + 1, "${citations.size} citations returned (safety fallback)")
         }
 
-        onStatus("")
+        onStatus?.invoke("")
         val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory, dateRange))
         AgentResult(citations, answerFlow, traceEvents)
     }
@@ -114,7 +114,7 @@ class AgentPipeline(
         question: String,
         treeUri: String,
         traceEvents: MutableList<AgentTraceEvent>,
-        onStatus: (String) -> Unit,
+        onStatus: ((String) -> Unit)?,
         explorerHint: String? = null,
         dateRange: DateRange? = null,
         cache: SearchRequestCache,
@@ -131,7 +131,7 @@ class AgentPipeline(
         var consecutiveParseErrors = 0
 
         for (iteration in 1..MAX_ITERATIONS) {
-            onStatus("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
+            onStatus?.invoke("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
             Log.d(TAG, "ReAct iteration=$iteration hint=$plannerHint obs=${observations.size}")
 
             if (!llmService.isReady()) {
@@ -160,7 +160,7 @@ class AgentPipeline(
                     traceEvents += PlannerDecisionEvent(iteration, "parse_error")
                     if (consecutiveParseErrors >= 2) {
                         Log.d(TAG, "2 consecutive parse errors — RRF fallback")
-                        onStatus("フォールバック検索中...")
+                        onStatus?.invoke("フォールバック検索中...")
                         val fallbackCitations = ragPipeline.retrieveTopChunks(question, treeUri, cache = cache)
                         val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(question))
                         toolResults += ToolResult(fallbackCall, "fallback", fallbackCitations)
@@ -175,7 +175,7 @@ class AgentPipeline(
                     val toolCall = ToolCall(iteration, decision.tool)
                     val tool = decision.tool
                     traceEvents += ToolCallEvent(iteration, tool.traceName, tool.traceArgs)
-                    onStatus(tool.progressLabel)
+                    onStatus?.invoke(tool.progressLabel)
                     val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
                     toolResults += result
                     traceEvents += ObservationEvent(
