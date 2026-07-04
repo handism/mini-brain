@@ -83,6 +83,8 @@ dependencies {
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation("io.mockk:mockk:1.13.8")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     // E5Tokenizer parity テスト用の参照実装（JVM のみ、APK には含まれない）
     testImplementation("ai.djl.huggingface:tokenizers:0.33.0")
     debugImplementation(libs.androidx.compose.ui.tooling)
