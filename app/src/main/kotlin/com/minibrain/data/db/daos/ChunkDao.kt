@@ -1,5 +1,6 @@
 package com.minibrain.data.db.daos
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -9,6 +10,11 @@ import androidx.sqlite.db.SupportSQLiteQuery
 import com.minibrain.data.db.entities.ChunkEntity
 import kotlinx.coroutines.flow.Flow
 
+data class DocChunkCount(
+    @ColumnInfo(name = "docId") val docId: Long,
+    @ColumnInfo(name = "chunkCount") val chunkCount: Int
+)
+
 @Dao
 interface ChunkDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -16,6 +22,12 @@ interface ChunkDao {
 
     @Query("SELECT * FROM chunks WHERE docId = :docId")
     suspend fun getByDoc(docId: Long): List<ChunkEntity>
+
+    @Query("SELECT COUNT(*) FROM chunks WHERE docId = :docId")
+    suspend fun countByDoc(docId: Long): Int
+
+    @Query("SELECT docId, COUNT(*) as chunkCount FROM chunks GROUP BY docId")
+    suspend fun getChunkCountsGroupedByDoc(): List<DocChunkCount>
 
     @Query("SELECT * FROM chunks")
     suspend fun getAll(): List<ChunkEntity>
