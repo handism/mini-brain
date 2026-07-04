@@ -211,14 +211,18 @@ class AgentPipeline(
 
                 val found = mutableListOf<String>()
                 val notFound = mutableListOf<String>()
+                // パスの正規化 (スラッシュとハイフンを除外) をループ外で一度だけ行うことで高速化
+                val normalizedDocs = allDocs.map { doc ->
+                    doc to doc.relativePath.replace("/", "").replace("-", "")
+                }
                 for (date in dates) {
                     // 区切り文字を除いた8桁数字 (YYYYMMDD) でパスを検索
                     val digits = date.replace("-", "")
-                    val matches = allDocs.filter { doc ->
-                        doc.relativePath.replace("/", "").replace("-", "").contains(digits)
+                    val matches = normalizedDocs.filter { (_, normalizedPath) ->
+                        normalizedPath.contains(digits)
                     }.take(3)
                     if (matches.isNotEmpty()) {
-                        found += matches.map { "[d=${it.id}] ${it.relativePath}" }
+                        found += matches.map { (doc, _) -> "[d=${doc.id}] ${doc.relativePath}" }
                     } else {
                         notFound += date
                     }
