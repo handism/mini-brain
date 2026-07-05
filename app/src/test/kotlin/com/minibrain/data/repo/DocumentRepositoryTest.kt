@@ -128,7 +128,7 @@ class DocumentRepositoryTest {
             contentHash = "hash1",
             content = "# Heading 1\nThis is paragraph 1.\n# Heading 2\nThis is paragraph 2."
         )
-        io.mockk.every { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
 
         io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
