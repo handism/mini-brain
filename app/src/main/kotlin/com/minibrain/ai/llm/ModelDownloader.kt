@@ -39,10 +39,31 @@ class ModelDownloader(private val context: Context) {
     val embedderModelFile: File get() = File(modelsDir, EMBEDDER_FILE_NAME)
     val tokenizerModelFile: File get() = File(modelsDir, TOKENIZER_FILE_NAME)
 
-    fun isLlmReady(): Boolean = llmModelFile.exists() && llmModelFile.length() >= MIN_LLM_SIZE
-    fun isEmbedderReady(): Boolean = embedderModelFile.exists() && embedderModelFile.length() >= MIN_EMBEDDER_SIZE
-    fun isTokenizerReady(): Boolean = tokenizerModelFile.exists() && tokenizerModelFile.length() >= MIN_TOKENIZER_SIZE
+    fun isLlmReady(): Boolean = llmModelFile.exists() && llmModelFile.length() >= MIN_LLM_SIZE && verifyHash(llmModelFile, LLM_SHA256)
+    fun isEmbedderReady(): Boolean = embedderModelFile.exists() && embedderModelFile.length() >= MIN_EMBEDDER_SIZE && verifyHash(embedderModelFile, EMBEDDER_SHA256)
+    fun isTokenizerReady(): Boolean = tokenizerModelFile.exists() && tokenizerModelFile.length() >= MIN_TOKENIZER_SIZE && verifyHash(tokenizerModelFile, TOKENIZER_SHA256)
     fun isAllReady(): Boolean = isLlmReady() && isEmbedderReady() && isTokenizerReady()
+
+    private fun verifyHash(file: File, expectedHash: String): Boolean {
+        if (!file.exists()) return false
+        val actualHash = calculateSha256(file)
+        return actualHash.equals(expectedHash, ignoreCase = true)
+    }
+
+    private fun calculateSha256(file: File): String = try {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(8192)
+            var bytesRead: Int
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                digest.update(buffer, 0, bytesRead)
+            }
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    } catch (e: Exception) {
+        Timber.tag(TAG).e(e, "Failed to calculate SHA-256 for ${file.name}")
+        ""
+    }
 
     fun downloadAll(): Flow<DownloadResult> = flow {
         try {
@@ -52,11 +73,18 @@ class ModelDownloader(private val context: Context) {
                 downloadFile(EMBEDDER_URL, tempFile, EMBEDDER_FILE_NAME).collect { result ->
                     when {
                         result is DownloadResult.Done -> {
-                            val err = moveFile(tempFile, embedderModelFile)
-                            if (err != null) {
-                                Timber.tag(TAG).e("Failed to move embedder temp file: $err")
+                            if (verifyHash(tempFile, EMBEDDER_SHA256)) {
+                                val err = moveFile(tempFile, embedderModelFile)
+                                if (err != null) {
+                                    Timber.tag(TAG).e("Failed to move embedder temp file: $err")
+                                    tempFile.delete()
+                                    emit(DownloadResult.Error(err))
+                                    errorOccurred = true
+                                }
+                            } else {
+                                Timber.tag(TAG).e("Embedder hash verification failed")
                                 tempFile.delete()
-                                emit(DownloadResult.Error(err))
+                                emit(DownloadResult.Error("Embedder のハッシュ検証に失敗しました。再試行してください。"))
                                 errorOccurred = true
                             }
                         }
@@ -72,11 +100,18 @@ class ModelDownloader(private val context: Context) {
                 downloadFile(TOKENIZER_URL, tempFile, TOKENIZER_FILE_NAME).collect { result ->
                     when {
                         result is DownloadResult.Done -> {
-                            val err = moveFile(tempFile, tokenizerModelFile)
-                            if (err != null) {
-                                Timber.tag(TAG).e("Failed to move tokenizer temp file: $err")
+                            if (verifyHash(tempFile, TOKENIZER_SHA256)) {
+                                val err = moveFile(tempFile, tokenizerModelFile)
+                                if (err != null) {
+                                    Timber.tag(TAG).e("Failed to move tokenizer temp file: $err")
+                                    tempFile.delete()
+                                    emit(DownloadResult.Error(err))
+                                    errorOccurred = true
+                                }
+                            } else {
+                                Timber.tag(TAG).e("Tokenizer hash verification failed")
                                 tempFile.delete()
-                                emit(DownloadResult.Error(err))
+                                emit(DownloadResult.Error("Tokenizer のハッシュ検証に失敗しました。再試行してください。"))
                                 errorOccurred = true
                             }
                         }
@@ -92,11 +127,18 @@ class ModelDownloader(private val context: Context) {
                 downloadFile(LLM_URL, tempFile, LLM_FILE_NAME).collect { result ->
                     when {
                         result is DownloadResult.Done -> {
-                            val err = moveFile(tempFile, llmModelFile)
-                            if (err != null) {
-                                Timber.tag(TAG).e("Failed to move LLM temp file: $err")
+                            if (verifyHash(tempFile, LLM_SHA256)) {
+                                val err = moveFile(tempFile, llmModelFile)
+                                if (err != null) {
+                                    Timber.tag(TAG).e("Failed to move LLM temp file: $err")
+                                    tempFile.delete()
+                                    emit(DownloadResult.Error(err))
+                                    errorOccurred = true
+                                }
+                            } else {
+                                Timber.tag(TAG).e("LLM hash verification failed")
                                 tempFile.delete()
-                                emit(DownloadResult.Error(err))
+                                emit(DownloadResult.Error("LLM のハッシュ検証に失敗しました。再試行してください。"))
                                 errorOccurred = true
                             }
                         }
@@ -209,5 +251,9 @@ class ModelDownloader(private val context: Context) {
         private const val MIN_LLM_SIZE = 2_000_000_000L    // 2GB (実際は約2.5GB)
         private const val MIN_EMBEDDER_SIZE = 50_000_000L  // 50MB (実際は約118MB)
         private const val MIN_TOKENIZER_SIZE = 1_000_000L  // 1MB (実際は約17MB)
+
+        private const val LLM_SHA256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+        private const val EMBEDDER_SHA256 = "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193"
+        private const val TOKENIZER_SHA256 = "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
     }
 }
