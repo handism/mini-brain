@@ -100,6 +100,33 @@ class DocumentRepositoryTest {
         io.mockk.verify { writableDb.endTransaction() }
     }
 
+    @org.junit.Test
+    fun testEnsureFtsIndex_getBatchSyncException_rollsBack() = kotlinx.coroutines.test.runTest {
+        io.mockk.coEvery { chunkDao.count() } returns 1
+        io.mockk.every { readableDb.query(any<String>(), any<Array<Any?>>()) } returns cursor
+        io.mockk.every { cursor.moveToFirst() } returns true
+        io.mockk.every { cursor.getInt(0) } returns 0 // ftsCount == 0, triggering index update
+        io.mockk.every { cursor.close() } returns Unit
+
+        // Force an exception during batch retrieval
+        io.mockk.every { chunkDao.getBatchSync(any(), any()) } throws RuntimeException("Batch retrieval failed")
+
+        val stmt = io.mockk.mockk<androidx.sqlite.db.SupportSQLiteStatement>(relaxed = true)
+        io.mockk.every { writableDb.compileStatement(any()) } returns stmt
+
+        try {
+            repository.ensureFtsIndex()
+            org.junit.Assert.fail("Expected exception")
+        } catch (e: Exception) {
+            org.junit.Assert.assertEquals("Batch retrieval failed", e.message)
+        }
+
+        io.mockk.verify { writableDb.beginTransaction() }
+        io.mockk.verify(exactly = 0) { writableDb.setTransactionSuccessful() }
+        io.mockk.verify { stmt.close() }
+        io.mockk.verify { writableDb.endTransaction() }
+    }
+
     @org.junit.After
     fun tearDown() {
         io.mockk.unmockkAll()
