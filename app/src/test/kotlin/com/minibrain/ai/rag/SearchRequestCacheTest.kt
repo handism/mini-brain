@@ -37,22 +37,22 @@ class SearchRequestCacheTest {
             )
         }
 
-        override fun observeAllByTree(treeUri: String): Flow<List<DocumentEntity>> = TODO()
-        override fun observeCountByTree(treeUri: String): Flow<Int> = TODO()
-        override suspend fun getByFileUri(fileUri: String): DocumentEntity? = TODO()
-        override suspend fun insert(doc: DocumentEntity): Long = TODO()
-        override suspend fun update(doc: DocumentEntity) = TODO()
-        override suspend fun deleteAllByTree(treeUri: String) = TODO()
-        override suspend fun deleteByFileUri(fileUri: String) = TODO()
-        override suspend fun getById(id: Long): DocumentEntity? = TODO()
-        override suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity> = TODO()
-        override suspend fun getRecentFiles(treeUri: String, limit: Int): List<DocumentEntity> = TODO()
-        override suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow> = TODO()
-        override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = TODO()
-        override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = TODO()
-        override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = TODO()
-        override suspend fun findByMetadataRaw(query: SupportSQLiteQuery): List<DocumentEntity> = TODO()
-        override suspend fun getMinimalByTree(treeUri: String): List<com.minibrain.data.db.daos.DocumentMinimal> = TODO()
+        override fun observeAllByTree(treeUri: String): Flow<List<DocumentEntity>> = kotlinx.coroutines.flow.emptyFlow()
+        override fun observeCountByTree(treeUri: String): Flow<Int> = kotlinx.coroutines.flow.flowOf(0)
+        override suspend fun getByFileUri(fileUri: String): DocumentEntity? = null
+        override suspend fun insert(doc: DocumentEntity): Long = 0L
+        override suspend fun update(doc: DocumentEntity) {}
+        override suspend fun deleteAllByTree(treeUri: String) {}
+        override suspend fun deleteByFileUri(fileUri: String) {}
+        override suspend fun getById(id: Long): DocumentEntity? = null
+        override suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity> = emptyList()
+        override suspend fun getRecentFiles(treeUri: String, limit: Int): List<DocumentEntity> = emptyList()
+        override suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow> = emptyList()
+        override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = emptyList()
+        override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = emptyList()
+        override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = emptyList()
+        override suspend fun findByMetadataRaw(query: SupportSQLiteQuery): List<DocumentEntity> = emptyList()
+        override suspend fun getMinimalByTree(treeUri: String): List<com.minibrain.data.db.daos.DocumentMinimal> = emptyList()
     }
 
     class FakeChunkDao : ChunkDao {
@@ -65,18 +65,18 @@ class SearchRequestCacheTest {
             return dummyChunks
         }
 
-        override suspend fun insertAll(chunks: List<ChunkEntity>): List<Long> = TODO()
-        override suspend fun getByDoc(docId: Long): List<ChunkEntity> = TODO()
-        override suspend fun countByDoc(docId: Long): Int = TODO()
-        override suspend fun getChunkCountsGroupedByDoc(): List<DocChunkCount> = TODO()
-        override suspend fun getAll(): List<ChunkEntity> = TODO()
-        override suspend fun getByScope(treeUri: String, scope: String): List<ChunkEntity> = TODO()
-        override fun observeCountByTree(treeUri: String): Flow<Int> = TODO()
-        override suspend fun count(): Int = TODO()
-        override suspend fun deleteByDoc(docId: Long) = TODO()
-        override suspend fun deleteAllByTree(treeUri: String) = TODO()
-        override suspend fun bm25SearchRaw(query: SupportSQLiteQuery): List<ChunkEntity> = TODO()
-        override fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity> = TODO()
+        override suspend fun insertAll(chunks: List<ChunkEntity>): List<Long> = emptyList()
+        override suspend fun getByDoc(docId: Long): List<ChunkEntity> = emptyList()
+        override suspend fun countByDoc(docId: Long): Int = 0
+        override suspend fun getChunkCountsGroupedByDoc(): List<DocChunkCount> = emptyList()
+        override suspend fun getAll(): List<ChunkEntity> = emptyList()
+        override suspend fun getByScope(treeUri: String, scope: String): List<ChunkEntity> = emptyList()
+        override fun observeCountByTree(treeUri: String): Flow<Int> = kotlinx.coroutines.flow.flowOf(0)
+        override suspend fun count(): Int = 0
+        override suspend fun deleteByDoc(docId: Long) {}
+        override suspend fun deleteAllByTree(treeUri: String) {}
+        override suspend fun bm25SearchRaw(query: SupportSQLiteQuery): List<ChunkEntity> = emptyList()
+        override fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity> = emptyList()
     }
 
     @Test
