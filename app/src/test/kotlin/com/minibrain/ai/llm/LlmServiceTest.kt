@@ -1,9 +1,7 @@
 package com.minibrain.ai.llm
 
-import android.content.Context
 import com.google.ai.edge.litertlm.Engine
 import io.mockk.every
-import io.mockk.mockk
 import io.mockk.mockkConstructor
 import io.mockk.mockkStatic
 import io.mockk.unmockkAll
@@ -30,8 +28,7 @@ class LlmServiceTest {
 
     @Test
     fun `initialize throws exception if model file is too small`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000) } // Only 100KB, less than 100MB
@@ -48,8 +45,7 @@ class LlmServiceTest {
 
     @Test
     fun `initialize falls back to CPU if GPU fails`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
@@ -68,8 +64,7 @@ class LlmServiceTest {
 
     @Test
     fun `initialize fails if both GPU and CPU fail`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
@@ -90,8 +85,7 @@ class LlmServiceTest {
 
     @Test
     fun `initialize fails with correct message if forceCpu fails`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
