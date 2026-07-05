@@ -51,6 +51,8 @@ class SearchRequestCacheTest {
         override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = TODO()
         override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = TODO()
         override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = TODO()
+        override suspend fun findByMetadataRaw(query: SupportSQLiteQuery): List<DocumentEntity> = TODO()
+        override suspend fun getMinimalByTree(treeUri: String): List<com.minibrain.data.db.daos.DocumentMinimal> = TODO()
     }
 
     class FakeChunkDao : ChunkDao {
