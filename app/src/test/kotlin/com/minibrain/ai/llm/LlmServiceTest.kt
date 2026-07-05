@@ -14,17 +14,29 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.io.RandomAccessFile
+import timber.log.Timber
 
 class LlmServiceTest {
+
+    private val logs = mutableListOf<String>()
+    private val testTree = object : Timber.Tree() {
+        override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+            println("LOGGED: '$message'")
+            logs.add(message)
+        }
+    }
 
     @Before
     fun setup() {
         mockkStatic(android.util.Log::class)
         every { android.util.Log.e(any(), any(), any()) } returns 0
+        logs.clear()
+        Timber.plant(testTree)
     }
 
     @After
     fun tearDown() {
+        Timber.uproot(testTree)
         unmockkAll()
     }
 
@@ -61,6 +73,8 @@ class LlmServiceTest {
         try {
             service.initialize(tempFile, forceCpu = false)
             assertTrue(service.isReady())
+            println("CURRENT LOGS: $logs")
+            assertTrue(logs.any { it.contains("GPU initialization failed, falling back to CPU") })
         } finally {
             tempFile.delete()
         }
