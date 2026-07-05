@@ -163,10 +163,10 @@ class SearchPipeline(
             JOIN chunks ON chunks_fts.rowid = chunks.id
             JOIN documents ON chunks.docId = documents.id
             WHERE chunks_fts MATCH ? AND documents.treeUri = ?
-            LIMIT $BM25_PER_QUERY_LIMIT
+            LIMIT ?
         """.trimIndent()
         val chunks = runCatching {
-            chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, arrayOf<Any?>(matchQuery, treeUri)))
+            chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, arrayOf<Any?>(matchQuery, treeUri, BM25_PER_QUERY_LIMIT)))
         }.getOrElse { e ->
             Timber.tag(TAG).w("BM25 search failed for '$query': ${e.message}")
             emptyList()
