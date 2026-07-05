@@ -185,14 +185,14 @@ class DocumentRepository(
             val fileUris = files.map { it.uri.toString() }
             val allDocs = documentDao.getByFileUris(fileUris)
 
-            val headings = allDocs.flatMap { doc ->
+            val headings = allDocs.asSequence().flatMap { doc ->
                 doc.headings?.let { json ->
                     runCatching {
                         val arr = org.json.JSONArray(json)
                         (0 until arr.length()).map { i -> arr.getString(i) }
                     }.getOrElse { emptyList() }
                 } ?: emptyList()
-            }.take(10)
+            }.take(10).toList()
 
             val folderText = buildString {
                 append("フォルダ: $folderPath\n")
