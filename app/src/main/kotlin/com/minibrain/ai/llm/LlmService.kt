@@ -1,6 +1,5 @@
 package com.minibrain.ai.llm
 
-import android.content.Context
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Engine
@@ -15,7 +14,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import timber.log.Timber
 
-class LlmService(private val context: Context) {
+class LlmService {
 
     private var engine: Engine? = null
     private val mutex = Mutex()
