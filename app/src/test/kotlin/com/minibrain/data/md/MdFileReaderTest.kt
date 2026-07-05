@@ -11,6 +11,7 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import java.io.ByteArrayInputStream
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -53,7 +54,7 @@ class MdFileReaderTest {
     }
 
     @Test
-    fun `listMdFiles returns empty list when root is null`() {
+    fun `listMdFiles returns empty list when root is null`() = runTest {
         every { DocumentFile.fromTreeUri(context, treeUri) } returns null
 
         val result = MdFileReader.listMdFiles(context, treeUri)
@@ -61,7 +62,7 @@ class MdFileReaderTest {
     }
 
     @Test
-    fun `listMdFiles collects md files and traverses directories`() {
+    fun `listMdFiles collects md files and traverses directories`() = runTest {
         val rootDir = mockk<DocumentFile>()
         every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
 
@@ -118,7 +119,7 @@ class MdFileReaderTest {
     }
 
     @Test
-    fun `listMdFiles ignores non-md files`() {
+    fun `listMdFiles ignores non-md files`() = runTest {
         val rootDir = mockk<DocumentFile>()
         every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
 
@@ -140,7 +141,7 @@ class MdFileReaderTest {
     }
 
     @Test
-    fun `listMdFiles skips files larger than 10MB`() {
+    fun `listMdFiles skips files larger than 10MB`() = runTest {
         val rootDir = mockk<DocumentFile>()
         every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
 
@@ -160,7 +161,7 @@ class MdFileReaderTest {
     }
 
     @Test
-    fun `listMdFiles skips file if readText fails`() {
+    fun `listMdFiles skips file if readText fails`() = runTest {
         val rootDir = mockk<DocumentFile>()
         every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
 
@@ -183,7 +184,7 @@ class MdFileReaderTest {
     }
 
     @Test
-    fun `listMdFiles skips file if name is null`() {
+    fun `listMdFiles skips file if name is null`() = runTest {
         val rootDir = mockk<DocumentFile>()
         every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
 

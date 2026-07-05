@@ -4,6 +4,10 @@ import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 data class MdFile(
@@ -20,47 +24,49 @@ object MdFileReader {
     private const val TAG = "MdFileReader"
     private const val MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024L // 10MB
 
-    fun listMdFiles(context: Context, treeUri: Uri): List<MdFile> {
-        val root = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
-        val results = mutableListOf<MdFile>()
-        collectMd(context, root, "", results)
-        return results
+    suspend fun listMdFiles(context: Context, treeUri: Uri): List<MdFile> = withContext(Dispatchers.IO) {
+        val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext emptyList()
+        collectMd(context, root, "")
     }
 
-    private fun collectMd(
+    private suspend fun collectMd(
         context: Context,
         dir: DocumentFile,
         pathPrefix: String,
-        results: MutableList<MdFile>,
-    ) {
-        for (file in dir.listFiles()) {
-            val name = file.name ?: continue
+    ): List<MdFile> = withContext(Dispatchers.IO) {
+        dir.listFiles().mapNotNull { file ->
+            val name = file.name ?: return@mapNotNull null
             when {
                 file.isDirectory -> {
-                    collectMd(context, file, if (pathPrefix.isEmpty()) name else "$pathPrefix/$name", results)
+                    async {
+                        collectMd(context, file, if (pathPrefix.isEmpty()) name else "$pathPrefix/$name")
+                    }
                 }
                 file.isFile && name.endsWith(".md", ignoreCase = true) -> {
-                    val fileSize = file.length()
-                    if (fileSize > MAX_FILE_SIZE_BYTES) {
-                        Timber.tag(TAG).w("Skipping $name: file too large ($fileSize bytes)")
-                        continue
-                    }
-                    val content = readText(context, file.uri) ?: continue
-                    val hash = sha256(content)
-                    val relativePath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"
-                    results.add(
-                        MdFile(
-                            uri = file.uri,
-                            name = name,
-                            relativePath = relativePath,
-                            lastModified = file.lastModified(),
-                            contentHash = hash,
-                            content = content,
+                    async {
+                        val fileSize = file.length()
+                        if (fileSize > MAX_FILE_SIZE_BYTES) {
+                            Timber.tag(TAG).w("Skipping $name: file too large ($fileSize bytes)")
+                            return@async null
+                        }
+                        val content = readText(context, file.uri) ?: return@async null
+                        val hash = sha256(content)
+                        val relativePath = if (pathPrefix.isEmpty()) name else "$pathPrefix/$name"
+                        listOf(
+                            MdFile(
+                                uri = file.uri,
+                                name = name,
+                                relativePath = relativePath,
+                                lastModified = file.lastModified(),
+                                contentHash = hash,
+                                content = content,
+                            )
                         )
-                    )
+                    }
                 }
+                else -> null
             }
-        }
+        }.awaitAll().filterNotNull().flatten()
     }
 
     private fun readText(context: Context, uri: Uri): String? = runCatching {
