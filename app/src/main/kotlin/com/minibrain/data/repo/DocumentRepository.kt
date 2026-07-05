@@ -97,8 +97,13 @@ class DocumentRepository(
         val existingDocs = documentDao.getByFileUris(mdFiles.map { it.uri.toString() }).associateBy { it.fileUri }
         val chunkCountsMap = chunkDao.getChunkCountsGroupedByDoc().associateBy({ it.docId }, { it.chunkCount })
 
-        mdFiles.forEachIndexed { index, mdFile ->
-            _indexingState.value = IndexingState.Progress(index + 1, total, mdFile.name)
+        val writableDb = db.openHelper.writableDatabase
+        val ftsSql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
+        val ftsStmt = writableDb.compileStatement(ftsSql)
+
+        try {
+            mdFiles.forEachIndexed { index, mdFile ->
+                _indexingState.value = IndexingState.Progress(index + 1, total, mdFile.name)
 
             val existing = existingDocs[mdFile.uri.toString()]
             // チャンク 0 件は過去のインデックスで embed が全滅した痕跡なので、ハッシュ一致でも再処理する
@@ -165,9 +170,12 @@ class DocumentRepository(
                 }.getOrNull()
             }
 
-            val ids = chunkDao.insertAll(chunkEntities)
-            insertFts(ids, chunkEntities)
-            totalChunks += chunkEntities.size
+                val ids = chunkDao.insertAll(chunkEntities)
+                insertFts(ftsStmt, ids, chunkEntities)
+                totalChunks += chunkEntities.size
+            }
+        } finally {
+            ftsStmt.close()
         }
 
         // フォルダ単位の仮想埋め込みを生成（直近の親フォルダでグループ化）
@@ -272,23 +280,16 @@ class DocumentRepository(
         }
     }
 
-    private fun insertFts(ids: List<Long>, entities: List<ChunkEntity>) {
-        val writableDb = db.openHelper.writableDatabase
-        val sql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
-        val stmt = writableDb.compileStatement(sql)
-        try {
-            ids.zip(entities).forEach { (id, entity) ->
-                stmt.bindLong(1, id)
-                val textBigrams = NGramTokenizer.toBigrams(entity.text)
-                stmt.bindString(2, textBigrams)
+    private fun insertFts(stmt: androidx.sqlite.db.SupportSQLiteStatement, ids: List<Long>, entities: List<ChunkEntity>) {
+        ids.zip(entities).forEach { (id, entity) ->
+            stmt.bindLong(1, id)
+            val textBigrams = NGramTokenizer.toBigrams(entity.text)
+            stmt.bindString(2, textBigrams)
 
-                val headingBigrams = NGramTokenizer.toBigrams(entity.headingPath)
-                stmt.bindString(3, headingBigrams)
-                stmt.executeInsert()
-                stmt.clearBindings()
-            }
-        } finally {
-            stmt.close()
+            val headingBigrams = NGramTokenizer.toBigrams(entity.headingPath)
+            stmt.bindString(3, headingBigrams)
+            stmt.executeInsert()
+            stmt.clearBindings()
         }
     }
 
