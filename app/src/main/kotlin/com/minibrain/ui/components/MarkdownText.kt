@@ -26,7 +26,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private sealed class MdBlock {
+internal sealed class MdBlock {
     data class Heading(val level: Int, val text: String) : MdBlock()
     data class Paragraph(val text: String) : MdBlock()
     data class CodeBlock(val language: String, val code: String) : MdBlock()
@@ -35,7 +35,7 @@ private sealed class MdBlock {
     data object HRule : MdBlock()
 }
 
-private fun parse(text: String): List<MdBlock> {
+internal fun parse(text: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     val lines = text.lines()
     var i = 0
@@ -85,7 +85,7 @@ private fun parse(text: String): List<MdBlock> {
     return blocks
 }
 
-private fun buildInline(text: String, codeBackground: Color): AnnotatedString = buildAnnotatedString {
+internal fun buildInline(text: String, codeBackground: Color): AnnotatedString = buildAnnotatedString {
     var remaining = text
     while (remaining.isNotEmpty()) {
         when {
