@@ -255,36 +255,6 @@ class AgentPipeline(
         return parts.joinToString(" / ").ifBlank { null }
     }
 
-    private fun traceToolName(tool: AgentTool): String = when (tool) {
-        is AgentTool.Glob -> "glob"
-        is AgentTool.ListDir -> "list_dir"
-        is AgentTool.ReadFile -> "read_file"
-        is AgentTool.Grep -> "grep"
-        is AgentTool.VectorSearch -> "vector_search"
-        is AgentTool.RrfSearch -> "rrf_search"
-        is AgentTool.TimelineSearch -> "timeline_search"
-    }
-
-    private fun traceToolArgs(tool: AgentTool): String = when (tool) {
-        is AgentTool.Glob -> tool.pattern
-        is AgentTool.ListDir -> tool.folder
-        is AgentTool.ReadFile -> tool.docId?.let { "docId=$it" } ?: tool.path ?: ""
-        is AgentTool.Grep -> "\"${tool.query}\"${tool.scope?.let { ",\nscope=$it" } ?: ""}"
-        is AgentTool.VectorSearch -> "\"${tool.query}\",\nk=${tool.k}"
-        is AgentTool.RrfSearch -> "\"${tool.query}\",\nk=${tool.k}"
-        is AgentTool.TimelineSearch -> "${tool.startDate},\n${tool.endDate}"
-    }
-
-    private fun traceObservationSummary(tool: AgentTool, result: ToolResult): String = when (tool) {
-        is AgentTool.Glob -> "${result.citations.size} files matched"
-        is AgentTool.ListDir -> "${result.citations.size} entries listed"
-        is AgentTool.ReadFile -> "${result.summary.length} chars loaded"
-        is AgentTool.Grep -> "${result.citations.size} hits returned"
-        is AgentTool.VectorSearch -> "${result.citations.size} results returned"
-        is AgentTool.RrfSearch -> "${result.citations.size} citations returned"
-        is AgentTool.TimelineSearch -> "${result.citations.size} documents found"
-    }
-
     private fun toolProgressDescription(tool: AgentTool): String = when (tool) {
         is AgentTool.Glob -> "ファイルパターン検索中..."
         is AgentTool.ListDir -> "フォルダ一覧取得中..."
