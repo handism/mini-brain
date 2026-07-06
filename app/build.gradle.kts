@@ -89,13 +89,10 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.ext)
-
-    // Compose testing
+    testImplementation(libs.androidx.navigation.testing)
     testImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-
     // E5Tokenizer parity テスト用の参照実装（JVM のみ、APK には含まれない）
     testImplementation("ai.djl.huggingface:tokenizers:0.33.0")
-    testImplementation(libs.robolectric)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

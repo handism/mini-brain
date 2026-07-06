@@ -1,6 +1,7 @@
 package com.minibrain.ui.nav
 
 import androidx.compose.runtime.Composable
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -12,7 +13,7 @@ import com.minibrain.ui.screens.HomeScreen
 import com.minibrain.ui.screens.OnboardingScreen
 import com.minibrain.ui.screens.SettingsScreen
 
-private object Routes {
+object Routes {
     const val ONBOARDING = "onboarding"
     const val HOME = "home"
     const val CHAT = "chat"
@@ -21,9 +22,9 @@ private object Routes {
 }
 
 @Composable
-fun AppNav() {
-    val navController = rememberNavController()
-
+fun AppNav(
+    navController: NavHostController = rememberNavController()
+) {
     NavHost(navController = navController, startDestination = Routes.ONBOARDING) {
 
         composable(Routes.ONBOARDING) {
