@@ -34,7 +34,7 @@ class MiniBrainApp : Application() {
 
     val embedderService: EmbedderService by lazy { EmbedderService() }
 
-    val llmService: LlmService by lazy { LlmService(this) }
+    val llmService: LlmService by lazy { LlmService() }
 
     val documentRepository: DocumentRepository by lazy {
         DocumentRepository(this, database.documentDao(), database.chunkDao(), embedderService, database, database.folderEmbeddingDao())
