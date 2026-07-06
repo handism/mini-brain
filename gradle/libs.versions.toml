@@ -19,6 +19,7 @@ timber = "5.0.1"
 mockk = "1.13.10"
 coroutines-test = "1.9.0"
 robolectric = "4.14.1"
+androidx-test-ext = "1.2.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
@@ -51,6 +52,7 @@ timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "tim
 mockk-mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines-test" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+androidx-test-ext = { group = "androidx.test.ext", name = "junit", version.ref = "androidx-test-ext" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
