@@ -88,6 +88,7 @@ dependencies {
     testImplementation(libs.mockk.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.ext)
     testImplementation(libs.androidx.navigation.testing)
     testImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

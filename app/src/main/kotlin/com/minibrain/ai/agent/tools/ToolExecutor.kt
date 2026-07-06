@@ -235,11 +235,14 @@ class ToolExecutor(
         } else {
             val (chunks, vectors) = cache.chunkVectors()
             val docsMap = cache.documents().associateBy { it.id }
+            val validDocIds = docsMap.values
+                .filter { it.relativePath.startsWith(tool.scope) }
+                .map { it.id }
+                .toSet()
             val filteredCandidates = ArrayList<Pair<FloatArray, com.minibrain.data.db.entities.ChunkEntity>>()
             for (i in chunks.indices) {
                 val chunk = chunks[i]
-                val doc = docsMap[chunk.docId]
-                if (doc != null && doc.relativePath.startsWith(tool.scope)) {
+                if (chunk.docId in validDocIds) {
                     filteredCandidates.add(Pair(vectors[i], chunk))
                 }
             }

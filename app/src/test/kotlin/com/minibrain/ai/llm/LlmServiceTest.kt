@@ -1,9 +1,7 @@
 package com.minibrain.ai.llm
 
-import android.content.Context
 import com.google.ai.edge.litertlm.Engine
 import io.mockk.every
-import io.mockk.mockk
 import io.mockk.mockkConstructor
 import io.mockk.mockkStatic
 import io.mockk.unmockkAll
@@ -14,24 +12,35 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.io.RandomAccessFile
+import timber.log.Timber
 
 class LlmServiceTest {
+
+    private val logs = mutableListOf<String>()
+    private val testTree = object : Timber.Tree() {
+        override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+            println("LOGGED: '$message'")
+            logs.add(message)
+        }
+    }
 
     @Before
     fun setup() {
         mockkStatic(android.util.Log::class)
         every { android.util.Log.e(any(), any(), any()) } returns 0
+        logs.clear()
+        Timber.plant(testTree)
     }
 
     @After
     fun tearDown() {
+        Timber.uproot(testTree)
         unmockkAll()
     }
 
     @Test
     fun `initialize throws exception if model file is too small`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000) } // Only 100KB, less than 100MB
@@ -48,8 +57,7 @@ class LlmServiceTest {
 
     @Test
     fun `initialize falls back to CPU if GPU fails`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
@@ -61,6 +69,8 @@ class LlmServiceTest {
         try {
             service.initialize(tempFile, forceCpu = false)
             assertTrue(service.isReady())
+            println("CURRENT LOGS: $logs")
+            assertTrue(logs.any { it.contains("GPU initialization failed, falling back to CPU") })
         } finally {
             tempFile.delete()
         }
@@ -68,8 +78,7 @@ class LlmServiceTest {
 
     @Test
     fun `initialize fails if both GPU and CPU fail`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
@@ -90,8 +99,7 @@ class LlmServiceTest {
 
     @Test
     fun `initialize fails with correct message if forceCpu fails`() = runBlocking {
-        val ctx = mockk<Context>()
-        val service = LlmService(ctx)
+        val service = LlmService()
 
         val tempFile = File.createTempFile("model", ".bin")
         RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
