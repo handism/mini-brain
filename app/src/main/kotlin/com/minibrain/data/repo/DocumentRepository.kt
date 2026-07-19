@@ -189,9 +189,14 @@ class DocumentRepository(
             .filter { it.relativePath.contains('/') }
             .groupBy { it.relativePath.substringBeforeLast('/') }
 
+        val allFileUrisToFetch = byFolder.values.flatten().map { it.uri.toString() }
+        val allDocsMap = allFileUrisToFetch.chunked(900).flatMap { chunk ->
+            documentDao.getByFileUris(chunk)
+        }.associateBy { it.fileUri }
+
         for ((folderPath, files) in byFolder) {
             val fileUris = files.map { it.uri.toString() }
-            val allDocs = documentDao.getByFileUris(fileUris)
+            val allDocs = fileUris.mapNotNull { allDocsMap[it] }
 
             val headings = allDocs.asSequence().flatMap { doc ->
                 doc.headings?.let { json ->
