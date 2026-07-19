@@ -14,11 +14,11 @@ class ChatHistoryViewModel(application: Application) : AndroidViewModel(applicat
 
     private val app = application as MiniBrainApp
 
-    val sessions: StateFlow<List<ChatSessionEntity>> = app.chatRepository
+    val sessions: StateFlow<List<ChatSessionEntity>> = app.container.chatRepository
         .observeSessions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun deleteSession(id: Long) {
-        viewModelScope.launch { app.chatRepository.deleteSession(id) }
+        viewModelScope.launch { app.container.chatRepository.deleteSession(id) }
     }
 }

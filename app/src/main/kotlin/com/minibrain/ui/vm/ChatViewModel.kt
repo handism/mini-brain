@@ -70,13 +70,13 @@ class ChatViewModel(
     init {
         viewModelScope.launch {
             _sessionId.value = if (navSessionId > 0L) navSessionId
-                               else app.chatRepository.getOrCreateSession()
+                               else app.container.chatRepository.getOrCreateSession()
         }
 
         viewModelScope.launch {
             _sessionId.collectLatest { id ->
                 if (id == -1L) return@collectLatest
-                app.chatRepository.observeMessages(id).collect { entities ->
+                app.container.chatRepository.observeMessages(id).collect { entities ->
                     if (!_isGenerating.value) {
                         val existingTrace = _messages.value.associate { it.id to it.traceEvents }
                         _messages.value = entities.map { entity ->
@@ -106,11 +106,11 @@ class ChatViewModel(
             // ユーザーメッセージを追加（最初の送信時はセッションタイトルを質問で更新）
             if (_messages.value.isEmpty()) {
                 val title = question.take(40).let { if (question.length > 40) "$it…" else it }
-                app.chatRepository.updateSessionTitle(_sessionId.value, title)
+                app.container.chatRepository.updateSessionTitle(_sessionId.value, title)
             }
             val userMsg = ChatMessage(role = MessageRole.USER, content = question)
             _messages.value = _messages.value + userMsg
-            app.chatRepository.addMessage(_sessionId.value, MessageRole.USER, question)
+            app.container.chatRepository.addMessage(_sessionId.value, MessageRole.USER, question)
 
             // ストリーミングプレースホルダーを先行追加（検索中も CircularProgressIndicator 表示）
             val streamingMsg = ChatMessage(
@@ -122,13 +122,13 @@ class ChatViewModel(
 
             val treeUri = savedTreeUri.value ?: ""
 
-            val history = app.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
+            val history = app.container.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
                 Pair(msg.role.name.lowercase(), msg.content)
             }
 
             // エージェントループ（計画 → 多段ツール実行 → 回答）
             val agentResult = runCatching {
-                app.agentPipeline.run(question, treeUri, history) { status ->
+                app.container.agentPipeline.run(question, treeUri, history) { status ->
                     _statusText.value = status.ifBlank { null }
                 }
             }.getOrElse {
@@ -165,7 +165,7 @@ class ChatViewModel(
             val finalContent = sb.toString()
             val filteredCitations = if (isNegativeResponse(finalContent)) emptyList() else citations
             val citationsJson = serializeCitations(filteredCitations)
-            val msgId = app.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
+            val msgId = app.container.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
             val finalTrace = agentResult.traceEvents + FinalAnswerEvent(finalContent.length)
 
             val finalList = _messages.value.toMutableList()
@@ -198,7 +198,7 @@ class ChatViewModel(
 
     fun newSession() {
         viewModelScope.launch {
-            _sessionId.value = app.chatRepository.createSession()
+            _sessionId.value = app.container.chatRepository.createSession()
             _messages.value = emptyList()
         }
     }
