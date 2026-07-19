@@ -7,24 +7,34 @@ import okio.buffer
 import okio.source
 import timber.log.Timber
 
-// 評価セットを SearchPipeline に流し込み、P@K / R@K / MRR を算出する。
-// 呼び出し例（デバッグメニュー等から）:
-//   val cases = EvalRunner.loadFromAssets(context, "eval/queries.sample.json")
-//   val result = EvalRunner(searchPipeline).run(treeUri, cases, k = 10)
-//
-// 評価セットは個人ノートの実 path を含むためリポジトリには sample のみ置く。
-// 実運用ではユーザーが自分の質問〜正解 path セットを足して使う想定。
+/**
+ * 評価セットを SearchPipeline に流し込み、P@K / R@K / MRR を算出する。
+ *
+ * 呼び出し例（デバッグメニュー等から）:
+ * ```kotlin
+ * val cases = EvalRunner.loadFromAssets(context, "eval/queries.sample.json")
+ * val result = EvalRunner(searchPipeline).run(treeUri, cases, k = 10)
+ * ```
+ *
+ * 評価セットは個人ノートの実 path を含むためリポジトリには sample のみ置く。
+ * 実運用ではユーザーが自分の質問〜正解 path セットを足して使う想定。
+ */
 class EvalRunner(private val searchPipeline: SearchPipeline) {
 
     companion object {
         private const val TAG = "EvalRunner"
 
-        // assets から JSON 配列形式の評価ケースを読む。
-        // フォーマット:
-        // [
-        //   { "id": "case1", "query": "...", "expected": ["folder/note.md", ...] },
-        //   ...
-        // ]
+        /**
+         * assets から JSON 配列形式の評価ケースを読む。
+         *
+         * フォーマット:
+         * ```json
+         * [
+         *   { "id": "case1", "query": "...", "expected": ["folder/note.md", ...] },
+         *   ...
+         * ]
+         * ```
+         */
         fun loadFromAssets(context: Context, assetPath: String): List<EvalCase> {
             return context.assets.open(assetPath).use { stream ->
                 JsonReader.of(stream.source().buffer()).use { reader ->
