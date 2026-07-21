@@ -36,7 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.minibrain.R
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.ui.vm.ChatMessage
 import kotlinx.coroutines.delay
@@ -179,7 +181,7 @@ fun MessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
                     )
-                    Text("検索ログ", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.search_log), style = MaterialTheme.typography.labelSmall)
                 }
                 AnimatedVisibility(visible = traceExpanded) {
                     AgentTraceSection(msg.traceEvents)
