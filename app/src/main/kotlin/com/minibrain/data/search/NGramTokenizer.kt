@@ -21,44 +21,68 @@ object NGramTokenizer {
             when {
                 c == ' ' -> i++
                 c.code < 128 -> {
-                    // ASCII 英数字の連続 → 単一トークン（例: "hello", "2024"）
-                    sb.clear()
-                    sb.append(c)
-                    i++
-                    while (i < text.length) {
-                        val nextC = normalize(text[i])
-                        if (nextC == ' ' || nextC.code >= 128) break
-                        sb.append(nextC)
-                        i++
-                    }
-                    tokens.add(sb.toString())
+                    i = processAscii(text, i, c, sb, tokens)
                 }
                 else -> {
-                    // 非 ASCII の連続（日本語・中国語等）→ ユニグラム + バイグラム
-                    sb.clear()
-                    sb.append(c)
-                    i++
-                    while (i < text.length) {
-                        val nextC = normalize(text[i])
-                        if (nextC == ' ' || nextC.code < 128) break
-                        sb.append(nextC)
-                        i++
-                    }
-                    val run = sb.toString()
-
-                    // ユニグラム: 1 文字検索（例: "猫" だけで検索できるように）
-                    for (j in 0 until run.length) {
-                        tokens.add(run.substring(j, j + 1))
-                    }
-
-                    // バイグラム: 隣接 2 文字（例: "猫が" "が好" "好き"）
-                    for (j in 0 until run.length - 1) {
-                        tokens.add(run.substring(j, j + 2))
-                    }
+                    i = processNonAscii(text, i, c, sb, tokens)
                 }
             }
         }
         return tokens.joinToString(" ")
+    }
+
+    private fun processAscii(
+        text: String,
+        startIndex: Int,
+        firstChar: Char,
+        sb: java.lang.StringBuilder,
+        tokens: MutableList<String>
+    ): Int {
+        var i = startIndex
+        // ASCII 英数字の連続 → 単一トークン（例: "hello", "2024"）
+        sb.clear()
+        sb.append(firstChar)
+        i++
+        while (i < text.length) {
+            val nextC = normalize(text[i])
+            if (nextC == ' ' || nextC.code >= 128) break
+            sb.append(nextC)
+            i++
+        }
+        tokens.add(sb.toString())
+        return i
+    }
+
+    private fun processNonAscii(
+        text: String,
+        startIndex: Int,
+        firstChar: Char,
+        sb: java.lang.StringBuilder,
+        tokens: MutableList<String>
+    ): Int {
+        var i = startIndex
+        // 非 ASCII の連続（日本語・中国語等）→ ユニグラム + バイグラム
+        sb.clear()
+        sb.append(firstChar)
+        i++
+        while (i < text.length) {
+            val nextC = normalize(text[i])
+            if (nextC == ' ' || nextC.code < 128) break
+            sb.append(nextC)
+            i++
+        }
+        val run = sb.toString()
+
+        // ユニグラム: 1 文字検索（例: "猫" だけで検索できるように）
+        for (j in 0 until run.length) {
+            tokens.add(run.substring(j, j + 1))
+        }
+
+        // バイグラム: 隣接 2 文字（例: "猫が" "が好" "好き"）
+        for (j in 0 until run.length - 1) {
+            tokens.add(run.substring(j, j + 2))
+        }
+        return i
     }
 
     private fun normalize(c: Char): Char {
