@@ -90,7 +90,7 @@ UI (Compose) → ViewModel → AgentPipeline → SearchPipeline → (QueryExpand
                                          → Repository     → Room
 ```
 
-依存性注入は `MiniBrainApp` での手動シングルトン。Hilt は使わない。
+依存性注入は AppContainer (com.minibrain.di.AppContainer) を用いた手動シングルトン。Hilt は使わない。
 
 ### 検索フロー（AgentPipeline — Search First）
 
@@ -183,6 +183,7 @@ context.filesDir/models/e5-tokenizer.json               # XLM-RoBERTa SentencePi
 | インデックス処理                     | `data/repo/DocumentRepository.kt`                     |
 | チャット履歴管理                     | `data/repo/ChatRepository.kt`                         |
 | チャット UI                          | `ui/screens/ChatScreen.kt` + `ui/vm/ChatViewModel.kt` |
+| DIコンテナ / サービス登録           | `di/AppContainer.kt`                                  |
 
 ## ドキュメント更新ルール
 

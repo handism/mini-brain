@@ -127,7 +127,7 @@ Room DB を採用し、`FloatArray` を `ByteArray` に変換して保存する�
 ## ADR-005: 依存性注入に手動シングルトンを採用
 
 **日付:** 2026-06-08  
-**ステータス:** 採用
+**ステータス:** 部分置き換え（ADR-028 に拡張）
 
 ### 背景
 
@@ -1132,3 +1132,35 @@ ADR-022 で RRF rank 融合に切り替え、SearchPipeline の基本骨格は�
 
 - ReAct ループが最大イテレーション（6回）回った場合でも、DB 読み込みやデコード処理の再計算が発生しなくなり、オンデバイスでの検索実行時の CPU 負荷、メモリ使用量、およびバッテリー消費が劇的に改善した。
 - すべての単体テストが正常にパスすることを確認した。
+
+---
+
+## ADR-028: AppContainer による手動依存性注入の整理
+
+**日付:** 2026-07-19  
+**ステータス:** 採用（ADR-005 を拡張）
+
+### 背景
+
+ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用いた手動シングルトン管理を採用していた。しかし、アプリの機能拡充に伴い依存するリポジトリやパイプライン、サービス層（`RagPipeline`, `SearchPipeline`, `AgentPipeline`, `CoverageChecker` 等）が増加し、`MiniBrainApp` クラス内に多数の lazy プロパティ定義が並ぶ状態となっていた。
+これにより `MiniBrainApp` の責務が過大になり、コードの重複や整理整頓の面で保守性低下が懸念されていた。
+
+### 決定
+
+手動依存性注入コンテナとして `AppContainer` インターフェースおよび `DefaultAppContainer` 実装クラス（[AppContainer.kt](file:///Users/mac/git/mini-brain/app/src/main/kotlin/com/minibrain/di/AppContainer.kt)）を新設する。
+- `AppContainer` インターフェースでアプリ全域で必要となる依存プロパティを定義する。
+- `DefaultAppContainer` 内で `Context` を受け取り、各依存オブジェクトの `by lazy` 初期化を一括管理する。
+- `MiniBrainApp` にて `val container: AppContainer by lazy { DefaultAppContainer(this) }` のみを保持・公開する。
+- 各 ViewModel および関連テストは `app.container.documentRepository` や `app.container.agentPipeline` 等を介して依存にアクセスする。
+
+### 理由
+
+- `MiniBrainApp` のコード記述をスリム化し、依存関係の宣言を専用モジュールへ集約できる。
+- Hilt / Koin 等の外部 DI フレームワークを導入せず、手動 DI のシンプルさとコンパイル時の安全性を維持できる。
+- ユニットテストにおける AppContainer 単位でのモック定義（`every { app.container } returns mockContainer`）が容易になる。
+
+### 影響
+
+- 既存の ViewModel および ViewModelTest の依存取得先が `app.container` に書き換えられた。
+- すべてのユニットテストおよび Lint チェックが正常に通過することを確認した。
+
