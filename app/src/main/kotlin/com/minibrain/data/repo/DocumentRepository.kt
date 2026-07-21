@@ -189,9 +189,14 @@ class DocumentRepository(
             .filter { it.relativePath.contains('/') }
             .groupBy { it.relativePath.substringBeforeLast('/') }
 
+        val allFileUrisToFetch = byFolder.values.flatten().map { it.uri.toString() }
+        val allDocsMap = allFileUrisToFetch.chunked(900).flatMap { chunk ->
+            documentDao.getByFileUris(chunk)
+        }.associateBy { it.fileUri }
+
         for ((folderPath, files) in byFolder) {
             val fileUris = files.map { it.uri.toString() }
-            val allDocs = documentDao.getByFileUris(fileUris)
+            val allDocs = fileUris.mapNotNull { allDocsMap[it] }
 
             val headings = allDocs.asSequence().flatMap { doc ->
                 doc.headings?.let { json ->
@@ -238,35 +243,39 @@ class DocumentRepository(
 
         writableDb.beginTransaction()
         try {
-            // Using compileStatement provides better performance than multiple execSQL
-            // Also process in batches to prevent OutOfMemory issues for large datasets
-            val limit = 1000
-            var lastId = 0L
-            val sql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
-            val stmt = writableDb.compileStatement(sql)
-            try {
-                while (true) {
-                    val chunksBatch = chunkDao.getBatchSync(lastId, limit)
-                    if (chunksBatch.isEmpty()) break
-
-                    chunksBatch.forEach { chunk ->
-                        stmt.bindLong(1, chunk.id)
-                        val textBigrams = NGramTokenizer.toBigrams(chunk.text)
-                        stmt.bindString(2, textBigrams)
-
-                        val headingBigrams = NGramTokenizer.toBigrams(chunk.headingPath)
-                        stmt.bindString(3, headingBigrams)
-                        stmt.executeInsert()
-                        stmt.clearBindings()
-                        lastId = maxOf(lastId, chunk.id)
-                    }
-                }
-                writableDb.setTransactionSuccessful()
-            } finally {
-                stmt.close()
-            }
+            processChunkBatch(writableDb)
+            writableDb.setTransactionSuccessful()
         } finally {
             writableDb.endTransaction()
+        }
+    }
+
+    private fun processChunkBatch(writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
+        // Using compileStatement provides better performance than multiple execSQL
+        // Also process in batches to prevent OutOfMemory issues for large datasets
+        val limit = 1000
+        var lastId = 0L
+        val sql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
+        val stmt = writableDb.compileStatement(sql)
+        try {
+            while (true) {
+                val chunksBatch = chunkDao.getBatchSync(lastId, limit)
+                if (chunksBatch.isEmpty()) break
+
+                chunksBatch.forEach { chunk ->
+                    stmt.bindLong(1, chunk.id)
+                    val textBigrams = NGramTokenizer.toBigrams(chunk.text)
+                    stmt.bindString(2, textBigrams)
+
+                    val headingBigrams = NGramTokenizer.toBigrams(chunk.headingPath)
+                    stmt.bindString(3, headingBigrams)
+                    stmt.executeInsert()
+                    stmt.clearBindings()
+                    lastId = maxOf(lastId, chunk.id)
+                }
+            }
+        } finally {
+            stmt.close()
         }
     }
 

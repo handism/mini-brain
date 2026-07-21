@@ -253,16 +253,6 @@ class AgentPipeline(
         return parts.joinToString(" / ").ifBlank { null }
     }
 
-    private fun toolProgressDescription(tool: AgentTool): String = when (tool) {
-        is AgentTool.Glob -> "ファイルパターン検索中..."
-        is AgentTool.ListDir -> "フォルダ一覧取得中..."
-        is AgentTool.ReadFile -> "ファイル読込中..."
-        is AgentTool.Grep -> "キーワード検索中..."
-        is AgentTool.VectorSearch -> "ベクトル検索中..."
-        is AgentTool.RrfSearch -> "ハイブリッド検索中..."
-        is AgentTool.TimelineSearch -> "タイムライン検索中..."
-    }
-
     private fun buildHistoryBlock(history: List<Pair<String, String>>): String {
         return history.takeLast(6)
             .joinToString("\n") { (role, content) ->
