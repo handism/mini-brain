@@ -27,7 +27,7 @@ sealed class OnboardingUiState {
 class OnboardingViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as MiniBrainApp
-    private val downloader = app.modelDownloader
+    private val downloader = app.container.modelDownloader
     private val PREF_KEY_INIT_IN_PROGRESS = booleanPreferencesKey("init_in_progress")
 
     private val _state = MutableStateFlow<OnboardingUiState>(OnboardingUiState.Checking)
@@ -99,13 +99,13 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = true }
         try {
             Timber.tag("Onboarding").d("Initializing Embedder...")
-            app.embedderService.initialize(downloader.embedderModelFile, downloader.tokenizerModelFile)
+            app.container.embedderService.initialize(downloader.embedderModelFile, downloader.tokenizerModelFile)
 
             Timber.tag("Onboarding").d("Initializing LLM (forceCpu=$forceCpu)...")
             if (forceCpu) {
-                app.llmService.initialize(downloader.llmModelFile, forceCpu = true)
+                app.container.llmService.initialize(downloader.llmModelFile, forceCpu = true)
             } else {
-                app.llmService.initialize(downloader.llmModelFile)
+                app.container.llmService.initialize(downloader.llmModelFile)
             }
 
             Timber.tag("Onboarding").d("All services initialized")
