@@ -14,24 +14,24 @@ class RagPipelineTest {
         // Null document date should return 0f
         assertEquals(0f, RagPipeline.freshnessBoost(null, today), 0.0f)
 
-        // Same day document should return max boost (0.010f)
-        assertEquals(0.010f, RagPipeline.freshnessBoost(today, today), 0.0001f)
+        // Same day document should return max boost
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX, RagPipeline.freshnessBoost(today, today), 0.0001f)
 
         // Future document date should be coerced to 0 days, returning max boost
         val future = LocalDate.of(2024, 1, 2)
-        assertEquals(0.010f, RagPipeline.freshnessBoost(future, today), 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX, RagPipeline.freshnessBoost(future, today), 0.0001f)
 
         // Past dates should exponentially decay
         val past30 = today.minusDays(30)
-        val expected30 = (0.010f * exp(-30f / 90f)).toFloat()
+        val expected30 = (RagPipeline.FRESHNESS_BOOST_MAX * exp(-30f / RagPipeline.FRESHNESS_DECAY_DAYS)).toFloat()
         assertEquals(expected30, RagPipeline.freshnessBoost(past30, today), 0.00001f)
 
         val past90 = today.minusDays(90)
-        val expected90 = (0.010f * exp(-90f / 90f)).toFloat()
+        val expected90 = (RagPipeline.FRESHNESS_BOOST_MAX * exp(-90f / RagPipeline.FRESHNESS_DECAY_DAYS)).toFloat()
         assertEquals(expected90, RagPipeline.freshnessBoost(past90, today), 0.00001f)
 
         val past365 = today.minusDays(365)
-        val expected365 = (0.010f * exp(-365f / 90f)).toFloat()
+        val expected365 = (RagPipeline.FRESHNESS_BOOST_MAX * exp(-365f / RagPipeline.FRESHNESS_DECAY_DAYS)).toFloat()
         assertEquals(expected365, RagPipeline.freshnessBoost(past365, today), 0.00001f)
     }
 }
