@@ -6,6 +6,7 @@ import com.minibrain.MiniBrainApp
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.llm.ModelDownloader
+import com.minibrain.di.AppContainer
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -61,6 +62,8 @@ class OnboardingViewModelTest {
     @Test
     fun `initializeServices failure transitions to Failure state`() = runTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
         val testPrefs = mockk<Preferences>(relaxed = true)
@@ -75,9 +78,9 @@ class OnboardingViewModelTest {
         val llmService = mockk<LlmService>(relaxed = true)
         val modelDownloader = mockk<ModelDownloader>(relaxed = true)
 
-        every { app.embedderService } returns embedderService
-        every { app.llmService } returns llmService
-        every { app.modelDownloader } returns modelDownloader
+        every { container.embedderService } returns embedderService
+        every { container.llmService } returns llmService
+        every { container.modelDownloader } returns modelDownloader
 
         every { modelDownloader.isAllReady() } returns true
         every { modelDownloader.embedderModelFile } returns File("embedder.onnx")
