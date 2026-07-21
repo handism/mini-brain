@@ -50,6 +50,21 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun `calculateSha256 exception returns empty string`() {
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_test")
+        every { mockContext.filesDir } returns filesDir
+        val downloader = ModelDownloader(mockContext)
+
+        val method = ModelDownloader::class.java.getDeclaredMethod("calculateSha256", File::class.java)
+        method.isAccessible = true
+
+        val file = File(filesDir, "non_existent_file_for_test.txt")
+        val result = method.invoke(downloader, file) as String
+        assertEquals("", result)
+    }
+
+    @Test
     fun `downloadAll catches Exception and emits Error`() = runTest {
         val mockContext = mockk<Context>()
         val filesDir = tempFolder.newFolder("models")
