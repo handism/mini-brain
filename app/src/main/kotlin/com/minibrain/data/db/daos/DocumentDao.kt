@@ -59,8 +59,13 @@ interface DocumentDao {
     @Query("SELECT * FROM documents WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): DocumentEntity?
 
-    @Query("SELECT * FROM documents WHERE treeUri = :treeUri AND relativePath LIKE '%' || :keyword || '%'")
-    suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity>
+    @Query("SELECT * FROM documents WHERE treeUri = :treeUri AND relativePath LIKE '%' || :keyword || '%' ESCAPE '\\'")
+    suspend fun _searchByPath(treeUri: String, keyword: String): List<DocumentEntity>
+
+    suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity> {
+        val escapedKeyword = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return _searchByPath(treeUri, escapedKeyword)
+    }
 
     @Query("SELECT * FROM documents WHERE treeUri = :treeUri ORDER BY lastModified DESC LIMIT :limit")
     suspend fun getRecentFiles(treeUri: String, limit: Int): List<DocumentEntity>
