@@ -11,6 +11,7 @@ import com.minibrain.data.repo.ChatRepository
 import com.minibrain.data.repo.DocumentRepository
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.dataStore
+import com.minibrain.di.AppContainer
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -40,6 +41,9 @@ class HomeViewModelTest {
     private lateinit var app: MiniBrainApp
 
     @MockK
+    private lateinit var container: AppContainer
+
+    @MockK
     private lateinit var documentRepository: DocumentRepository
 
     @MockK
@@ -63,9 +67,9 @@ class HomeViewModelTest {
         mockkStatic("com.minibrain.MiniBrainAppKt")
         every { app.dataStore } returns dataStore
         every { dataStore.data } returns prefsFlow
-
-        every { app.documentRepository } returns documentRepository
-        every { app.chatRepository } returns chatRepository
+        every { app.container } returns container
+        every { container.documentRepository } returns documentRepository
+        every { container.chatRepository } returns chatRepository
         every { app.contentResolver } returns contentResolver
 
         val indexingStateFlow = MutableStateFlow<IndexingState>(IndexingState.Idle)

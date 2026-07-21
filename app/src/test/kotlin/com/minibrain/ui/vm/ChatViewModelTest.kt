@@ -12,6 +12,7 @@ import com.minibrain.data.db.entities.ChatMessageEntity
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.data.repo.ChatRepository
 import com.minibrain.dataStore
+import com.minibrain.di.AppContainer
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -77,8 +78,10 @@ class ChatViewModelTest {
     @Test
     fun `init loads existing session and messages`() = runTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
-        every { app.chatRepository } returns chatRepo
+        every { container.chatRepository } returns chatRepo
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
         val testPrefs = mockk<Preferences>(relaxed = true)
@@ -109,8 +112,10 @@ class ChatViewModelTest {
     @Test
     fun `init creates new session if navSessionId is absent`() = runTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
-        every { app.chatRepository } returns chatRepo
+        every { container.chatRepository } returns chatRepo
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
         val testPrefs = mockk<Preferences>(relaxed = true)
@@ -136,10 +141,12 @@ class ChatViewModelTest {
     @Test
     fun `sendMessage success path`() = runTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
         val agentPipeline = mockk<AgentPipeline>(relaxed = true)
-        every { app.chatRepository } returns chatRepo
-        every { app.agentPipeline } returns agentPipeline
+        every { container.chatRepository } returns chatRepo
+        every { container.agentPipeline } returns agentPipeline
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
         val testPrefs = mockk<Preferences>(relaxed = true)
@@ -203,8 +210,10 @@ class ChatViewModelTest {
     @Test
     fun `newSession resets messages and gets new session id`() = runTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
-        every { app.chatRepository } returns chatRepo
+        every { container.chatRepository } returns chatRepo
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
         val testPrefs = mockk<Preferences>(relaxed = true)
@@ -232,10 +241,12 @@ class ChatViewModelTest {
     @Test
     fun `cancelGeneration sets isGenerating to false and marks streaming message non-streaming`() = runTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
         val agentPipeline = mockk<AgentPipeline>(relaxed = true)
-        every { app.chatRepository } returns chatRepo
-        every { app.agentPipeline } returns agentPipeline
+        every { container.chatRepository } returns chatRepo
+        every { container.agentPipeline } returns agentPipeline
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
         val testPrefs = mockk<Preferences>(relaxed = true)

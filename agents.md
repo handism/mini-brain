@@ -11,7 +11,7 @@ Antigravity はコードの変更、テストの実行、リファクタリン�
 - **パッケージ名**: `com.minibrain`
 - **主要言語**: Kotlin
 - **UI フレームワーク**: Jetpack Compose + Material 3
-- **依存性注入 (DI)**: [MiniBrainApp.kt](app/src/main/kotlin/com/minibrain/MiniBrainApp.kt) での手動シングルトン管理（Hilt や Koin などの DI フレームワークは不使用）。
+- **依存性注入 (DI)**: [AppContainer.kt](app/src/main/kotlin/com/minibrain/di/AppContainer.kt) での手動DIコンテナ (`MiniBrainApp.container`) 管理（Hilt や Koin などの DI フレームワークは不使用）。
 
 ---
 
@@ -141,6 +141,7 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 | チャット履歴データベース処理 | [ChatRepository.kt](app/src/main/kotlin/com/minibrain/data/repo/ChatRepository.kt) |
 | チャット UI 画面 | [ChatScreen.kt](app/src/main/kotlin/com/minibrain/ui/screens/ChatScreen.kt) |
 | チャット ViewModel | [ChatViewModel.kt](app/src/main/kotlin/com/minibrain/ui/vm/ChatViewModel.kt) |
+| DIコンテナ / サービス登録 | [AppContainer.kt](app/src/main/kotlin/com/minibrain/di/AppContainer.kt) |
 
 ---
 

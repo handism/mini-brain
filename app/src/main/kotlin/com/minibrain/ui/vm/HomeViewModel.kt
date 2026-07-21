@@ -29,17 +29,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         .map { prefs -> prefs[PREF_TREE_URI] }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val indexingState: StateFlow<IndexingState> = app.documentRepository.indexingState
+    val indexingState: StateFlow<IndexingState> = app.container.documentRepository.indexingState
 
     val docCount: StateFlow<Int> = savedTreeUri
         .flatMapLatest { uri ->
-            if (uri != null) app.documentRepository.observeDocCount(uri) else flowOf(0)
+            if (uri != null) app.container.documentRepository.observeDocCount(uri) else flowOf(0)
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     val chunkCount: StateFlow<Int> = savedTreeUri
         .flatMapLatest { uri ->
-            if (uri != null) app.documentRepository.observeChunkCount(uri) else flowOf(0)
+            if (uri != null) app.container.documentRepository.observeChunkCount(uri) else flowOf(0)
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
@@ -52,14 +52,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             saveTreeUri(uri.toString())
-            app.documentRepository.indexFolder(uri)
+            app.container.documentRepository.indexFolder(uri)
         }
     }
 
     fun reindex() {
         val uri = savedTreeUri.value ?: return
         viewModelScope.launch {
-            app.documentRepository.indexFolder(Uri.parse(uri))
+            app.container.documentRepository.indexFolder(Uri.parse(uri))
         }
     }
 

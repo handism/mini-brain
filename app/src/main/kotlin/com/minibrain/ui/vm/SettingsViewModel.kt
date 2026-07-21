@@ -35,13 +35,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    val llmModelFile get() = app.modelDownloader.llmModelFile
-    val embedderModelFile get() = app.modelDownloader.embedderModelFile
+    val llmModelFile get() = app.container.modelDownloader.llmModelFile
+    val embedderModelFile get() = app.container.modelDownloader.embedderModelFile
 
     fun reindex() {
         val uri = savedTreeUri.value ?: return
         viewModelScope.launch {
-            app.documentRepository.indexFolder(Uri.parse(uri))
+            app.container.documentRepository.indexFolder(Uri.parse(uri))
         }
     }
 
@@ -50,7 +50,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             // 既存フォルダのインデックスを削除して新規インデックス
             val oldUri = savedTreeUri.value
             if (oldUri != null) {
-                app.documentRepository.clearFolder(oldUri)
+                app.container.documentRepository.clearFolder(oldUri)
             }
             runCatching {
                 app.contentResolver.takePersistableUriPermission(
@@ -59,13 +59,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 )
             }
             app.dataStore.edit { prefs -> prefs[PREF_TREE_URI_SETTINGS] = newUri.toString() }
-            app.documentRepository.indexFolder(newUri)
+            app.container.documentRepository.indexFolder(newUri)
         }
     }
 
     fun clearChatHistory() {
         viewModelScope.launch {
-            app.chatRepository.clearAll()
+            app.container.chatRepository.clearAll()
         }
     }
 }
