@@ -238,8 +238,8 @@ class RagPipeline(
         private const val SEARCH_TIMEOUT_MS = 8_000L
         // freshnessBoost tuning constants — adjust to balance recency vs. relevance
         // RRF max score ≈ 0.032 (rank=1 in both BM25 and vector)
-        private const val FRESHNESS_BOOST_MAX  = 0.010f  // 最大加点 (RRF max の約 30%)
-        private const val FRESHNESS_DECAY_DAYS = 90f     // 半減期 90 日 (30d:~0.0072, 1y:~0.0017, 3y:~0.0001)
+        internal const val FRESHNESS_BOOST_MAX  = 0.010f  // 最大加点 (RRF max の約 30%)
+        internal const val FRESHNESS_DECAY_DAYS = 90f     // 半減期 90 日 (30d:~0.0072, 1y:~0.0017, 3y:~0.0001)
 
         fun freshnessBoost(docDate: LocalDate?, today: LocalDate): Float {
             if (docDate == null) return 0f
