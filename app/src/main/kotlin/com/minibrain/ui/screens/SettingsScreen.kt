@@ -32,7 +32,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -48,7 +47,7 @@ fun SettingsScreen(
 ) {
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
-    var showClearDialog by remember { mutableStateOf(false) }
+    val showClearDialog = remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -102,7 +101,7 @@ fun SettingsScreen(
             SectionTitle("チャット履歴")
 
             OutlinedButton(
-                onClick = { showClearDialog = true },
+                onClick = { showClearDialog.value = true },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("チャット履歴をすべて削除", color = MaterialTheme.colorScheme.error)
@@ -154,22 +153,22 @@ fun SettingsScreen(
         }
     }
 
-    if (showClearDialog) {
+    if (showClearDialog.value) {
         AlertDialog(
-            onDismissRequest = { showClearDialog = false },
+            onDismissRequest = { showClearDialog.value = false },
             title = { Text("チャット履歴を削除") },
             text = { Text("すべてのチャット履歴が削除されます。この操作は取り消せません。") },
             confirmButton = {
                 TextButton(onClick = {
                     vm.clearChatHistory()
-                    showClearDialog = false
+                    showClearDialog.value = false
                     scope.launch { snackbarHostState.showSnackbar("チャット履歴を削除しました") }
                 }) {
                     Text("削除", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) { Text("キャンセル") }
+                TextButton(onClick = { showClearDialog.value = false }) { Text("キャンセル") }
             },
         )
     }
