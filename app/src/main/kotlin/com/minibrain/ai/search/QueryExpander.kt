@@ -8,6 +8,7 @@ class QueryExpander(private val llmService: LlmService) {
     companion object {
         private const val TAG = "QueryExpander"
         private const val MAX_QUERIES = 8
+        private val QUOTED_ELEMENT_REGEX = Regex(""""([^"]*)"|'([^']*)'""")
 
         // 簡易 JSON 配列パーサ。LLM 出力に前置きやコードフェンスが混ざる前提で、
         // 最初に出現する [ から最後の ] までを切り出し、ダブル/シングルクォート両対応で要素を抽出する。
@@ -18,8 +19,7 @@ class QueryExpander(private val llmService: LlmService) {
             val jsonStr = raw.substring(start, end + 1)
             return runCatching {
                 val result = mutableListOf<String>()
-                val regex = Regex(""""([^"]*)"|'([^']*)'""")
-                regex.findAll(jsonStr).forEach { match ->
+                QUOTED_ELEMENT_REGEX.findAll(jsonStr).forEach { match ->
                     val value = match.groupValues[1].ifEmpty { match.groupValues[2] }
                     if (value.isNotBlank()) result += value
                 }

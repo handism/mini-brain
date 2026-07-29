@@ -66,6 +66,8 @@ class SearchPipeline(
         // 「初回訪問日: YYYY/MM/DD」のようなラベル行が firstParagraph (200) からこぼれていても
         // 拾えるよう、先頭 chunk テキストから長めに採る。
         private const val TOPIC_MATCH_SNIPPET_CHARS = 500
+        private val METADATA_SPLIT_REGEX = Regex("""[\s　、。・]+""")
+        private val WHITESPACE_NORMALIZE_REGEX = Regex("""\s+""")
     }
 
     suspend fun search(
@@ -184,7 +186,7 @@ class SearchPipeline(
     private suspend fun metadataSearch(queries: List<String>, ctx: SearchRequestCache): List<Citation> {
         val allDocs = ctx.documents()
         val tokens = queries.flatMap { q ->
-            q.split(Regex("[\\s　、。・]+")).filter { it.length >= 2 }
+            q.split(METADATA_SPLIT_REGEX).filter { it.length >= 2 }
         }.distinct()
 
         // topicMatch ヒットは先頭 chunk テキストでスニペットを組むため、必要なら 1 回だけロードする。
@@ -258,7 +260,7 @@ class SearchPipeline(
         val ordered = LinkedHashSet<String>()
         fun addIfValid(s: String?) {
             if (s.isNullOrBlank()) return
-            val normalized = s.trim().replace(Regex("\\s+"), " ")
+            val normalized = s.trim().replace(WHITESPACE_NORMALIZE_REGEX, " ")
             if (normalized.isNotEmpty()) ordered.add(normalized)
         }
         addIfValid(originalQuery)
