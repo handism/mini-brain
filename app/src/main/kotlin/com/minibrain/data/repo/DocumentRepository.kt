@@ -42,6 +42,21 @@ class DocumentRepository(
     private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
     companion object {
+        private val FULL_DATE_PATTERNS = listOf(
+            Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
+            Regex("""(\d{4})/(\d{1,2})/(\d{1,2})"""),
+            Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
+            Regex("""(\d{4})_(\d{1,2})_(\d{1,2})"""),
+            Regex("""(\d{4})\.(\d{1,2})\.(\d{1,2})"""),
+            Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日"""),
+        )
+
+        private val MONTH_DATE_PATTERNS = listOf(
+            Regex("""(?<!\d)(\d{4})-(\d{1,2})(?!\d|-\d)"""),
+            Regex("""(\d{4})年(\d{1,2})月(?!\d)"""),
+            Regex("""(?<!\d)(\d{4})(\d{2})(?!\d)"""),
+        )
+
         // パスやファイル名から日付メタを抽出する。完全日付（日まで揃う）を先に検査し、
         // マッチしなかった場合は月単位ファイル（YYYY-MM など）を月初 1 日として扱う。
         // ユニットテストから呼び出せるよう @VisibleForTesting に昇格。
@@ -49,27 +64,14 @@ class DocumentRepository(
         internal fun extractDateFromPath(relativePath: String): String? {
             val yearRange = 1990..LocalDate.now().year
 
-            val fullPatterns = listOf(
-                Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
-                Regex("""(\d{4})/(\d{1,2})/(\d{1,2})"""),
-                Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
-                Regex("""(\d{4})_(\d{1,2})_(\d{1,2})"""),
-                Regex("""(\d{4})\.(\d{1,2})\.(\d{1,2})"""),
-                Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日"""),
-            )
-            for (pattern in fullPatterns) {
+            for (pattern in FULL_DATE_PATTERNS) {
                 val match = pattern.find(relativePath) ?: continue
                 val (y, m, d) = match.destructured
                 val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), d.toInt()) }.getOrNull()
                 if (date != null && date.year in yearRange) return date.toString()
             }
 
-            val monthPatterns = listOf(
-                Regex("""(?<!\d)(\d{4})-(\d{1,2})(?!\d|-\d)"""),
-                Regex("""(\d{4})年(\d{1,2})月(?!\d)"""),
-                Regex("""(?<!\d)(\d{4})(\d{2})(?!\d)"""),
-            )
-            for (pattern in monthPatterns) {
+            for (pattern in MONTH_DATE_PATTERNS) {
                 val match = pattern.find(relativePath) ?: continue
                 val (y, m) = match.destructured
                 val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), 1) }.getOrNull()
