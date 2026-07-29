@@ -53,7 +53,7 @@ class SearchPipeline(
         // 低スコアは Reranker のノイズ源になるため、ここで除外する（ADR-023）。
         private const val VECTOR_MIN_SCORE = 0.45f
         private const val SNIPPET_CHARS = 200
-        private const val MIN_FILENAME_MATCH_CHARS = 3
+        private const val MIN_FILENAME_MATCH_CHARS = 1
         private const val RRF_K = 60
         // RRF 重み（[meta, vector, bm25]）。Metadata 完全一致 > BM25 > Vector の順。
         private val RRF_WEIGHTS = listOf(1.5f, 1.0f, 1.2f)
