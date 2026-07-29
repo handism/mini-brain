@@ -18,7 +18,9 @@ class DocumentDaoTest {
             override suspend fun getByFileUri(fileUri: String): DocumentEntity? = null
             override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = emptyList()
             override suspend fun insert(doc: DocumentEntity): Long = 0
+            override suspend fun insertAll(docs: List<DocumentEntity>): List<Long> = emptyList()
             override suspend fun update(doc: DocumentEntity) {}
+            override suspend fun updateAll(docs: List<DocumentEntity>) {}
             override suspend fun deleteAllByTree(treeUri: String) {}
             override suspend fun deleteByFileUri(fileUri: String) {}
             override suspend fun getById(id: Long): DocumentEntity? = null
