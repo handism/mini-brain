@@ -161,6 +161,7 @@ class DocumentRepositoryTest {
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
         io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
         io.mockk.coEvery { documentDao.insert(any()) } returns 1L
+        io.mockk.coEvery { documentDao.insertAll(any()) } answers { val arg = firstArg<List<Any>>(); List(arg.size) { (it + 1).toLong() } }
 
         // Log is now Timber, no mock needed as it no-ops without a planted Tree
 
