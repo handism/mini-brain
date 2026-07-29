@@ -47,6 +47,12 @@ interface DocumentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(doc: DocumentEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(docs: List<DocumentEntity>): List<Long>
+
+    @Update
+    suspend fun updateAll(docs: List<DocumentEntity>)
+
     @Update
     suspend fun update(doc: DocumentEntity)
 
