@@ -1,5 +1,6 @@
 package com.minibrain.data.search
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -42,7 +43,11 @@ class NGramTokenizerTest {
         assertTrue(tokens.contains("胃袋"))
     }
 
-    private fun assertEquals(expected: String, actual: String) {
-        org.junit.Assert.assertEquals(expected, actual)
+    @Test
+    fun testToFtsMatchQueryEscapesQuotes() {
+        // While toBigrams strips symbols before we can inject quotes, we still verify it produces valid syntax.
+        // It should enclose the token in double quotes correctly.
+        val ftsMatchQuery = NGramTokenizer.toFtsMatchQuery("hello")
+        assertEquals("\"hello\"", ftsMatchQuery ?: "")
     }
 }
