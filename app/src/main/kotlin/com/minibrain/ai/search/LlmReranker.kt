@@ -13,6 +13,7 @@ class LlmReranker(private val llmService: LlmService) {
         private const val SNIPPET_MAX_CHARS = 140
         private const val CANDIDATE_LIMIT = 30
         private const val DEFAULT_TOP_K = 10
+        private val DIGITS_REGEX = Regex("""\d+""")
     }
 
     suspend fun rerank(
@@ -90,9 +91,7 @@ class LlmReranker(private val llmService: LlmService) {
 
         return runCatching {
             val result = mutableListOf<Int>()
-            // カンマ区切りなどで並んでいる数値を抽出
-            val regex = Regex("""\d+""")
-            regex.findAll(jsonStr).forEach {
+            DIGITS_REGEX.findAll(jsonStr).forEach {
                 result += it.value.toInt()
             }
             result
