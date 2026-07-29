@@ -7,7 +7,6 @@ import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.llm.ModelDownloader
 import com.minibrain.ai.agent.AgentPipeline
-import com.minibrain.ai.agent.CoverageChecker
 import com.minibrain.ai.rag.RagPipeline
 import com.minibrain.ai.search.HyDE
 import com.minibrain.ai.search.LlmReranker
