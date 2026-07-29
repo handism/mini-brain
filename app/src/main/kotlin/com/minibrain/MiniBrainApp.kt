@@ -15,7 +15,6 @@ import com.minibrain.ai.search.QueryExpander
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.AppDatabase
 import com.minibrain.data.repo.ChatRepository
-import com.minibrain.data.repo.DocumentRepository
 import com.minibrain.di.AppContainer
 import com.minibrain.di.DefaultAppContainer
 import kotlinx.coroutines.CoroutineScope
