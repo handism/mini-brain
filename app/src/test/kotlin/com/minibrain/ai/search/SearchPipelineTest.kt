@@ -77,7 +77,7 @@ class SearchPipelineTest {
         val metaCitation = citation(3, "C", SourceType.METADATA)
 
         // Mock BM25 search
-        coEvery { chunkDao.bm25SearchRaw(any()) } returns listOf(
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns listOf(
             ChunkEntity(id = 1, docId = 1, text = "bm25 text", embedding = ByteArray(0), headingPath = "A")
         )
 
@@ -110,7 +110,7 @@ class SearchPipelineTest {
         coEvery { hyde.generateHypothetical(query) } returns hypothetical
         coEvery { cache.documents() } returns emptyList()
         coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
-        coEvery { chunkDao.bm25SearchRaw(any()) } returns emptyList()
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
         coEvery { llmReranker.rerank(query, any(), any()) } returns emptyList()
 
@@ -132,7 +132,7 @@ class SearchPipelineTest {
             DocumentEntity(id = 5, treeUri = treeUri, fileUri = "uri", fileName = "test.md", relativePath = "test.md", lastModified = 0L, contentHash = "", firstParagraph = "test", documentDate = "2023-06-01")
         )
         coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
-        coEvery { chunkDao.bm25SearchRaw(any()) } returns emptyList()
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
 
         // Mock Reranker to put some other citation first, or reverse the list

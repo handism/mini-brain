@@ -158,15 +158,8 @@ class SearchPipeline(
 
     private suspend fun bm25Search(query: String, treeUri: String): List<Citation> {
         val matchQuery = NGramTokenizer.toFtsMatchQuery(query) ?: return emptyList()
-        val sql = """
-            SELECT chunks.* FROM chunks_fts
-            JOIN chunks ON chunks_fts.rowid = chunks.id
-            JOIN documents ON chunks.docId = documents.id
-            WHERE chunks_fts MATCH ? AND documents.treeUri = ?
-            LIMIT ?
-        """.trimIndent()
         val chunks = runCatching {
-            chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, arrayOf<Any?>(matchQuery, treeUri, BM25_PER_QUERY_LIMIT)))
+            chunkDao.bm25SearchByTree(matchQuery, treeUri, BM25_PER_QUERY_LIMIT)
         }.getOrElse { e ->
             Timber.tag(TAG).w("BM25 search failed for '$query': ${e.message}")
             emptyList()

@@ -1,6 +1,5 @@
 package com.minibrain.ai.rag
 
-import androidx.sqlite.db.SupportSQLiteQuery
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.daos.ChunkDao
@@ -147,8 +146,7 @@ class RagPipelineTest {
             text = "BM25 Text",
             embedding = ByteArray(0)
         )
-        val sqlSlot = slot<SupportSQLiteQuery>()
-        coEvery { chunkDao.bm25SearchRaw(capture(sqlSlot)) } returns listOf(bm25Chunk)
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns listOf(bm25Chunk)
 
         val folderEmbedding = FolderEmbeddingEntity(
             id = 1L,
@@ -190,7 +188,7 @@ class RagPipelineTest {
 
         coEvery { embedderService.embed(query, EmbedType.QUERY) } returns FloatArray(384) { 0.1f }
         coEvery { chunkDao.getAllByTree(treeUri) } returns emptyList()
-        coEvery { chunkDao.bm25SearchRaw(any()) } returns emptyList()
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { folderEmbeddingDao.getAllByTree(treeUri) } returns emptyList()
         coEvery { documentDao.getDocPathsByIds(emptyList()) } returns emptyList()
         coEvery { documentDao.getDocDatesByIds(emptyList()) } returns emptyList()
