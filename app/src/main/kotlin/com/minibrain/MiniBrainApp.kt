@@ -10,7 +10,6 @@ import com.minibrain.ai.agent.AgentPipeline
 import com.minibrain.ai.agent.CoverageChecker
 import com.minibrain.ai.rag.RagPipeline
 import com.minibrain.ai.search.HyDE
-import com.minibrain.ai.search.LlmReranker
 import com.minibrain.ai.search.QueryExpander
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.AppDatabase
