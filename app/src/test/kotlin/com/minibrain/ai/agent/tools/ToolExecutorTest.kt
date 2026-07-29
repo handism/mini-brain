@@ -22,7 +22,6 @@ import io.mockk.mockkConstructor
 import io.mockk.unmockkAll
 import org.json.JSONArray
 import org.junit.Test
-import org.junit.runner.RunWith
 import timber.log.Timber
 
 class ToolExecutorTest {
