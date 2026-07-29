@@ -31,7 +31,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -47,10 +46,10 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     vm: HomeViewModel = viewModel(),
 ) {
-    val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
-    val indexState by vm.indexingState.collectAsStateWithLifecycle()
-    val docCount by vm.docCount.collectAsStateWithLifecycle()
-    val chunkCount by vm.chunkCount.collectAsStateWithLifecycle()
+    val treeUri = vm.savedTreeUri.collectAsStateWithLifecycle().value
+    val indexState = vm.indexingState.collectAsStateWithLifecycle().value
+    val docCount = vm.docCount.collectAsStateWithLifecycle().value
+    val chunkCount = vm.chunkCount.collectAsStateWithLifecycle().value
 
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
