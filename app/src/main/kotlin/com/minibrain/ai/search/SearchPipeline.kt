@@ -314,13 +314,8 @@ class SearchPipeline(
         if (DateResolver.isDiaryQuery(query)) {
             val dateStrings = DateResolver.resolveToDateStrings(query)
             if (dateStrings.isNotEmpty()) {
-<<<<<<< HEAD
                 val allDocs = ctx.documents()
                 val matched = allDocs.filter { doc ->
-=======
-                val minimalDocs = withContext(Dispatchers.IO) { documentDao.getMinimalByTree(treeUri) }
-                val matched = minimalDocs.filter { doc ->
->>>>>>> origin/pr/2
                     val docDate = doc.documentDate ?: return@filter false
                     val docDigits = docDate.replace("-", "")
                     dateStrings.any { date ->
