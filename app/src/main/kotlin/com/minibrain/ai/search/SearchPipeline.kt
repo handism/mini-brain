@@ -205,12 +205,10 @@ class SearchPipeline(
             val tokenMatch = tokens.any { token ->
                 fields.any { field -> field.contains(token, ignoreCase = true) }
             }
-            // ファイル名逆引き: fileName(拡張子除く) が query の substring として含まれるか
-            // 日本語助詞でトークン化されないクエリ（例: 「サウナしきじにいつ行ったっけ？」）でも
-            // 固有名詞ファイル（「サウナしきじ.md」）を確実に拾うための保険
             val fileStem = doc.fileName.removeSuffix(".md").removeSuffix(".MD")
             val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
                 queries.any { q -> q.contains(fileStem, ignoreCase = true) }
+
             if (!tokenMatch && !fileNameInQuery) return@mapNotNull null
 
             // topicMatch ヒットは「初回訪問日: …」「YYYY/MM/DD」など本文の日付を後段の回答 LLM が
@@ -220,6 +218,7 @@ class SearchPipeline(
             } else {
                 doc.firstParagraph
             }
+
             Citation(
                 headingPath = doc.relativePath,
                 snippet = DatePrefix.build(doc.documentDate, snippetBody),
@@ -315,8 +314,13 @@ class SearchPipeline(
         if (DateResolver.isDiaryQuery(query)) {
             val dateStrings = DateResolver.resolveToDateStrings(query)
             if (dateStrings.isNotEmpty()) {
+<<<<<<< HEAD
                 val allDocs = ctx.documents()
                 val matched = allDocs.filter { doc ->
+=======
+                val minimalDocs = withContext(Dispatchers.IO) { documentDao.getMinimalByTree(treeUri) }
+                val matched = minimalDocs.filter { doc ->
+>>>>>>> origin/pr/2
                     val docDate = doc.documentDate ?: return@filter false
                     val docDigits = docDate.replace("-", "")
                     dateStrings.any { date ->
