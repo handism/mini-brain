@@ -19,7 +19,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -34,7 +33,7 @@ fun OnboardingScreen(
     onReady: () -> Unit,
     vm: OnboardingViewModel = viewModel(),
 ) {
-    val state by vm.state.collectAsStateWithLifecycle()
+    val state = vm.state.collectAsStateWithLifecycle().value
 
     LaunchedEffect(state) {
         if (state is OnboardingUiState.Ready || state is OnboardingUiState.AlreadyReady) {
