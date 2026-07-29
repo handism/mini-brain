@@ -79,6 +79,6 @@ class QueryExpander(private val llmService: LlmService) {
 
         入力: $query
         出力:
-    }
+    """.trimIndent()
 }
 
