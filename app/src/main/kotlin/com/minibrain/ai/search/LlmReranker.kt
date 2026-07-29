@@ -82,12 +82,15 @@ class LlmReranker(private val llmService: LlmService) {
     }
 
     private fun parseIndices(raw: String): List<Int> {
+        // 出力中から [...] を抽出
         val start = raw.indexOf('[')
         val end = raw.lastIndexOf(']')
         if (start < 0 || end <= start) return emptyList()
         val jsonStr = raw.substring(start, end + 1)
+
         return runCatching {
             val result = mutableListOf<Int>()
+            // カンマ区切りなどで並んでいる数値を抽出
             val regex = Regex("""\d+""")
             regex.findAll(jsonStr).forEach {
                 result += it.value.toInt()
