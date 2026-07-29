@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import androidx.sqlite.db.SupportSQLiteQuery
 
 class SearchRequestCacheTest {
 
@@ -52,7 +51,7 @@ class SearchRequestCacheTest {
         override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = emptyList()
         override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = emptyList()
         override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = emptyList()
-        override suspend fun findByMetadataRaw(query: SupportSQLiteQuery): List<DocumentEntity> = emptyList()
+        override suspend fun findByMetadataRaw(query: androidx.sqlite.db.SupportSQLiteQuery): List<DocumentEntity> = emptyList()
         override suspend fun getMinimalByTree(treeUri: String): List<com.minibrain.data.db.daos.DocumentMinimal> = emptyList()
     }
 
