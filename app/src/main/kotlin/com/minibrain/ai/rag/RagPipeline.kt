@@ -1,6 +1,5 @@
 package com.minibrain.ai.rag
 
-import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.daos.ChunkDao
@@ -190,22 +189,12 @@ class RagPipeline(
 
     private suspend fun bm25Search(question: String, treeUri: String?, k: Int): List<ChunkEntity> {
         val matchQuery = NGramTokenizer.toFtsMatchQuery(question) ?: return emptyList()
-        val sql = if (treeUri != null) {
-            """SELECT chunks.* FROM chunks_fts
-               JOIN chunks ON chunks_fts.rowid = chunks.id
-               JOIN documents ON chunks.docId = documents.id
-               WHERE chunks_fts MATCH ? AND documents.treeUri = ?
-               LIMIT ?"""
-        } else {
-            """SELECT chunks.* FROM chunks_fts
-               JOIN chunks ON chunks_fts.rowid = chunks.id
-               WHERE chunks_fts MATCH ?
-               LIMIT ?"""
-        }
-        val args: Array<Any?> = if (treeUri != null) arrayOf(matchQuery, treeUri, k) else arrayOf(matchQuery, k)
-        
         return runCatching {
-            chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, args))
+            if (treeUri != null) {
+                chunkDao.bm25SearchByTree(matchQuery, treeUri, k)
+            } else {
+                chunkDao.bm25Search(matchQuery, k)
+            }
         }.getOrElse { e ->
             Timber.tag("RagPipeline").w("BM25 search failed: ${e.message}")
             emptyList()

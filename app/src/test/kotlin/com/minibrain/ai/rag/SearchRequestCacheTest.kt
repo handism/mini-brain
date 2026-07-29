@@ -76,7 +76,9 @@ class SearchRequestCacheTest {
         override suspend fun count(): Int = 0
         override suspend fun deleteByDoc(docId: Long) {}
         override suspend fun deleteAllByTree(treeUri: String) {}
-        override suspend fun bm25SearchRaw(query: SupportSQLiteQuery): List<ChunkEntity> = emptyList()
+
+        override suspend fun bm25Search(matchQuery: String, limit: Int): List<ChunkEntity> = emptyList()
+        override suspend fun bm25SearchByTree(matchQuery: String, treeUri: String, limit: Int): List<ChunkEntity> = emptyList()
         override fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity> = emptyList()
     }
 
