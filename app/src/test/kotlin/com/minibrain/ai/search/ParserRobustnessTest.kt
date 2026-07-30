@@ -42,7 +42,6 @@ class ParserRobustnessTest {
     }
 
     // --- CoverageChecker.parse（複数行スキャン） ---
-    // parse() の入力は check() 側で trim + lowercase 済み前提なので、ここでも小文字で渡す。
 
     @Test
     fun `parse は前置きの後にある yes 行を採用する`() {
