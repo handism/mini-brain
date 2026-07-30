@@ -1,7 +1,5 @@
 package com.minibrain.ai.embed
 
-import java.io.File
-import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -13,6 +11,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
+import java.io.File
+import kotlin.math.sqrt
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class EmbedderServiceTest {
