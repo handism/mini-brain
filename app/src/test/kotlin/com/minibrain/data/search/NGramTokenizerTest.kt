@@ -1,5 +1,6 @@
 package com.minibrain.data.search
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -40,9 +41,5 @@ class NGramTokenizerTest {
         assertTrue(tokens.contains("歯"))
         assertTrue(tokens.contains("袋"))
         assertTrue(tokens.contains("歯車"))
-    }
-
-    private fun assertEquals(expected: String, actual: String) {
-        org.junit.Assert.assertEquals(expected, actual)
     }
 }

@@ -243,8 +243,8 @@ class AgentPipeline(
         }
 
         val fileMatches = allDocs.filter { doc ->
-            val name = doc.fileName.removeSuffix(".md").lowercase()
-            name.length >= 2 && question.lowercase().contains(name)
+            val name = doc.fileName.removeSuffix(".md").removeSuffix(".MD").lowercase()
+            name.length >= 1 && question.lowercase().contains(name)
         }.take(5)
         if (fileMatches.isNotEmpty()) {
             parts += "質問にマッチするファイル候補: ${fileMatches.joinToString(", ") { "[d=${it.id}] ${it.fileName}" }}"
