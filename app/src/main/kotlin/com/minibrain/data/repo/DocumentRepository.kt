@@ -96,7 +96,9 @@ class DocumentRepository(
         var totalChunks = 0
 
         // 既存のドキュメントのチャンク数をキャッシュしてN+1問題を回避する
-        val existingDocs = documentDao.getByFileUris(mdFiles.map { it.uri.toString() }).associateBy { it.fileUri }
+        val existingDocs = mdFiles.map { it.uri.toString() }.chunked(900).flatMap { chunk ->
+            documentDao.getByFileUris(chunk)
+        }.associateBy { it.fileUri }
         val chunkCountsMap = chunkDao.getChunkCountsGroupedByDoc().associateBy({ it.docId }, { it.chunkCount })
 
         val writableDb = db.openHelper.writableDatabase
