@@ -63,7 +63,7 @@ class RagPipelineTest {
     fun `freshnessBoost returns max boost for today`() {
         val today = LocalDate.now()
         val boost = RagPipeline.freshnessBoost(today, today)
-        assertEquals(0.010f, boost, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX, boost, 0.0001f)
     }
 
     @Test
@@ -72,11 +72,11 @@ class RagPipelineTest {
         val thirtyDaysAgo = today.minusDays(30)
         val boost30 = RagPipeline.freshnessBoost(thirtyDaysAgo, today)
 
-        assertEquals(0.010f * exp(-30f / 90f).toFloat(), boost30, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX * exp(-30f / RagPipeline.FRESHNESS_DECAY_DAYS).toFloat(), boost30, 0.0001f)
 
         val oneYearAgo = today.minusDays(365)
         val boost365 = RagPipeline.freshnessBoost(oneYearAgo, today)
-        assertEquals(0.010f * exp(-365f / 90f).toFloat(), boost365, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX * exp(-365f / RagPipeline.FRESHNESS_DECAY_DAYS).toFloat(), boost365, 0.0001f)
 
         assertTrue(boost30 > boost365)
     }
@@ -86,7 +86,7 @@ class RagPipelineTest {
         val today = LocalDate.now()
         val tomorrow = today.plusDays(1)
         val boost = RagPipeline.freshnessBoost(tomorrow, today)
-        assertEquals(0.010f, boost, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX, boost, 0.0001f)
     }
 
     @Test
@@ -198,3 +198,4 @@ class RagPipelineTest {
         assertTrue(results.isEmpty())
     }
 }
+
