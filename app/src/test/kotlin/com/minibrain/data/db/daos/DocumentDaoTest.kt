@@ -32,7 +32,6 @@ class DocumentDaoTest {
             override suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow> = emptyList()
             override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = emptyList()
             override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = emptyList()
-            override suspend fun findByMetadataRaw(query: androidx.sqlite.db.SupportSQLiteQuery): List<DocumentEntity> = emptyList()
             override suspend fun getMinimalByTree(treeUri: String): List<DocumentMinimal> = emptyList()
         }
 

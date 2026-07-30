@@ -85,9 +85,6 @@ interface DocumentDao {
     @Query("SELECT * FROM documents WHERE treeUri = :treeUri AND documentDate >= :start AND documentDate <= :end ORDER BY documentDate ASC")
     suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity>
 
-    @androidx.room.RawQuery
-    suspend fun findByMetadataRaw(query: androidx.sqlite.db.SupportSQLiteQuery): List<DocumentEntity>
-
     @Query("SELECT id, fileName, relativePath, first_para, documentDate FROM documents WHERE treeUri = :treeUri")
     suspend fun getMinimalByTree(treeUri: String): List<DocumentMinimal>
 }
