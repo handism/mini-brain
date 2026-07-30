@@ -44,6 +44,11 @@ class NGramTokenizerTest {
     }
     @Test
     fun testToFtsMatchQueryEscapesQuotes() {
+        // While toBigrams strips symbols before we can inject quotes, we still verify it produces valid syntax.
+        // It should enclose the token in double quotes correctly.
+        val ftsMatchQuery = NGramTokenizer.toFtsMatchQuery("hello")
+        assertEquals("\"hello\"", ftsMatchQuery ?: "")
+
         val result = NGramTokenizer.toFtsMatchQuery("hello\"world")
         assertEquals("\"hello\" OR \"world\"", result!!)
     }

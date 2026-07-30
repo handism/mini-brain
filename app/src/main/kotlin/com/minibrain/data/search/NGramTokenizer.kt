@@ -97,6 +97,8 @@ object NGramTokenizer {
     fun toFtsMatchQuery(text: String): String? {
         val tokens = toBigrams(text).split(" ").filter { it.isNotBlank() }
         if (tokens.isEmpty()) return null
+        // Escape double quotes inside tokens to prevent FTS match syntax errors/injections
+        // According to SQLite FTS documentation, a double quote within a phrase must be escaped as two double quotes
         return tokens.joinToString(" OR ") { "\"${it.replace("\"", "\"\"")}\"" }
     }
 }
