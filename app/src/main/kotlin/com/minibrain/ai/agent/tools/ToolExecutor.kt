@@ -309,9 +309,7 @@ class ToolExecutor(
         val cachedChunksList = cache.chunkVectors().first
         val chunksByDoc = HashMap<Long, String>()
         for (chunk in cachedChunksList) {
-            if (chunk.docId !in chunksByDoc) {
-                chunksByDoc[chunk.docId] = chunk.text
-            }
+            chunksByDoc.putIfAbsent(chunk.docId, chunk.text)
         }
         for (doc in docs) {
             val snippet = chunksByDoc[doc.id] ?: doc.firstParagraph ?: ""
