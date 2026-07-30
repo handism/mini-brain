@@ -42,4 +42,9 @@ class NGramTokenizerTest {
         assertTrue(tokens.contains("袋"))
         assertTrue(tokens.contains("歯車"))
     }
+    @Test
+    fun testToFtsMatchQueryEscapesQuotes() {
+        val result = NGramTokenizer.toFtsMatchQuery("hello\"world")
+        assertEquals("\"hello\" OR \"world\"", result!!)
+    }
 }
