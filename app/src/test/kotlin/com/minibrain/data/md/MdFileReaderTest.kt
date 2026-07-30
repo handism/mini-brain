@@ -11,6 +11,7 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -177,6 +178,29 @@ class MdFileReaderTest {
 
         // Simulate read failure by returning null
         every { contentResolver.openInputStream(uri) } returns null
+
+        val result = MdFileReader.listMdFiles(context, treeUri)
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `listMdFiles skips file if readText throws exception`() = runTest {
+        val rootDir = mockk<DocumentFile>()
+        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
+
+        val mdFile = mockk<DocumentFile>()
+        every { mdFile.isDirectory } returns false
+        every { mdFile.isFile } returns true
+        every { mdFile.name } returns "error.md"
+        every { mdFile.length() } returns 100L
+        val uri = mockk<Uri>()
+        every { mdFile.uri } returns uri
+
+        every { rootDir.listFiles() } returns arrayOf(mdFile)
+
+        // Simulate read failure by throwing IOException
+        every { contentResolver.openInputStream(uri) } throws IOException("Disk read error")
 
         val result = MdFileReader.listMdFiles(context, treeUri)
 
