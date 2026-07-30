@@ -178,4 +178,30 @@ class ToolExecutorTest {
         assertTrue(logs.any { it.contains("parseFirstHeadings failed") })
         assertTrue(logs.any { it.contains("parseJsonArray failed") })
     }
+
+    @Test
+    fun executeTimeline_preservesFirstChunkTextForDocument() = runTest {
+        val docId = 10L
+        val doc = DocumentEntity(
+            id = docId,
+            treeUri = treeUri,
+            fileUri = "uri",
+            fileName = "diary.md",
+            relativePath = "diary.md",
+            lastModified = 0L,
+            contentHash = "hash",
+            documentDate = "2026-01-01"
+        )
+        val firstChunk = ChunkEntity(id = 1L, docId = docId, headingPath = "H1", text = "First Chunk Text", embedding = ByteArray(0))
+        val secondChunk = ChunkEntity(id = 2L, docId = docId, headingPath = "H2", text = "Second Chunk Text", embedding = ByteArray(0))
+
+        coEvery { documentDao.getByDateRange(treeUri, "2026-01-01", "2026-01-02") } returns listOf(doc)
+        coEvery { cache.chunkVectors() } returns Pair(listOf(firstChunk, secondChunk), emptyArray())
+
+        val call = ToolCall(1, AgentTool.TimelineSearch(startDate = "2026-01-01", endDate = "2026-01-02", limit = 10))
+        val result = toolExecutor.execute(call)
+
+        assertEquals(1, result.citations.size)
+        assertEquals("First Chunk Text", result.citations[0].snippet)
+    }
 }
