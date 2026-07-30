@@ -4,12 +4,14 @@ import com.minibrain.ai.llm.LlmService
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 
-// Hypothetical Document Embeddings (Gao et al. 2022).
-// クエリに対する「ありそうな回答（仮想 passage）」を LLM に生成させ、その埋め込みで
-// ベクトル検索を行うことで、query↔passage の表現非対称性を緩和する。
-//
-// LiteRT-LM が単一スレッドであるため、QueryExpander の直後に逐次実行する。
-// 失敗・タイムアウトは null を返し、呼び出し側はフォールバック動作にする。
+/**
+ * Hypothetical Document Embeddings (Gao et al. 2022).
+ * クエリに対する「ありそうな回答（仮想 passage）」を LLM に生成させ、その埋め込みで
+ * ベクトル検索を行うことで、query↔passage の表現非対称性を緩和する。
+ *
+ * LiteRT-LM が単一スレッドであるため、QueryExpander の直後に逐次実行する。
+ * 失敗・タイムアウトは null を返し、呼び出し側はフォールバック動作にする。
+ */
 class HyDE(private val llmService: LlmService) {
 
     companion object {

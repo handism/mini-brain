@@ -19,7 +19,6 @@ class LlmServiceTest {
     private val logs = mutableListOf<String>()
     private val testTree = object : Timber.Tree() {
         override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-            println("LOGGED: '$message'")
             logs.add(message)
         }
     }
@@ -69,7 +68,6 @@ class LlmServiceTest {
         try {
             service.initialize(tempFile, forceCpu = false)
             assertTrue(service.isReady())
-            println("CURRENT LOGS: $logs")
             assertTrue(logs.any { it.contains("GPU initialization failed, falling back to CPU") })
         } finally {
             tempFile.delete()
