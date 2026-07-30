@@ -1,6 +1,5 @@
 package com.minibrain.ai.search
 
-import androidx.sqlite.db.SupportSQLiteQuery
 import com.minibrain.ai.agent.DateRange
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
@@ -12,7 +11,6 @@ import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
 import java.time.LocalDate
 import kotlinx.coroutines.test.runTest
