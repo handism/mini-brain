@@ -359,11 +359,13 @@ class SearchPipeline(
     }
 }
 
-// ソース別 rank リストを RRF（Reciprocal Rank Fusion）で融合する。
-// score = Σ weight × 1/(k + rank + 1)。複数ソースに出現する候補ほど加点され、
-// ソースごとの擬似スコアの大小に依存しない（ADR-022）。
-// weights を渡すと「信頼度の高いソースを上位に寄せる」非対称重み付けが可能（ADR-023）。
-// docId + headingPath で重複排除し、同キーは最初に出現した Citation を保持する。
+/**
+ * ソース別 rank リストを RRF（Reciprocal Rank Fusion）で融合する。
+ * score = Σ weight × 1/(k + rank + 1)。複数ソースに出現する候補ほど加点され、
+ * ソースごとの擬似スコアの大小に依存しない（ADR-022）。
+ * weights を渡すと「信頼度の高いソースを上位に寄せる」非対称重み付けが可能（ADR-023）。
+ * docId + headingPath で重複排除し、同キーは最初に出現した Citation を保持する。
+ */
 internal fun mergeCandidatesRrf(
     rankLists: List<List<Citation>>,
     limit: Int,
