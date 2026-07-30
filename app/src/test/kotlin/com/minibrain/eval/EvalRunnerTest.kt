@@ -176,4 +176,27 @@ class EvalRunnerTest {
 
         EvalRunner.loadFromAssets(mockContext, "eval/queries.sample.json")
     }
+
+    @Test
+    fun `run invokes onProgress callback correctly`() = runTest {
+        val treeUri = "content://dummy"
+        val case1 = EvalCase("c1", "q1", listOf("a.md"))
+        val case2 = EvalCase("c2", "q2", listOf("b.md"))
+        val cases = listOf(case1, case2)
+
+        coEvery { searchPipeline.search(any(), any()) } returns SearchPipelineResult(
+            citations = emptyList(),
+            traceEvents = emptyList()
+        )
+
+        val progressLog = mutableListOf<Pair<Int, Int>>()
+        evalRunner.run(treeUri, cases, k = 1, onProgress = { current, total ->
+            progressLog += current to total
+        })
+
+        assertEquals(
+            listOf(0 to 2, 1 to 2, 2 to 2),
+            progressLog
+        )
+    }
 }
