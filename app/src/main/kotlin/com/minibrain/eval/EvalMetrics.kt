@@ -2,13 +2,15 @@ package com.minibrain.eval
 
 import com.minibrain.ai.rag.Citation
 
-// 検索評価指標の純 Kotlin 実装。JVM ユニットテストで数値検証する。
-//
-// - Precision@K: 上位 K 件のうち正解集合に含まれるものの割合
-// - Recall@K   : 正解集合のうち上位 K 件で拾えたものの割合
-// - MRR        : 正解が初めて出現した順位の逆数（出現しなければ 0）
-//
-// ケース全体の集計は単純な算術平均（マイクロではなくマクロ平均）。
+/**
+ * 検索評価指標の純 Kotlin 実装。JVM ユニットテストで数値検証する。
+ *
+ * - Precision@K: 上位 K 件のうち正解集合に含まれるものの割合
+ * - Recall@K   : 正解集合のうち上位 K 件で拾えたものの割合
+ * - MRR        : 正解が初めて出現した順位の逆数（出現しなければ 0）
+ *
+ * ケース全体の集計は単純な算術平均（マイクロではなくマクロ平均）。
+ */
 data class EvalResult(
     val cases: Int,
     val k: Int,
