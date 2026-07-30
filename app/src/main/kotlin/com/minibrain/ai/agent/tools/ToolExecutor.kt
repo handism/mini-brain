@@ -179,16 +179,8 @@ class ToolExecutor(
 
         val rawChunks = withContext(Dispatchers.IO) {
             runCatching {
-                chunkDao.bm25SearchRaw(
-                    SimpleSQLiteQuery(
-                        """SELECT chunks.* FROM chunks_fts
-                           JOIN chunks ON chunks_fts.rowid = chunks.id
-                           WHERE chunks_fts MATCH ?
-                           LIMIT 50""",
-                        arrayOf<Any?>(matchQuery),
-                    )
-                )
-            }.onFailure { Timber.tag(TAG).w(it, "bm25SearchRaw failed for query: $matchQuery") }
+                chunkDao.bm25Search(matchQuery, 50)
+            }.onFailure { Timber.tag(TAG).w(it, "bm25Search failed for query: $matchQuery") }
              .getOrElse { emptyList() }
         }
 
