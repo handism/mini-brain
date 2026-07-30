@@ -1,6 +1,5 @@
 package com.minibrain.ai.search
 
-import androidx.sqlite.db.SupportSQLiteQuery
 import com.minibrain.ai.agent.DateRange
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
@@ -12,7 +11,6 @@ import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
 import java.time.LocalDate
 import kotlinx.coroutines.test.runTest
@@ -147,4 +145,30 @@ class SearchPipelineTest {
         assertEquals(5L, result.citations[0].docId)
         assertEquals(6L, result.citations[1].docId)
     }
+
+    @Test
+    fun `search matches single character filename for metadata topicMatch`() = runTest {
+        val query = "胃についての記録"
+        val treeUri = "tree/uri"
+
+        coEvery { queryExpander.expand(query) } returns listOf(query)
+        coEvery { hyde.generateHypothetical(query) } returns null
+        coEvery { cache.documents() } returns listOf(
+            DocumentEntity(id = 7, treeUri = treeUri, fileUri = "uri", fileName = "胃.md", relativePath = "胃.md", lastModified = 0L, contentHash = "", firstParagraph = "胃の調子について", documentDate = null)
+        )
+        coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
+        coEvery { chunkDao.bm25SearchRaw(any()) } returns emptyList()
+        coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
+        coEvery { llmReranker.rerank(query, any(), any()) } answers {
+            @Suppress("UNCHECKED_CAST")
+            it.invocation.args[1] as List<Citation>
+        }
+
+        val result = searchPipeline.search(query, treeUri, cache = cache)
+
+        val topicMatchCitation = result.citations.find { it.docId == 7L }
+        assertTrue(topicMatchCitation != null)
+        assertTrue(topicMatchCitation!!.topicMatch)
+    }
 }
+

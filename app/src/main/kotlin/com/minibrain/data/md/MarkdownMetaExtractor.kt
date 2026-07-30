@@ -6,7 +6,6 @@ object MarkdownMetaExtractor {
 
     private val HEADING_REGEX = Regex("^#{1,6}\\s+(.+)$", RegexOption.MULTILINE)
     private val TAG_REGEX = Regex("(?<![#\\w])#([\\w\\u4e00-\\u9fff\\u3040-\\u309f\\u30a0-\\u30ff-]+)")
-
     private val YAML_DATE_REGEX = Regex(
         """^(?:date|created|published|updated|日付|作成日|記録日)\s*:\s*['"]?(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})""",
         RegexOption.IGNORE_CASE,
