@@ -183,6 +183,29 @@ class MdFileReaderTest {
     }
 
     @Test
+    fun `listMdFiles skips file if readText throws exception`() {
+        val rootDir = mockk<DocumentFile>()
+        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
+
+        val mdFile = mockk<DocumentFile>()
+        every { mdFile.isDirectory } returns false
+        every { mdFile.isFile } returns true
+        every { mdFile.name } returns "error.md"
+        every { mdFile.length() } returns 100L
+        val uri = mockk<Uri>()
+        every { mdFile.uri } returns uri
+
+        every { rootDir.listFiles() } returns arrayOf(mdFile)
+
+        // Simulate read failure by throwing IOException
+        every { contentResolver.openInputStream(uri) } throws java.io.IOException("Disk read error")
+
+        val result = MdFileReader.listMdFiles(context, treeUri)
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
     fun `listMdFiles skips file if name is null`() {
         val rootDir = mockk<DocumentFile>()
         every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
