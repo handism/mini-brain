@@ -97,6 +97,6 @@ object NGramTokenizer {
     fun toFtsMatchQuery(text: String): String? {
         val tokens = toBigrams(text).split(" ").filter { it.isNotBlank() }
         if (tokens.isEmpty()) return null
-        return tokens.joinToString(" OR ") { "\"$it\"" }
+        return tokens.joinToString(" OR ") { "\"${it.replace("\"", "\"\"")}\"" }
     }
 }
