@@ -3,7 +3,12 @@
 このファイルは、AI コーディングエージェント（Google DeepMind の **Antigravity**、Anthropic の **Claude Code** など）向けに、プロジェクトの技術仕様、ビルド・実行コマンド、設計の制約、および注意事項をまとめたものです。
 エージェントはコードの変更、テストの実行、リファクタリングなどを行う際に、常にこのファイルを最優先で参照してください。
 
-> ルート直下の `CLAUDE.md` はこのファイルへの symlink です。実体は 1 つなので、どちらを編集しても同じ内容が更新されます。
+> **エージェント設定ファイルの配置方針**: 実体はすべて `.agents/` 配下（またはリポジトリルート）に置き、`.claude/` 側は symlink とします。実体が 1 つなのでツールごとの内容ズレが起きません。
+>
+> - `CLAUDE.md` → `AGENTS.md`（このファイル）への symlink
+> - `.claude/skills/<name>` → `../../.agents/skills/<name>` への symlink
+>
+> スキルを追加する場合は `.agents/skills/<name>/SKILL.md` に実体を作り、`.claude/skills/` から symlink を張ってください。
 
 ---
 
