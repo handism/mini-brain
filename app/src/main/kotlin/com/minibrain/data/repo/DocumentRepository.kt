@@ -185,7 +185,9 @@ class DocumentRepository(
             if (docsToInsertList.isNotEmpty()) {
                 val insertedDocIds = documentDao.insertAll(docsToInsertList)
 
-                // Embed and insert chunks using the generated IDs
+                val chunkBuffer = mutableListOf<ChunkEntity>()
+
+                // Embed and collect chunks using the generated IDs
                 pendingDocs.forEachIndexed { i, pending ->
                     // Emit progress state during the heavy embedding phase
                     _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
@@ -206,11 +208,21 @@ class DocumentRepository(
                         }.getOrNull()
                     }
 
-                    if (chunkEntities.isNotEmpty()) {
-                        val chunkIds = chunkDao.insertAll(chunkEntities)
-                        insertFts(ftsStmt, chunkIds, chunkEntities)
-                        totalChunks += chunkEntities.size
+                    chunkBuffer.addAll(chunkEntities)
+
+                    // Flush buffer to DB to avoid high memory pressure (OOM)
+                    if (chunkBuffer.size >= 900) {
+                        val chunkIds = chunkDao.insertAll(chunkBuffer)
+                        insertFts(ftsStmt, chunkIds, chunkBuffer)
+                        totalChunks += chunkBuffer.size
+                        chunkBuffer.clear()
                     }
+                }
+
+                if (chunkBuffer.isNotEmpty()) {
+                    val chunkIds = chunkDao.insertAll(chunkBuffer)
+                    insertFts(ftsStmt, chunkIds, chunkBuffer)
+                    totalChunks += chunkBuffer.size
                 }
             }
 
