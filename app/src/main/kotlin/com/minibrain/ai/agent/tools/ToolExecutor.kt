@@ -228,8 +228,7 @@ class ToolExecutor(
             val (chunks, vectors) = cache.chunkVectors()
             val docsMap = cache.documents().associateBy { it.id }
             val validDocIds = docsMap.values
-                .filter { it.relativePath.startsWith(tool.scope) }
-                .map { it.id }
+                .mapNotNull { if (it.relativePath.startsWith(tool.scope)) it.id else null }
                 .toSet()
             val filteredCandidates = ArrayList<Pair<FloatArray, com.minibrain.data.db.entities.ChunkEntity>>()
             for (i in chunks.indices) {
