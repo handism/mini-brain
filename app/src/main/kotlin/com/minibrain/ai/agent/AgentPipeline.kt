@@ -89,7 +89,8 @@ class AgentPipeline(
         }
 
         onStatus?.invoke("")
-        val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory, dateRange))
+        val answerContext = AnswerContext(question, citations, recentHistory, dateRange)
+        val answerFlow = llmService.generateStream(buildAnswerPrompt(answerContext))
         AgentResult(citations, answerFlow, traceEvents)
     }
 
@@ -343,18 +344,22 @@ $body
         return "${historyBlock}ユーザー: $question\nアシスタント:"
     }
 
+    private data class AnswerContext(
+        val question: String,
+        val citations: List<Citation>,
+        val history: List<Pair<String, String>>,
+        val dateRange: DateRange? = null,
+    )
+
     private fun buildAnswerPrompt(
-        question: String,
-        citations: List<Citation>,
-        history: List<Pair<String, String>>,
-        dateRange: DateRange? = null,
+        context: AnswerContext
     ): String {
-        val contextBlock = buildContextBlock(citations)
-        val temporalInstruction = buildTemporalInstruction(question, citations, dateRange)
-        val historyBlock = buildHistoryBlock(history)
+        val contextBlock = buildContextBlock(context.citations)
+        val temporalInstruction = buildTemporalInstruction(context.question, context.citations, context.dateRange)
+        val historyBlock = buildHistoryBlock(context.history)
 
         val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
-        return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: $question\nアシスタント:"
+        return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: ${context.question}\nアシスタント:"
     }
 
     // observation スライディングウィンドウ: 最新2件を full(詳細)、それ以前を compact(要約)に保つ
