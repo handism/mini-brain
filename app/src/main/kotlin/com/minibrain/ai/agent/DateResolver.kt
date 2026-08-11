@@ -128,37 +128,32 @@ object DateResolver {
                 listOf(today.format(FORMATTER))
             question.contains("今週") -> {
                 val dayOfWeek = today.dayOfWeek.value
-                (0 until dayOfWeek).map { today.minusDays(it.toLong()).format(FORMATTER) }
+                List(dayOfWeek) { today.minusDays(it.toLong()).format(FORMATTER) }
             }
             question.contains("先週") ->
-                (1..7).map { today.minusDays(it.toLong()).format(FORMATTER) }
+                List(7) { today.minusDays((it + 1).toLong()).format(FORMATTER) }
             question.contains("今月") -> {
                 val start = today.withDayOfMonth(1)
-                generateSequence(start) { it.plusDays(1) }
-                    .takeWhile { !it.isAfter(today) }
-                    .map { it.format(FORMATTER) }
-                    .toList()
+                val days = today.dayOfMonth
+                List(days) { start.plusDays(it.toLong()).format(FORMATTER) }
             }
             question.contains("先月") -> {
                 val lastMonth = today.minusMonths(1)
                 val start = lastMonth.withDayOfMonth(1)
-                val end = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth())
-                generateSequence(start) { it.plusDays(1) }
-                    .takeWhile { !it.isAfter(end) }
-                    .map { it.format(FORMATTER) }
-                    .toList()
+                val days = lastMonth.lengthOfMonth()
+                List(days) { start.plusDays(it.toLong()).format(FORMATTER) }
             }
             question.contains("正月") || question.contains("お正月") || question.contains("年始") -> {
                 val year = if (isPastYear) today.year - 1 else today.year
-                (1..7).map { LocalDate.of(year, 1, it).format(FORMATTER) }
+                List(7) { LocalDate.of(year, 1, it + 1).format(FORMATTER) }
             }
             question.contains("年末") -> {
                 // 上半期に「年末」と言ったら去年の年末を指す可能性が高い
                 val year = if (isPastYear || today.monthValue <= 6) today.year - 1 else today.year
-                (25..31).map { LocalDate.of(year, 12, it).format(FORMATTER) }
+                List(7) { LocalDate.of(year, 12, 25 + it).format(FORMATTER) }
             }
             question.contains("最近") ->
-                (0..14).map { today.minusDays(it.toLong()).format(FORMATTER) }
+                List(15) { today.minusDays(it.toLong()).format(FORMATTER) }
             else -> resolveByNumericPattern(question, today)
         }
     }
@@ -182,10 +177,8 @@ object DateResolver {
             return runCatching {
                 val start = LocalDate.of(year, month, 1)
                 val end = minOf(start.withDayOfMonth(start.lengthOfMonth()), today)
-                generateSequence(start) { it.plusDays(1) }
-                    .takeWhile { !it.isAfter(end) }
-                    .map { it.format(FORMATTER) }
-                    .toList()
+                val days = maxOf(0, java.time.temporal.ChronoUnit.DAYS.between(start, end).toInt() + 1)
+                List(days) { start.plusDays(it.toLong()).format(FORMATTER) }
             }.onFailure { Timber.tag(TAG).w(it, "Invalid month-only: $year/$month") }
              .getOrElse { emptyList() }
         }
