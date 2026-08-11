@@ -80,20 +80,16 @@ object MarkdownMetaExtractor {
         }
 
         // 2. 「ラベル: YYYY/MM/DD」形式の行
-        // 3. 本文中の最初の YYYY/MM/DD または YYYY-MM-DD（1990〜今日の範囲のみ）
-        var firstBodyDate: String? = null
-        for (line in lines) {
-            LABELED_DATE_REGEX.find(line)?.destructured?.let { (y, m, d) ->
-                safeDate(y, m, d)?.let { return it }
-            }
-            if (firstBodyDate == null) {
-                BODY_DATE_REGEX.find(line)?.destructured?.let { (y, m, d) ->
-                    safeDate(y, m, d)?.let { firstBodyDate = it }
-                }
-            }
-        }
+        LABELED_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
+            val (y, m, d) = it.destructured
+            safeDate(y, m, d)
+        }?.let { return it }
 
-        firstBodyDate?.let { return it }
+        // 3. 本文中の最初の YYYY/MM/DD または YYYY-MM-DD（1990〜今日の範囲のみ）
+        BODY_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
+            val (y, m, d) = it.destructured
+            safeDate(y, m, d)
+        }?.let { return it }
 
         // 4. 見出し中の YYYY年MM月DD日 / YYYY年MM月
         // ※ 本文全行を走査すると「2024年5月に行った」のようなカジュアル言及にも反応し、
