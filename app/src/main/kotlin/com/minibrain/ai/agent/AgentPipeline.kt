@@ -66,9 +66,9 @@ class AgentPipeline(
             Timber.tag(TAG).d("CoverageCheck canAnswer=${coverage.canAnswer} missing=${coverage.missingInformation}")
             if (!coverage.canAnswer) {
                 val strategy = resolveExplorerStrategy(coverage.missingInformation)
-                traceEvents += ExplorerStrategyEvent(strategy.first, strategy.second)
-                explorerHint = strategy.third
-                Timber.tag(TAG).d("ExplorerStrategy=${strategy.first}")
+                traceEvents += ExplorerStrategyEvent(strategy.name, strategy.reason)
+                explorerHint = strategy.hint
+                Timber.tag(TAG).d("ExplorerStrategy=${strategy.name}")
                 citations = emptyList()
             }
         }
@@ -76,7 +76,9 @@ class AgentPipeline(
         // ReAct ループはフォールバック専用 (SearchPipeline が空 or CoverageCheck 失敗の場合)
         if (citations.isEmpty()) {
             Timber.tag(TAG).d("falling back to ReAct loop (explorerHint=$explorerHint)")
-            citations = runReActLoop(question, treeUri, traceEvents, onStatus, explorerHint, dateRange, cache)
+            citations = runReActLoop(
+                ReActParams(question, treeUri, traceEvents, onStatus, explorerHint, dateRange, cache)
+            )
         }
 
         // 最終セーフティネット: RRF 強制実行
@@ -96,33 +98,35 @@ class AgentPipeline(
 
     private data class ExplorerStrategy(val name: String, val reason: String, val hint: String)
 
-    private fun resolveExplorerStrategy(missing: List<String>): Triple<String, String, String> {
+    private fun resolveExplorerStrategy(missing: List<String>): ExplorerStrategy {
         val isTimeRelated = missing.any { it.contains("date") || it.contains("visit") || it.contains("time") || it.contains("when") }
         return if (isTimeRelated) {
-            Triple(
+            ExplorerStrategy(
                 "EXPAND_TIME",
                 "missing date info",
                 "ファイル本文に日付メタが埋め込まれている可能性が高いです。まず read_file で該当ファイル全文を取得して『初回訪問日』『日付』『date』などのラベル行を確認してください。それでも特定できない場合のみ timeline_search を使ってください。",
             )
         } else {
-            Triple("EXPAND_TOPIC", "missing detail", "read_file または grep で詳細内容を調べてください。")
+            ExplorerStrategy("EXPAND_TOPIC", "missing detail", "read_file または grep で詳細内容を調べてください。")
         }
     }
 
-    private suspend fun runReActLoop(
-        question: String,
-        treeUri: String,
-        traceEvents: MutableList<AgentTraceEvent>,
-        onStatus: ((String) -> Unit)?,
-        explorerHint: String? = null,
-        dateRange: DateRange? = null,
-        cache: SearchRequestCache,
-    ): List<Citation> {
-        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, treeUri, llmService, cache)
-        val baseHint = buildPlannerHint(question, dateRange, cache)
+    private data class ReActParams(
+        val question: String,
+        val treeUri: String,
+        val traceEvents: MutableList<AgentTraceEvent>,
+        val onStatus: ((String) -> Unit)?,
+        val explorerHint: String? = null,
+        val dateRange: DateRange? = null,
+        val cache: SearchRequestCache,
+    )
+
+    private suspend fun runReActLoop(params: ReActParams): List<Citation> {
+        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, params.treeUri, llmService, params.cache)
+        val baseHint = buildPlannerHint(params.question, params.dateRange, params.cache)
         val plannerHint = when {
-            explorerHint != null && baseHint != null -> "$explorerHint / $baseHint"
-            explorerHint != null -> explorerHint
+            params.explorerHint != null && baseHint != null -> "${params.explorerHint} / $baseHint"
+            params.explorerHint != null -> params.explorerHint
             else -> baseHint
         }
         val observations = mutableListOf<Observation>()
@@ -130,7 +134,7 @@ class AgentPipeline(
         var consecutiveParseErrors = 0
 
         for (iteration in 1..MAX_ITERATIONS) {
-            onStatus?.invoke("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
+            params.onStatus?.invoke("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
             Timber.tag(TAG).d("ReAct iteration=$iteration hint=$plannerHint obs=${observations.size}")
 
             if (!llmService.isReady()) {
@@ -138,7 +142,7 @@ class AgentPipeline(
                 break
             }
 
-            val prompt = PlannerPrompt.build(question, plannerHint, observations)
+            val prompt = PlannerPrompt.build(params.question, plannerHint, observations)
             val sb = StringBuilder()
             runCatching {
                 llmService.generateStream(prompt).collect { token -> sb.append(token) }
@@ -150,21 +154,21 @@ class AgentPipeline(
             when (decision) {
                 is PlannerDecision.Finalize -> {
                     Timber.tag(TAG).d("finalize: ${decision.reason}")
-                    traceEvents += PlannerDecisionEvent(iteration, "finalize: ${decision.reason}")
+                    params.traceEvents += PlannerDecisionEvent(iteration, "finalize: ${decision.reason}")
                     break
                 }
                 is PlannerDecision.ParseError -> {
                     consecutiveParseErrors++
                     Timber.tag(TAG).w("parse error ($consecutiveParseErrors)")
-                    traceEvents += PlannerDecisionEvent(iteration, "parse_error")
+                    params.traceEvents += PlannerDecisionEvent(iteration, "parse_error")
                     if (consecutiveParseErrors >= 2) {
                         Timber.tag(TAG).d("2 consecutive parse errors — RRF fallback")
-                        onStatus?.invoke("フォールバック検索中...")
-                        val fallbackCitations = ragPipeline.retrieveTopChunks(question, treeUri, cache = cache)
-                        val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(question))
+                        params.onStatus?.invoke("フォールバック検索中...")
+                        val fallbackCitations = ragPipeline.retrieveTopChunks(params.question, params.treeUri, cache = params.cache)
+                        val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(params.question))
                         toolResults += ToolResult(fallbackCall, "fallback", fallbackCitations)
-                        traceEvents += ToolCallEvent(iteration, "rrf_search", "\"$question\"")
-                        traceEvents += ObservationEvent(iteration, "${fallbackCitations.size} citations returned")
+                        params.traceEvents += ToolCallEvent(iteration, "rrf_search", "\"${params.question}\"")
+                        params.traceEvents += ObservationEvent(iteration, "${fallbackCitations.size} citations returned")
                         break
                     }
                     continue
@@ -173,11 +177,11 @@ class AgentPipeline(
                     consecutiveParseErrors = 0
                     val toolCall = ToolCall(iteration, decision.tool)
                     val tool = decision.tool
-                    traceEvents += ToolCallEvent(iteration, tool.traceName, tool.traceArgs)
-                    onStatus?.invoke(tool.progressLabel)
+                    params.traceEvents += ToolCallEvent(iteration, tool.traceName, tool.traceArgs)
+                    params.onStatus?.invoke(tool.progressLabel)
                     val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
                     toolResults += result
-                    traceEvents += ObservationEvent(
+                    params.traceEvents += ObservationEvent(
                         iteration,
                         tool.observationKind(result.citations.size, result.summary.length),
                     )
