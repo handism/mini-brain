@@ -29,7 +29,6 @@ class EvalRunnerTest {
         Timber.plant(object : Timber.Tree() {
             override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
                 // No-op for tests, or print to stdout if debugging needed
-                println("[$tag] $message")
             }
         })
         evalRunner = EvalRunner(searchPipeline)
@@ -175,5 +174,28 @@ class EvalRunnerTest {
         every { mockAssetManager.open("eval/queries.sample.json") } returns ByteArrayInputStream(json.toByteArray())
 
         EvalRunner.loadFromAssets(mockContext, "eval/queries.sample.json")
+    }
+
+    @Test
+    fun `run invokes onProgress callback correctly`() = runTest {
+        val treeUri = "content://dummy"
+        val case1 = EvalCase("c1", "q1", listOf("a.md"))
+        val case2 = EvalCase("c2", "q2", listOf("b.md"))
+        val cases = listOf(case1, case2)
+
+        coEvery { searchPipeline.search(any(), any()) } returns SearchPipelineResult(
+            citations = emptyList(),
+            traceEvents = emptyList()
+        )
+
+        val progressLog = mutableListOf<Pair<Int, Int>>()
+        evalRunner.run(treeUri, cases, k = 1, onProgress = { current, total ->
+            progressLog += current to total
+        })
+
+        assertEquals(
+            listOf(0 to 2, 1 to 2, 2 to 2),
+            progressLog
+        )
     }
 }

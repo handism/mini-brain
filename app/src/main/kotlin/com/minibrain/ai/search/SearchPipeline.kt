@@ -1,6 +1,5 @@
 package com.minibrain.ai.search
 
-import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.BM25SearchHitEvent
 import com.minibrain.ai.agent.AgentTraceEvent
 import com.minibrain.ai.agent.CandidateMergeEvent
@@ -53,7 +52,7 @@ class SearchPipeline(
         // 低スコアは Reranker のノイズ源になるため、ここで除外する（ADR-023）。
         private const val VECTOR_MIN_SCORE = 0.45f
         private const val SNIPPET_CHARS = 200
-        private const val MIN_FILENAME_MATCH_CHARS = 3
+        private const val MIN_FILENAME_MATCH_CHARS = 1
         private const val RRF_K = 60
         // RRF 重み（[meta, vector, bm25]）。Metadata 完全一致 > BM25 > Vector の順。
         private val RRF_WEIGHTS = listOf(1.5f, 1.0f, 1.2f)
@@ -66,6 +65,8 @@ class SearchPipeline(
         // 「初回訪問日: YYYY/MM/DD」のようなラベル行が firstParagraph (200) からこぼれていても
         // 拾えるよう、先頭 chunk テキストから長めに採る。
         private const val TOPIC_MATCH_SNIPPET_CHARS = 500
+        private val METADATA_SPLIT_REGEX = Regex("""[\s　、。・]+""")
+        private val WHITESPACE_NORMALIZE_REGEX = Regex("""\s+""")
     }
 
     suspend fun search(
@@ -158,15 +159,8 @@ class SearchPipeline(
 
     private suspend fun bm25Search(query: String, treeUri: String): List<Citation> {
         val matchQuery = NGramTokenizer.toFtsMatchQuery(query) ?: return emptyList()
-        val sql = """
-            SELECT chunks.* FROM chunks_fts
-            JOIN chunks ON chunks_fts.rowid = chunks.id
-            JOIN documents ON chunks.docId = documents.id
-            WHERE chunks_fts MATCH ? AND documents.treeUri = ?
-            LIMIT ?
-        """.trimIndent()
         val chunks = runCatching {
-            chunkDao.bm25SearchRaw(SimpleSQLiteQuery(sql, arrayOf<Any?>(matchQuery, treeUri, BM25_PER_QUERY_LIMIT)))
+            chunkDao.bm25SearchByTree(matchQuery, treeUri, BM25_PER_QUERY_LIMIT)
         }.getOrElse { e ->
             Timber.tag(TAG).w("BM25 search failed for '$query': ${e.message}")
             emptyList()
@@ -184,7 +178,7 @@ class SearchPipeline(
     private suspend fun metadataSearch(queries: List<String>, ctx: SearchRequestCache): List<Citation> {
         val allDocs = ctx.documents()
         val tokens = queries.flatMap { q ->
-            q.split(Regex("[\\s　、。・]+")).filter { it.length >= 2 }
+            q.split(METADATA_SPLIT_REGEX).filter { it.length >= 2 }
         }.distinct()
 
         // topicMatch ヒットは先頭 chunk テキストでスニペットを組むため、必要なら 1 回だけロードする。
@@ -205,12 +199,10 @@ class SearchPipeline(
             val tokenMatch = tokens.any { token ->
                 fields.any { field -> field.contains(token, ignoreCase = true) }
             }
-            // ファイル名逆引き: fileName(拡張子除く) が query の substring として含まれるか
-            // 日本語助詞でトークン化されないクエリ（例: 「サウナしきじにいつ行ったっけ？」）でも
-            // 固有名詞ファイル（「サウナしきじ.md」）を確実に拾うための保険
             val fileStem = doc.fileName.removeSuffix(".md").removeSuffix(".MD")
             val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
                 queries.any { q -> q.contains(fileStem, ignoreCase = true) }
+
             if (!tokenMatch && !fileNameInQuery) return@mapNotNull null
 
             // topicMatch ヒットは「初回訪問日: …」「YYYY/MM/DD」など本文の日付を後段の回答 LLM が
@@ -220,6 +212,7 @@ class SearchPipeline(
             } else {
                 doc.firstParagraph
             }
+
             Citation(
                 headingPath = doc.relativePath,
                 snippet = DatePrefix.build(doc.documentDate, snippetBody),
@@ -259,7 +252,7 @@ class SearchPipeline(
         val ordered = LinkedHashSet<String>()
         fun addIfValid(s: String?) {
             if (s.isNullOrBlank()) return
-            val normalized = s.trim().replace(Regex("\\s+"), " ")
+            val normalized = s.trim().replace(WHITESPACE_NORMALIZE_REGEX, " ")
             if (normalized.isNotEmpty()) ordered.add(normalized)
         }
         addIfValid(originalQuery)
@@ -358,11 +351,13 @@ class SearchPipeline(
     }
 }
 
-// ソース別 rank リストを RRF（Reciprocal Rank Fusion）で融合する。
-// score = Σ weight × 1/(k + rank + 1)。複数ソースに出現する候補ほど加点され、
-// ソースごとの擬似スコアの大小に依存しない（ADR-022）。
-// weights を渡すと「信頼度の高いソースを上位に寄せる」非対称重み付けが可能（ADR-023）。
-// docId + headingPath で重複排除し、同キーは最初に出現した Citation を保持する。
+/**
+ * ソース別 rank リストを RRF（Reciprocal Rank Fusion）で融合する。
+ * score = Σ weight × 1/(k + rank + 1)。複数ソースに出現する候補ほど加点され、
+ * ソースごとの擬似スコアの大小に依存しない（ADR-022）。
+ * weights を渡すと「信頼度の高いソースを上位に寄せる」非対称重み付けが可能（ADR-023）。
+ * docId + headingPath で重複排除し、同キーは最初に出現した Citation を保持する。
+ */
 internal fun mergeCandidatesRrf(
     rankLists: List<List<Citation>>,
     limit: Int,

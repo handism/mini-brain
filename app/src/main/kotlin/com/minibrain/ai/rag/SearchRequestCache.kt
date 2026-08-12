@@ -62,11 +62,11 @@ class SearchRequestCache(
     suspend fun cosineTopK(queryVec: FloatArray, k: Int): List<Pair<Float, ChunkEntity>> {
         val (chunks, vectors) = chunkVectors()
         if (chunks.isEmpty()) return emptyList()
-        val scored = ArrayList<Pair<Float, ChunkEntity>>(chunks.size)
-        for (i in chunks.indices) {
-            scored.add(CosineSimilarity.compute(queryVec, vectors[i]) to chunks[i])
+        val candidates = object : AbstractList<Pair<FloatArray, Any>>() {
+            override val size: Int get() = chunks.size
+            override fun get(index: Int): Pair<FloatArray, Any> = vectors[index] to chunks[index]
         }
-        scored.sortByDescending { it.first }
-        return if (scored.size > k) scored.subList(0, k) else scored
+        @Suppress("UNCHECKED_CAST")
+        return CosineSimilarity.topK(queryVec, candidates, k) as List<Pair<Float, ChunkEntity>>
     }
 }

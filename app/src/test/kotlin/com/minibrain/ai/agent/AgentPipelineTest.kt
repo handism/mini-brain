@@ -9,7 +9,6 @@ import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.ai.search.SearchPipelineResult
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
-import com.minibrain.data.db.entities.DocumentEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every

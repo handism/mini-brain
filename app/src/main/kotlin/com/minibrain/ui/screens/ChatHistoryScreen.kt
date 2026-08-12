@@ -1,3 +1,4 @@
+@file:Suppress("unused", "UnusedImport")
 package com.minibrain.ui.screens
 
 import androidx.compose.foundation.layout.Box

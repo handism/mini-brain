@@ -1,6 +1,5 @@
 package com.minibrain.ai.rag
 
-import androidx.sqlite.db.SupportSQLiteQuery
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.daos.ChunkDao
@@ -18,7 +17,6 @@ import kotlin.math.exp
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -64,7 +62,7 @@ class RagPipelineTest {
     fun `freshnessBoost returns max boost for today`() {
         val today = LocalDate.now()
         val boost = RagPipeline.freshnessBoost(today, today)
-        assertEquals(0.010f, boost, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX, boost, 0.0001f)
     }
 
     @Test
@@ -73,11 +71,11 @@ class RagPipelineTest {
         val thirtyDaysAgo = today.minusDays(30)
         val boost30 = RagPipeline.freshnessBoost(thirtyDaysAgo, today)
 
-        assertEquals(0.010f * exp(-30f / 90f).toFloat(), boost30, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX * exp(-30f / RagPipeline.FRESHNESS_DECAY_DAYS).toFloat(), boost30, 0.0001f)
 
         val oneYearAgo = today.minusDays(365)
         val boost365 = RagPipeline.freshnessBoost(oneYearAgo, today)
-        assertEquals(0.010f * exp(-365f / 90f).toFloat(), boost365, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX * exp(-365f / RagPipeline.FRESHNESS_DECAY_DAYS).toFloat(), boost365, 0.0001f)
 
         assertTrue(boost30 > boost365)
     }
@@ -87,7 +85,7 @@ class RagPipelineTest {
         val today = LocalDate.now()
         val tomorrow = today.plusDays(1)
         val boost = RagPipeline.freshnessBoost(tomorrow, today)
-        assertEquals(0.010f, boost, 0.0001f)
+        assertEquals(RagPipeline.FRESHNESS_BOOST_MAX, boost, 0.0001f)
     }
 
     @Test
@@ -147,8 +145,7 @@ class RagPipelineTest {
             text = "BM25 Text",
             embedding = ByteArray(0)
         )
-        val sqlSlot = slot<SupportSQLiteQuery>()
-        coEvery { chunkDao.bm25SearchRaw(capture(sqlSlot)) } returns listOf(bm25Chunk)
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns listOf(bm25Chunk)
 
         val folderEmbedding = FolderEmbeddingEntity(
             id = 1L,
@@ -190,7 +187,7 @@ class RagPipelineTest {
 
         coEvery { embedderService.embed(query, EmbedType.QUERY) } returns FloatArray(384) { 0.1f }
         coEvery { chunkDao.getAllByTree(treeUri) } returns emptyList()
-        coEvery { chunkDao.bm25SearchRaw(any()) } returns emptyList()
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { folderEmbeddingDao.getAllByTree(treeUri) } returns emptyList()
         coEvery { documentDao.getDocPathsByIds(emptyList()) } returns emptyList()
         coEvery { documentDao.getDocDatesByIds(emptyList()) } returns emptyList()

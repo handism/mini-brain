@@ -5,8 +5,6 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.RawQuery
-import androidx.sqlite.db.SupportSQLiteQuery
 import com.minibrain.data.db.entities.ChunkEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -58,9 +56,25 @@ interface ChunkDao {
     @Query("DELETE FROM chunks WHERE docId = :docId")
     suspend fun deleteByDoc(docId: Long)
 
+    @Query("DELETE FROM chunks WHERE docId IN (:docIds)")
+    suspend fun deleteByDocIds(docIds: List<Long>)
+
     @Query("DELETE FROM chunks WHERE docId IN (SELECT id FROM documents WHERE treeUri = :treeUri)")
     suspend fun deleteAllByTree(treeUri: String)
 
-    @RawQuery
-    suspend fun bm25SearchRaw(query: SupportSQLiteQuery): List<ChunkEntity>
+    @Query("""
+        SELECT chunks.* FROM chunks
+        JOIN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH :matchQuery) AS fts ON chunks.id = fts.rowid
+        LIMIT :limit
+    """)
+    suspend fun bm25Search(matchQuery: String, limit: Int): List<ChunkEntity>
+
+    @Query("""
+        SELECT chunks.* FROM chunks
+        JOIN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH :matchQuery) AS fts ON chunks.id = fts.rowid
+        JOIN documents ON chunks.docId = documents.id
+        WHERE documents.treeUri = :treeUri
+        LIMIT :limit
+    """)
+    suspend fun bm25SearchByTree(matchQuery: String, treeUri: String, limit: Int): List<ChunkEntity>
 }

@@ -16,6 +16,7 @@ import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChatMessageEntity
 import com.minibrain.data.db.entities.ChatSessionEntity
 import com.minibrain.data.db.entities.ChunkEntity
+import com.minibrain.data.db.entities.ChunkFtsEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.db.entities.FolderEmbeddingEntity
 import com.minibrain.data.db.entities.MessageRole
@@ -90,7 +91,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
 }
 
 @Database(
-    entities = [DocumentEntity::class, ChunkEntity::class, ChatSessionEntity::class, ChatMessageEntity::class, FolderEmbeddingEntity::class],
+    entities = [DocumentEntity::class, ChunkEntity::class, ChatSessionEntity::class, ChatMessageEntity::class, FolderEmbeddingEntity::class, ChunkFtsEntity::class],
     version = 6,
     exportSchema = false,
 )

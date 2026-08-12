@@ -42,6 +42,21 @@ class DocumentRepository(
     private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
     companion object {
+        private val FULL_DATE_PATTERNS = listOf(
+            Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
+            Regex("""(\d{4})/(\d{1,2})/(\d{1,2})"""),
+            Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
+            Regex("""(\d{4})_(\d{1,2})_(\d{1,2})"""),
+            Regex("""(\d{4})\.(\d{1,2})\.(\d{1,2})"""),
+            Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日"""),
+        )
+
+        private val MONTH_DATE_PATTERNS = listOf(
+            Regex("""(?<!\d)(\d{4})-(\d{1,2})(?!\d|-\d)"""),
+            Regex("""(\d{4})年(\d{1,2})月(?!\d)"""),
+            Regex("""(?<!\d)(\d{4})(\d{2})(?!\d)"""),
+        )
+
         // パスやファイル名から日付メタを抽出する。完全日付（日まで揃う）を先に検査し、
         // マッチしなかった場合は月単位ファイル（YYYY-MM など）を月初 1 日として扱う。
         // ユニットテストから呼び出せるよう @VisibleForTesting に昇格。
@@ -49,27 +64,14 @@ class DocumentRepository(
         internal fun extractDateFromPath(relativePath: String): String? {
             val yearRange = 1990..LocalDate.now().year
 
-            val fullPatterns = listOf(
-                Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
-                Regex("""(\d{4})/(\d{1,2})/(\d{1,2})"""),
-                Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
-                Regex("""(\d{4})_(\d{1,2})_(\d{1,2})"""),
-                Regex("""(\d{4})\.(\d{1,2})\.(\d{1,2})"""),
-                Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日"""),
-            )
-            for (pattern in fullPatterns) {
+            for (pattern in FULL_DATE_PATTERNS) {
                 val match = pattern.find(relativePath) ?: continue
                 val (y, m, d) = match.destructured
                 val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), d.toInt()) }.getOrNull()
                 if (date != null && date.year in yearRange) return date.toString()
             }
 
-            val monthPatterns = listOf(
-                Regex("""(?<!\d)(\d{4})-(\d{1,2})(?!\d|-\d)"""),
-                Regex("""(\d{4})年(\d{1,2})月(?!\d)"""),
-                Regex("""(?<!\d)(\d{4})(\d{2})(?!\d)"""),
-            )
-            for (pattern in monthPatterns) {
+            for (pattern in MONTH_DATE_PATTERNS) {
                 val match = pattern.find(relativePath) ?: continue
                 val (y, m) = match.destructured
                 val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), 1) }.getOrNull()
@@ -94,7 +96,9 @@ class DocumentRepository(
         var totalChunks = 0
 
         // 既存のドキュメントのチャンク数をキャッシュしてN+1問題を回避する
-        val existingDocs = documentDao.getByFileUris(mdFiles.map { it.uri.toString() }).associateBy { it.fileUri }
+        val existingDocs = mdFiles.map { it.uri.toString() }.chunked(900).flatMap { chunk ->
+            documentDao.getByFileUris(chunk)
+        }.associateBy { it.fileUri }
         val chunkCountsMap = chunkDao.getChunkCountsGroupedByDoc().associateBy({ it.docId }, { it.chunkCount })
 
         val writableDb = db.openHelper.writableDatabase
@@ -102,44 +106,50 @@ class DocumentRepository(
         val ftsStmt = writableDb.compileStatement(ftsSql)
 
         try {
+            val docsToUpdate = mutableListOf<DocumentEntity>()
+            val docsToInsert = mutableListOf<DocumentEntity>()
+            val docsToDelete = mutableListOf<Long>()
+
+            // To maintain batching, we group the raw chunks and their metadata
+            data class PendingDoc(val docEntity: DocumentEntity, val mdFile: MdFile)
+            val pendingDocs = mutableListOf<PendingDoc>()
+
             mdFiles.forEachIndexed { index, mdFile ->
                 _indexingState.value = IndexingState.Progress(index + 1, total, mdFile.name)
 
-            val existing = existingDocs[mdFile.uri.toString()]
-            // チャンク 0 件は過去のインデックスで embed が全滅した痕跡なので、ハッシュ一致でも再処理する
-            var existingChunkCount = 0
-            if (existing != null && existing.contentHash == mdFile.contentHash) {
-                existingChunkCount = chunkCountsMap[existing.id] ?: 0
-            }
-            if (existing != null && existing.contentHash == mdFile.contentHash &&
-                existingChunkCount > 0
-            ) {
-                if (existing.headings == null || existing.documentDate == null) {
-                    documentDao.update(
-                        existing.copy(
-                            headings = existing.headings
-                                ?: JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
-                            firstParagraph = existing.firstParagraph
-                                ?: MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
-                            tags = existing.tags
-                                ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
-                            documentDate = existing.documentDate
-                                ?: extractDateFromPath(mdFile.relativePath)
-                                ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
-                        )
-                    )
+                val existing = existingDocs[mdFile.uri.toString()]
+                var existingChunkCount = 0
+                if (existing != null && existing.contentHash == mdFile.contentHash) {
+                    existingChunkCount = chunkCountsMap[existing.id] ?: 0
                 }
-                totalChunks += existingChunkCount
-                return@forEachIndexed
-            }
 
-            if (existing != null) {
-                deleteFtsByDoc(existing.id)
-                chunkDao.deleteByDoc(existing.id)
-            }
+                if (existing != null && existing.contentHash == mdFile.contentHash &&
+                    existingChunkCount > 0
+                ) {
+                    if (existing.headings == null || existing.documentDate == null) {
+                        docsToUpdate.add(
+                            existing.copy(
+                                headings = existing.headings
+                                    ?: JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
+                                firstParagraph = existing.firstParagraph
+                                    ?: MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
+                                tags = existing.tags
+                                    ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+                                documentDate = existing.documentDate
+                                    ?: extractDateFromPath(mdFile.relativePath)
+                                    ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
+                            )
+                        )
+                    }
+                    totalChunks += existingChunkCount
+                    return@forEachIndexed
+                }
 
-            val docId = documentDao.insert(
-                DocumentEntity(
+                if (existing != null) {
+                    docsToDelete.add(existing.id)
+                }
+
+                val newDoc = DocumentEntity(
                     id = existing?.id ?: 0,
                     treeUri = treeUri.toString(),
                     fileUri = mdFile.uri.toString(),
@@ -153,27 +163,57 @@ class DocumentRepository(
                     documentDate = extractDateFromPath(mdFile.relativePath)
                         ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
                 )
-            )
 
-            val rawChunks = MarkdownChunker.chunk(mdFile.content, mdFile.relativePath)
-            val chunkEntities = rawChunks.mapNotNull { chunk ->
-                runCatching {
-                    val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
-                    ChunkEntity(
-                        docId = docId,
-                        headingPath = chunk.headingPath,
-                        text = chunk.text,
-                        embedding = EmbedderService.floatArrayToBytes(embedding),
-                    )
-                }.onFailure { e ->
-                    Timber.tag("DocumentRepository").e(e, "embed failed: ${mdFile.relativePath} / ${chunk.headingPath}")
-                }.getOrNull()
+                pendingDocs.add(PendingDoc(newDoc, mdFile))
             }
 
-                val ids = chunkDao.insertAll(chunkEntities)
-                insertFts(ftsStmt, ids, chunkEntities)
-                totalChunks += chunkEntities.size
+            // Update unchanged docs that needed metadata refresh
+            if (docsToUpdate.isNotEmpty()) {
+                documentDao.updateAll(docsToUpdate)
             }
+
+            // Delete old FTS and Chunks
+            if (docsToDelete.isNotEmpty()) {
+                docsToDelete.chunked(900).forEach { batch ->
+                    deleteFtsByDocIds(batch)
+                    chunkDao.deleteByDocIds(batch)
+                }
+            }
+
+            // Insert new docs
+            val docsToInsertList = pendingDocs.map { it.docEntity }
+            if (docsToInsertList.isNotEmpty()) {
+                val insertedDocIds = documentDao.insertAll(docsToInsertList)
+
+                // Embed and insert chunks using the generated IDs
+                pendingDocs.forEachIndexed { i, pending ->
+                    // Emit progress state during the heavy embedding phase
+                    _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
+
+                    val docId = insertedDocIds[i]
+                    val rawChunks = MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
+                    val chunkEntities = rawChunks.mapNotNull { chunk ->
+                        runCatching {
+                            val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
+                            ChunkEntity(
+                                docId = docId,
+                                headingPath = chunk.headingPath,
+                                text = chunk.text,
+                                embedding = EmbedderService.floatArrayToBytes(embedding),
+                            )
+                        }.onFailure { e ->
+                            Timber.tag("DocumentRepository").e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
+                        }.getOrNull()
+                    }
+
+                    if (chunkEntities.isNotEmpty()) {
+                        val chunkIds = chunkDao.insertAll(chunkEntities)
+                        insertFts(ftsStmt, chunkIds, chunkEntities)
+                        totalChunks += chunkEntities.size
+                    }
+                }
+            }
+
         } finally {
             ftsStmt.close()
         }
@@ -302,10 +342,12 @@ class DocumentRepository(
         }
     }
 
-    private fun deleteFtsByDoc(docId: Long) {
+    private fun deleteFtsByDocIds(docIds: List<Long>) {
+        if (docIds.isEmpty()) return
+        val placeholders = docIds.joinToString(",") { "?" }
         db.openHelper.writableDatabase.execSQL(
-            "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE docId = ?)",
-            arrayOf(docId)
+            "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE docId IN ($placeholders))",
+            docIds.toTypedArray()
         )
     }
 

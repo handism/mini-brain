@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import androidx.sqlite.db.SupportSQLiteQuery
 
 class SearchRequestCacheTest {
 
@@ -42,7 +41,10 @@ class SearchRequestCacheTest {
         override suspend fun getByFileUri(fileUri: String): DocumentEntity? = null
         override suspend fun insert(doc: DocumentEntity): Long = 0L
         override suspend fun update(doc: DocumentEntity) {}
+    override suspend fun insertAll(docs: List<DocumentEntity>): List<Long> = emptyList()
+    override suspend fun updateAll(docs: List<DocumentEntity>) {}
         override suspend fun deleteAllByTree(treeUri: String) {}
+
         override suspend fun deleteByFileUri(fileUri: String) {}
         override suspend fun getById(id: Long): DocumentEntity? = null
         override suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity> = emptyList()
@@ -52,7 +54,6 @@ class SearchRequestCacheTest {
         override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = emptyList()
         override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = emptyList()
         override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = emptyList()
-        override suspend fun findByMetadataRaw(query: SupportSQLiteQuery): List<DocumentEntity> = emptyList()
         override suspend fun getMinimalByTree(treeUri: String): List<com.minibrain.data.db.daos.DocumentMinimal> = emptyList()
     }
 
@@ -75,8 +76,11 @@ class SearchRequestCacheTest {
         override fun observeCountByTree(treeUri: String): Flow<Int> = kotlinx.coroutines.flow.flowOf(0)
         override suspend fun count(): Int = 0
         override suspend fun deleteByDoc(docId: Long) {}
+        override suspend fun deleteByDocIds(docIds: List<Long>) {}
         override suspend fun deleteAllByTree(treeUri: String) {}
-        override suspend fun bm25SearchRaw(query: SupportSQLiteQuery): List<ChunkEntity> = emptyList()
+
+        override suspend fun bm25Search(matchQuery: String, limit: Int): List<ChunkEntity> = emptyList()
+        override suspend fun bm25SearchByTree(matchQuery: String, treeUri: String, limit: Int): List<ChunkEntity> = emptyList()
         override fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity> = emptyList()
     }
 

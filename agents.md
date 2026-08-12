@@ -1,7 +1,14 @@
-# agents.md (Antigravity AI Agent Rules)
+# agents.md (AI Agent Rules)
 
-このファイルは、Google DeepMind の AI コーディングアシスタント **Antigravity** 向けに、プロジェクトの技術仕様、ビルド・実行コマンド、設計の制約、および注意事項をまとめたものです。
-Antigravity はコードの変更、テストの実行、リファクタリングなどを行う際に、常にこのファイルを最優先で参照してください。
+このファイルは、AI コーディングエージェント（Google DeepMind の **Antigravity**、Anthropic の **Claude Code** など）向けに、プロジェクトの技術仕様、ビルド・実行コマンド、設計の制約、および注意事項をまとめたものです。
+エージェントはコードの変更、テストの実行、リファクタリングなどを行う際に、常にこのファイルを最優先で参照してください。
+
+> **エージェント設定ファイルの配置方針**: 実体はすべて `.agents/` 配下（またはリポジトリルート）に置き、`.claude/` 側は symlink とします。実体が 1 つなのでツールごとの内容ズレが起きません。
+>
+> - `CLAUDE.md` → `AGENTS.md`（このファイル）への symlink
+> - `.claude/skills/<name>` → `../../.agents/skills/<name>` への symlink
+>
+> スキルを追加する場合は `.agents/skills/<name>/SKILL.md` に実体を作り、`.claude/skills/` から symlink を張ってください。
 
 ---
 
@@ -151,8 +158,7 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 | ドキュメントファイル | 更新が必要となる変更 |
 | --- | --- |
 | [ADR.md](ADR.md) | アーキテクチャ上の重要な意思決定、検索アルゴリズムの再編、新ツールの追加など。新規決定は末尾に追記し、古い決定は「廃止」等のステータスに更新する。 |
-| [agents.md](agents.md) | **(このファイル)** Antigravity 向けの指示、ファイル構成、制約事項、検索フローの更新等。コードと食い違った場合は直ちに修正する。 |
-| [CLAUDE.md](.claude/CLAUDE.md) | Claude Code 向けのビルドコマンド、制約、よく変更するファイルの更新等。 |
+| [agents.md](agents.md) | **(このファイル)** Antigravity / Claude Code 共通の指示、ファイル構成、制約事項、検索フローの更新等。コードと食い違った場合は直ちに修正する。ルート直下の `CLAUDE.md` はこのファイルへの symlink であり、実体は 1 つ。 |
 | [README.md](README.md) | ユーザー向けの特徴、機能概要、画面イメージ、インストール方法の更新等。 |
 
 ---
@@ -174,3 +180,47 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 
 ### 7.3 ReAct DSL
 - ReAct ループで Planner LLM が出力するツール命令は、JVM 上でのユニットテスト実行の互換性を担保するため、**JSON ではなく独自の DSL 形式（key:value）** を用います。
+- `buildPlannerHint` は 期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致 の順に解析して hint を構築します。
+
+### 7.4 実装上の詳細な制約（定数・regression 対策）
+
+変更時に壊れやすい箇所です。値を変える場合は必ず対応するテスト・呼び出し元も更新してください。
+
+**キャッシュ・パフォーマンス**
+- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `buildPlannerHint` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
+- `SearchPipeline.multiVectorSearch` は Embedder の `Mutex` により実質直列で走ります（並列ではない）。サブクエリ N 件 ≒ 30ms × N の追加コスト。embed 前に 元クエリ + 展開クエリ + HyDE を正規化 + distinct してから embed し、同一テキストへの重複 embed を排除します。
+
+**チューニング定数**
+- `mergeCandidatesRrf(weights=...)` の重みは `[meta=1.5, vector=1.0, bm25=1.2]`。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新すること。
+- `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新すること。
+- `SearchPipeline.search` は `dateRange != null` かつ `dateRangeSearch` ヒットありのとき、上位 `DATE_RANGE_PIN_COUNT = 5` 件を Reranker 結果の先頭に強制マージします（ADR-025）。`docId::headingPath` で dedupe し、後段は Reranker 順を維持、最終的に `RERANK_TOP_K = 10` で切ります。`RRF_WEIGHTS` は変更しません（他クエリの順位を壊さないため）。
+- `dateRangeSearch` のスニペットは `firstParagraph`（200 字）ではなく **doc の先頭 chunk テキストから `DATE_RANGE_SNIPPET_CHARS = 600` 字** を採ります（ADR-025）。chunk が空の場合のみ `firstParagraph` フォールバック。スニペットが薄すぎて LLM が「具体的な内容が記載されていません」と返す問題への対処です。
+- `SearchPipeline.metadataSearch` は `topicMatch` ヒットだけ `TOPIC_MATCH_SNIPPET_CHARS = 500` で先頭 chunk テキストを採ります（ADR-026）。「初回訪問日:」ラベル行や本文 `YYYY/MM/DD` を 200 字の firstParagraph から漏らさないためです。chunks のロードは topicMatch がある場合のみ lazy で 1 回。
+
+**日付抽出の詳細**
+- `DocumentRepository.Companion.extractDateFromPath` は 完全日付（`YYYY[-/_.]MM[-/_.]DD` / `YYYY年MM月DD日` / 8桁 `YYYYMMDD`）と 月のみ（`YYYY-MM` / `YYYY年MM月` / 6桁 `YYYYMM`）の両方を抽出します。月のみは月初 1 日（`YYYY-MM-01`）として登録。**完全日付 → 月のみの順を厳守**し、`LocalDate.of` の validity + 年が `1990..今年` の範囲チェックで誤マッチを弾きます。`@VisibleForTesting` で JVM テストから直接呼べます（ADR-025）。
+- `MarkdownMetaExtractor.extractDateFromContent` の YAML frontmatter ラベルは `date / created / published / updated / 日付 / 作成日 / 記録日`（IGNORE_CASE、`'"` クォート可）。**和暦パターン（`YYYY年MM月DD日` / `YYYY年MM月`）は見出し限定**で検出します — 本文中のカジュアルな言及で誤って `documentDate` が付くと Reranker の競合候補が増えて固有名詞ファイルが押し出される regression が起きるためです。Western 形式（`YYYY-MM-DD` / `YYYY/MM/DD`）は従来通り本文全行を走査します。
+
+**トピックマッチと短絡判定（ADR-026）**
+- `Citation.topicMatch: Boolean` は `SearchPipeline.metadataSearch` でファイル名 stem が query の substring として一致したヒットだけ true。RRF 融合は metaCandidates を先頭に置く既存挙動と `mergeCandidatesRrf` の first-wins により後段まで保持されます。
+- `LlmReranker` は候補プロンプトに `topic=match` タグを出し、「いつ」クエリでは date フィールド優先と並んで topic=match 候補も上位に残すよう指示します。date 欄が空の固有名詞ファイルが押し出される回路を塞ぐためです。
+- `CoverageChecker.check` は (1) 日付クエリ + `[日付:]` プレフィックス → 短絡 yes、(2) 日付クエリ + `topicMatch=true` 候補 → 短絡 yes、の 2 段で LLM 呼び出しを省きます。**topic match 短絡が無いと固有名詞ヒットが「no, visit_date」でリセットされて ReAct に落ちる事故が起きます。**
+
+**回答プロンプトへの日付指示**
+- `AgentPipeline.buildAnswerPrompt` は `dateRange != null` のとき、期間（start〜end）と「日付を拾う優先順位 3 段」の照合指示を context block 直後に差し込みます（ADR-025 + ADR-026）。`citations` に日付プレフィックス付きが 1 件もない場合は「`[日付:]` 付きは無いが本文ラベル / 表記を期間と照合せよ」というフェールセーフ文に切り替えます。
+- `dateRange == null` でも `DATE_QUERY_REGEX`（`いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで`）にマッチすれば「日付に関する質問」ブロックを差し込み、同じ 3 段優先順位で本文から日付を拾うよう LLM に指示します（ADR-026）。固有名詞 +「いつ」クエリ（例:「サウナしきじにいつ行ったっけ」）で `documentDate` が無くても本文中の「初回訪問日: 2022/01/01」を回答に乗せられます。
+
+### 7.5 DB マイグレーション運用
+- 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は、次回の差分インデックス時に自動補完されます。強制的に補完したい場合は Settings → 再インデックスを実行します。
+
+---
+
+## 8. モデルファイルのパス
+
+```
+context.filesDir/models/gemma-4-E2B-it.litertlm        # LLM（約 2.5 GB）
+context.filesDir/models/multilingual-e5-small-q.onnx   # Embedder（INT8 量子化、約 118 MB）
+context.filesDir/models/e5-tokenizer.json              # XLM-RoBERTa SentencePiece tokenizer（約 17 MB）
+```
+
+モデルは `ModelDownloader` が Range リクエスト対応でダウンロードし、レジュームをサポートします。

@@ -1,6 +1,5 @@
 package com.minibrain.ai.agent.tools
 
-import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.AgentTool
 import com.minibrain.ai.agent.ToolCall
 import com.minibrain.ai.agent.ToolResult
@@ -179,16 +178,8 @@ class ToolExecutor(
 
         val rawChunks = withContext(Dispatchers.IO) {
             runCatching {
-                chunkDao.bm25SearchRaw(
-                    SimpleSQLiteQuery(
-                        """SELECT chunks.* FROM chunks_fts
-                           JOIN chunks ON chunks_fts.rowid = chunks.id
-                           WHERE chunks_fts MATCH ?
-                           LIMIT 50""",
-                        arrayOf<Any?>(matchQuery),
-                    )
-                )
-            }.onFailure { Timber.tag(TAG).w(it, "bm25SearchRaw failed for query: $matchQuery") }
+                chunkDao.bm25Search(matchQuery, 50)
+            }.onFailure { Timber.tag(TAG).w(it, "bm25Search failed for query: $matchQuery") }
              .getOrElse { emptyList() }
         }
 
@@ -309,9 +300,7 @@ class ToolExecutor(
         val cachedChunksList = cache.chunkVectors().first
         val chunksByDoc = HashMap<Long, String>()
         for (chunk in cachedChunksList) {
-            if (chunk.docId !in chunksByDoc) {
-                chunksByDoc[chunk.docId] = chunk.text
-            }
+            chunksByDoc.putIfAbsent(chunk.docId, chunk.text)
         }
         for (doc in docs) {
             val snippet = chunksByDoc[doc.id] ?: doc.firstParagraph ?: ""
