@@ -175,8 +175,14 @@ class DocumentRepository(
             // Delete old FTS and Chunks
             if (docsToDelete.isNotEmpty()) {
                 docsToDelete.chunked(900).forEach { batch ->
-                    deleteFtsByDocIds(batch)
-                    chunkDao.deleteByDocIds(batch)
+                    writableDb.beginTransaction()
+                    try {
+                        deleteFtsByDocIds(batch)
+                        chunkDao.deleteByDocIds(batch)
+                        writableDb.setTransactionSuccessful()
+                    } finally {
+                        writableDb.endTransaction()
+                    }
                 }
             }
 
@@ -210,18 +216,30 @@ class DocumentRepository(
 
                     chunkBuffer.addAll(chunkEntities)
 
-                    // Flush buffer to DB to avoid high memory pressure (OOM)
+                    // Flush buffer to DB in a single SQLite transaction to avoid high memory pressure (OOM) and auto-commits
                     if (chunkBuffer.size >= 900) {
-                        val chunkIds = chunkDao.insertAll(chunkBuffer)
-                        insertFts(ftsStmt, chunkIds, chunkBuffer)
+                        writableDb.beginTransaction()
+                        try {
+                            val chunkIds = chunkDao.insertAll(chunkBuffer)
+                            insertFts(ftsStmt, chunkIds, chunkBuffer)
+                            writableDb.setTransactionSuccessful()
+                        } finally {
+                            writableDb.endTransaction()
+                        }
                         totalChunks += chunkBuffer.size
                         chunkBuffer.clear()
                     }
                 }
 
                 if (chunkBuffer.isNotEmpty()) {
-                    val chunkIds = chunkDao.insertAll(chunkBuffer)
-                    insertFts(ftsStmt, chunkIds, chunkBuffer)
+                    writableDb.beginTransaction()
+                    try {
+                        val chunkIds = chunkDao.insertAll(chunkBuffer)
+                        insertFts(ftsStmt, chunkIds, chunkBuffer)
+                        writableDb.setTransactionSuccessful()
+                    } finally {
+                        writableDb.endTransaction()
+                    }
                     totalChunks += chunkBuffer.size
                 }
             }
@@ -246,6 +264,8 @@ class DocumentRepository(
             documentDao.getByFileUris(chunk)
         }.associateBy { it.fileUri }
 
+        val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
+
         for ((folderPath, files) in byFolder) {
             val fileUris = files.map { it.uri.toString() }
             val allDocs = fileUris.mapNotNull { allDocsMap[it] }
@@ -267,7 +287,7 @@ class DocumentRepository(
 
             runCatching {
                 val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
-                folderEmbeddingDao.upsert(
+                folderEmbeddings.add(
                     FolderEmbeddingEntity(
                         path = folderPath,
                         treeUri = treeUri.toString(),
@@ -275,6 +295,10 @@ class DocumentRepository(
                     )
                 )
             }
+        }
+
+        if (folderEmbeddings.isNotEmpty()) {
+            folderEmbeddingDao.upsertAll(folderEmbeddings)
         }
     }
 
