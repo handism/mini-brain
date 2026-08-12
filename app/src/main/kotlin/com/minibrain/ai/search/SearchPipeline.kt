@@ -117,7 +117,9 @@ class SearchPipeline(
             // EmbedderService は Mutex で直列化されるため、ここを async にしても並列実行はされないが、
             // 他ジョブ（BM25 / metadata）とは並列に走る。低スコアの候補は閾値カットで除外する。
             val vectorJob = async(Dispatchers.IO) {
-                multiVectorSearch(query, expanded, hypothetical, treeUri, ctx)
+                multiVectorSearch(
+                    MultiVectorSearchRequest(query, expanded, hypothetical, treeUri, ctx)
+                )
             }
             Triple(bm25Job.await(), metaJob.await(), vectorJob.await())
         }
@@ -239,16 +241,20 @@ class SearchPipeline(
             emptyList()
         }
 
+    private data class MultiVectorSearchRequest(
+        val originalQuery: String,
+        val expanded: List<String>,
+        val hypothetical: String?,
+        val treeUri: String,
+        val ctx: SearchRequestCache,
+    )
+
     // 元クエリ + 展開クエリ + HyDE 仮想回答でベクトル検索を実行する。
     // R4: 同一テキストへの embed を防ぐため、まず正規化 + distinct でユニークなクエリ集合を作る。
     // 主クエリ（先頭）を VECTOR_LIMIT、それ以降を VECTOR_LIMIT_PER_EXPANDED の枠で検索し、
     // (docId, headingPath) で重複排除する。
     private suspend fun multiVectorSearch(
-        originalQuery: String,
-        expanded: List<String>,
-        hypothetical: String?,
-        treeUri: String,
-        ctx: SearchRequestCache,
+        request: MultiVectorSearchRequest
     ): List<Citation> {
         val ordered = LinkedHashSet<String>()
         fun addIfValid(s: String?) {
@@ -256,15 +262,15 @@ class SearchPipeline(
             val normalized = s.trim().replace(WHITESPACE_NORMALIZE_REGEX, " ")
             if (normalized.isNotEmpty()) ordered.add(normalized)
         }
-        addIfValid(originalQuery)
-        expanded.forEach(::addIfValid)
-        addIfValid(hypothetical)
+        addIfValid(request.originalQuery)
+        request.expanded.forEach(::addIfValid)
+        addIfValid(request.hypothetical)
 
         val seen = HashSet<String>()
         val out = mutableListOf<Citation>()
         ordered.forEachIndexed { idx, q ->
             val k = if (idx == 0) VECTOR_LIMIT else VECTOR_LIMIT_PER_EXPANDED
-            vectorSearch(q, treeUri, k = k, ctx = ctx).forEach { c ->
+            vectorSearch(q, request.treeUri, k = k, ctx = request.ctx).forEach { c ->
                 if (seen.add(c.dedupeKey)) out += c
             }
         }
