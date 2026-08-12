@@ -227,7 +227,7 @@ class ChatViewModel(
 
     private fun parseCitations(json: String): List<Citation> = runCatching {
         val arr = JSONArray(json)
-        (0 until arr.length()).map { i ->
+        List(arr.length()) { i ->
             val obj = arr.getJSONObject(i)
             Citation(
                 headingPath = obj.getString("headingPath"),

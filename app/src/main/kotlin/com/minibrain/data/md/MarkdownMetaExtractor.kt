@@ -22,23 +22,27 @@ object MarkdownMetaExtractor {
         HEADING_REGEX.findAll(markdown).map { it.groupValues[1].trim() }.toList()
 
     fun extractFirstParagraph(markdown: String, maxChars: Int = 200): String {
-        val lines = markdown.lines()
+        val lineSeq = markdown.lineSequence().iterator()
+        if (!lineSeq.hasNext()) return ""
+
+        var firstLine = lineSeq.next()
         val sb = StringBuilder()
-        var i = 0
 
         // skip YAML frontmatter
-        if (lines.firstOrNull()?.trim() == "---") {
-            i = 1
-            while (i < lines.size) {
-                val trimmed = lines[i].trim()
-                i++
+        if (firstLine.trim() == "---") {
+            while (lineSeq.hasNext()) {
+                val trimmed = lineSeq.next().trim()
                 if (trimmed == "---" || trimmed == "...") break
+            }
+        } else {
+            val line = firstLine.trim()
+            if (line.isNotEmpty() && !line.startsWith("#") && !line.startsWith("!")) {
+                sb.append(line).append(" ")
             }
         }
 
-        while (i < lines.size && sb.length < maxChars) {
-            val line = lines[i].trim()
-            i++
+        while (lineSeq.hasNext() && sb.length < maxChars) {
+            val line = lineSeq.next().trim()
             if (line.isEmpty()) {
                 if (sb.isNotEmpty()) break
                 continue
@@ -55,7 +59,6 @@ object MarkdownMetaExtractor {
         TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct().toList()
 
     fun extractDateFromContent(content: String): String? {
-        val lines = content.lines()
         val today = LocalDate.now()
 
         fun safeDate(y: String, m: String, d: String): String? = runCatching {
@@ -69,9 +72,10 @@ object MarkdownMetaExtractor {
         }.getOrNull()
 
         // 1. YAML frontmatter の date 系フィールド
-        if (lines.firstOrNull()?.trim() == "---") {
-            for (line in lines.drop(1)) {
-                val t = line.trim()
+        val lineSeq = content.lineSequence().iterator()
+        if (lineSeq.hasNext() && lineSeq.next().trim() == "---") {
+            while (lineSeq.hasNext()) {
+                val t = lineSeq.next().trim()
                 if (t == "---" || t == "...") break
                 YAML_DATE_REGEX.find(t)?.destructured?.let { (y, m, d) ->
                     safeDate(y, m, d)?.let { return it }
@@ -80,20 +84,16 @@ object MarkdownMetaExtractor {
         }
 
         // 2. 「ラベル: YYYY/MM/DD」形式の行
-        // 3. 本文中の最初の YYYY/MM/DD または YYYY-MM-DD（1990〜今日の範囲のみ）
-        var firstBodyDate: String? = null
-        for (line in lines) {
-            LABELED_DATE_REGEX.find(line)?.destructured?.let { (y, m, d) ->
-                safeDate(y, m, d)?.let { return it }
-            }
-            if (firstBodyDate == null) {
-                BODY_DATE_REGEX.find(line)?.destructured?.let { (y, m, d) ->
-                    safeDate(y, m, d)?.let { firstBodyDate = it }
-                }
-            }
-        }
+        LABELED_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
+            val (y, m, d) = it.destructured
+            safeDate(y, m, d)
+        }?.let { return it }
 
-        firstBodyDate?.let { return it }
+        // 3. 本文中の最初の YYYY/MM/DD または YYYY-MM-DD（1990〜今日の範囲のみ）
+        BODY_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
+            val (y, m, d) = it.destructured
+            safeDate(y, m, d)
+        }?.let { return it }
 
         // 4. 見出し中の YYYY年MM月DD日 / YYYY年MM月
         // ※ 本文全行を走査すると「2024年5月に行った」のようなカジュアル言及にも反応し、
