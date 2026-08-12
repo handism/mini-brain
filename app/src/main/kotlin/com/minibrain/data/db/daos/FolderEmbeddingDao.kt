@@ -11,6 +11,9 @@ interface FolderEmbeddingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: FolderEmbeddingEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entities: List<FolderEmbeddingEntity>)
+
     @Query("SELECT * FROM folder_embeddings WHERE treeUri = :treeUri")
     suspend fun getAllByTree(treeUri: String): List<FolderEmbeddingEntity>
 

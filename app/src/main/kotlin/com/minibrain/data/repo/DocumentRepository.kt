@@ -175,8 +175,14 @@ class DocumentRepository(
             // Delete old FTS and Chunks
             if (docsToDelete.isNotEmpty()) {
                 docsToDelete.chunked(900).forEach { batch ->
-                    deleteFtsByDocIds(batch)
-                    chunkDao.deleteByDocIds(batch)
+                    writableDb.beginTransaction()
+                    try {
+                        deleteFtsByDocIds(batch)
+                        chunkDao.deleteByDocIds(batch)
+                        writableDb.setTransactionSuccessful()
+                    } finally {
+                        writableDb.endTransaction()
+                    }
                 }
             }
 
@@ -185,7 +191,9 @@ class DocumentRepository(
             if (docsToInsertList.isNotEmpty()) {
                 val insertedDocIds = documentDao.insertAll(docsToInsertList)
 
-                // Embed and insert chunks using the generated IDs
+                val chunkBuffer = mutableListOf<ChunkEntity>()
+
+                // Embed and collect chunks using the generated IDs
                 pendingDocs.forEachIndexed { i, pending ->
                     // Emit progress state during the heavy embedding phase
                     _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
@@ -206,11 +214,33 @@ class DocumentRepository(
                         }.getOrNull()
                     }
 
-                    if (chunkEntities.isNotEmpty()) {
-                        val chunkIds = chunkDao.insertAll(chunkEntities)
-                        insertFts(ftsStmt, chunkIds, chunkEntities)
-                        totalChunks += chunkEntities.size
+                    chunkBuffer.addAll(chunkEntities)
+
+                    // Flush buffer to DB in a single SQLite transaction to avoid high memory pressure (OOM) and auto-commits
+                    if (chunkBuffer.size >= 900) {
+                        writableDb.beginTransaction()
+                        try {
+                            val chunkIds = chunkDao.insertAll(chunkBuffer)
+                            insertFts(ftsStmt, chunkIds, chunkBuffer)
+                            writableDb.setTransactionSuccessful()
+                        } finally {
+                            writableDb.endTransaction()
+                        }
+                        totalChunks += chunkBuffer.size
+                        chunkBuffer.clear()
                     }
+                }
+
+                if (chunkBuffer.isNotEmpty()) {
+                    writableDb.beginTransaction()
+                    try {
+                        val chunkIds = chunkDao.insertAll(chunkBuffer)
+                        insertFts(ftsStmt, chunkIds, chunkBuffer)
+                        writableDb.setTransactionSuccessful()
+                    } finally {
+                        writableDb.endTransaction()
+                    }
+                    totalChunks += chunkBuffer.size
                 }
             }
 
@@ -234,6 +264,8 @@ class DocumentRepository(
             documentDao.getByFileUris(chunk)
         }.associateBy { it.fileUri }
 
+        val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
+
         for ((folderPath, files) in byFolder) {
             val fileUris = files.map { it.uri.toString() }
             val allDocs = fileUris.mapNotNull { allDocsMap[it] }
@@ -242,7 +274,7 @@ class DocumentRepository(
                 doc.headings?.let { json ->
                     runCatching {
                         val arr = org.json.JSONArray(json)
-                        (0 until arr.length()).map { i -> arr.getString(i) }
+                        List(arr.length()) { i -> arr.getString(i) }
                     }.getOrElse { emptyList() }
                 } ?: emptyList()
             }.take(10).toList()
@@ -255,7 +287,7 @@ class DocumentRepository(
 
             runCatching {
                 val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
-                folderEmbeddingDao.upsert(
+                folderEmbeddings.add(
                     FolderEmbeddingEntity(
                         path = folderPath,
                         treeUri = treeUri.toString(),
@@ -263,6 +295,10 @@ class DocumentRepository(
                     )
                 )
             }
+        }
+
+        if (folderEmbeddings.isNotEmpty()) {
+            folderEmbeddingDao.upsertAll(folderEmbeddings)
         }
     }
 
