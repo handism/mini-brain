@@ -84,7 +84,7 @@ object MarkdownChunker {
         var inCode = false
         var blanks = 0
 
-        for (line in body.lines()) {
+        for (line in body.lineSequence()) {
             if (line.trimStart().startsWith("```")) inCode = !inCode
 
             when {
