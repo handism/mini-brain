@@ -86,4 +86,25 @@ class GlobMatcherTest {
         assertTrue(GlobMatcher.matches("file[name].txt", "file[name].txt"))
         assertFalse(GlobMatcher.matches("file[name].txt", "filen.txt"))
     }
+
+    @Test
+    fun testDoubleAsteriskLeading() {
+        assertTrue(GlobMatcher.matches("**/file.txt", "file.txt"))
+        assertTrue(GlobMatcher.matches("**/file.txt", "a/b/file.txt"))
+        assertFalse(GlobMatcher.matches("**/file.txt", "a/b/file.md"))
+    }
+
+    @Test
+    fun testIntermediateWildcard() {
+        assertTrue(GlobMatcher.matches("dir/*/*.kt", "dir/sub/Main.kt"))
+        assertFalse(GlobMatcher.matches("dir/*/*.kt", "dir/sub/deep/Main.kt"))
+    }
+
+    @Test
+    fun testGlobToRegexDirect() {
+        val regex = GlobMatcher.globToRegex("*.kt")
+        assertTrue(regex.matches("Test.kt"))
+        assertFalse(regex.matches("Test.java"))
+    }
 }
+
