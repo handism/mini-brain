@@ -44,8 +44,7 @@ class QueryExpander(private val llmService: LlmService) {
         }
 
         val parsed = parseJsonArray(sb.toString())
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+            .mapNotNull { it.trim().ifBlank { null } }
             .distinct()
 
         // 元クエリが含まれていない場合は先頭に追加
