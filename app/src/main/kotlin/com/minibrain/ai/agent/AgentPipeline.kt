@@ -288,16 +288,17 @@ $body
         }
     }
 
-    private fun buildTemporalInstruction(question: String, citations: List<Citation>, dateRange: DateRange?): String {
+    private fun buildTemporalInstruction(context: AnswerContext): String {
         // 日付関連の指示。dateRange があれば期間照合、無くても「いつ」系クエリなら本文中の日付を
         // 拾うよう誘導する（ADR-026）。snippet から日付を抽出する優先順位は次の通り:
         //   1. `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みの documentDate）
         //   2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
         //   3. 本文中の YYYY/MM/DD / YYYY-MM-DD / YYYY年MM月DD日 表記
-        val isDateQuery = DateResolver.isDateQuery(question)
+        val isDateQuery = DateResolver.isDateQuery(context.question)
+        val dateRange = context.dateRange
         return when {
             dateRange != null -> {
-                val hasDated = citations.any { it.snippet.trimStart().startsWith("[日付:") }
+                val hasDated = context.citations.any { it.snippet.trimStart().startsWith("[日付:") }
                 if (hasDated) {
                     """
 【期間クエリの解釈】
@@ -355,7 +356,7 @@ $body
         context: AnswerContext
     ): String {
         val contextBlock = buildContextBlock(context.citations)
-        val temporalInstruction = buildTemporalInstruction(context.question, context.citations, context.dateRange)
+        val temporalInstruction = buildTemporalInstruction(context)
         val historyBlock = buildHistoryBlock(context.history)
 
         val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
