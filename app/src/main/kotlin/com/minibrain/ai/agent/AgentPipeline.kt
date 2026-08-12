@@ -89,7 +89,8 @@ class AgentPipeline(
         }
 
         onStatus?.invoke("")
-        val answerFlow = llmService.generateStream(buildAnswerPrompt(question, citations, recentHistory, dateRange))
+        val answerContext = AnswerContext(question, citations, recentHistory, dateRange)
+        val answerFlow = llmService.generateStream(buildAnswerPrompt(answerContext))
         AgentResult(citations, answerFlow, traceEvents)
     }
 
@@ -211,7 +212,7 @@ class AgentPipeline(
                 val notFound = mutableListOf<String>()
                 // パスの正規化 (スラッシュとハイフンを除外) をループ外で一度だけ行うことで高速化
                 val normalizedDocs = allDocs.map { doc ->
-                    doc to doc.relativePath.replace("/", "").replace("-", "")
+                    doc to doc.relativePath.filter { c -> c != '/' && c != '-' }
                 }
                 for (date in dates) {
                     // 区切り文字を除いた8桁数字 (YYYYMMDD) でパスを検索
@@ -287,16 +288,17 @@ $body
         }
     }
 
-    private fun buildTemporalInstruction(question: String, citations: List<Citation>, dateRange: DateRange?): String {
+    private fun buildTemporalInstruction(context: AnswerContext): String {
         // 日付関連の指示。dateRange があれば期間照合、無くても「いつ」系クエリなら本文中の日付を
         // 拾うよう誘導する（ADR-026）。snippet から日付を抽出する優先順位は次の通り:
         //   1. `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みの documentDate）
         //   2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
         //   3. 本文中の YYYY/MM/DD / YYYY-MM-DD / YYYY年MM月DD日 表記
-        val isDateQuery = DateResolver.isDateQuery(question)
+        val isDateQuery = DateResolver.isDateQuery(context.question)
+        val dateRange = context.dateRange
         return when {
             dateRange != null -> {
-                val hasDated = citations.any { it.snippet.trimStart().startsWith("[日付:") }
+                val hasDated = context.citations.any { it.snippet.trimStart().startsWith("[日付:") }
                 if (hasDated) {
                     """
 【期間クエリの解釈】
@@ -343,18 +345,22 @@ $body
         return "${historyBlock}ユーザー: $question\nアシスタント:"
     }
 
+    private data class AnswerContext(
+        val question: String,
+        val citations: List<Citation>,
+        val history: List<Pair<String, String>>,
+        val dateRange: DateRange? = null,
+    )
+
     private fun buildAnswerPrompt(
-        question: String,
-        citations: List<Citation>,
-        history: List<Pair<String, String>>,
-        dateRange: DateRange? = null,
+        context: AnswerContext
     ): String {
-        val contextBlock = buildContextBlock(citations)
-        val temporalInstruction = buildTemporalInstruction(question, citations, dateRange)
-        val historyBlock = buildHistoryBlock(history)
+        val contextBlock = buildContextBlock(context.citations)
+        val temporalInstruction = buildTemporalInstruction(context)
+        val historyBlock = buildHistoryBlock(context.history)
 
         val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
-        return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: $question\nアシスタント:"
+        return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: ${context.question}\nアシスタント:"
     }
 
     // observation スライディングウィンドウ: 最新2件を full(詳細)、それ以前を compact(要約)に保つ

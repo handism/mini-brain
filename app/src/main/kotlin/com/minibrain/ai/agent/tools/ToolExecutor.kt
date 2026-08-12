@@ -228,8 +228,7 @@ class ToolExecutor(
             val (chunks, vectors) = cache.chunkVectors()
             val docsMap = cache.documents().associateBy { it.id }
             val validDocIds = docsMap.values
-                .filter { it.relativePath.startsWith(tool.scope) }
-                .map { it.id }
+                .mapNotNull { if (it.relativePath.startsWith(tool.scope)) it.id else null }
                 .toSet()
             val filteredCandidates = ArrayList<Pair<FloatArray, com.minibrain.data.db.entities.ChunkEntity>>()
             for (i in chunks.indices) {
@@ -328,7 +327,7 @@ class ToolExecutor(
 
     private fun parseJsonArray(json: String): List<String> = runCatching {
         val arr = JSONArray(json)
-        (0 until arr.length()).map { i -> arr.getString(i) }
+        List(arr.length()) { i -> arr.getString(i) }
     }.onFailure { Timber.tag(TAG).w(it, "parseJsonArray failed: $json") }
      .getOrElse { emptyList() }
 }

@@ -80,8 +80,14 @@ class RagPipeline(
 
             val docPathMap = resolveDocPaths(allDocIds, cache)
 
-            val chunkCitations = rrf(bm25Results, vecResults.map { it.second }, topK, docIdToDate = docIdToDate)
-                .map { (score, chunk) ->
+            val chunkCitations = rrf(
+                RrfParams(
+                    bm25Results = bm25Results,
+                    vecResults = vecResults.map { it.second },
+                    topK = topK,
+                    docIdToDate = docIdToDate,
+                )
+            ).map { (score, chunk) ->
                     Timber.tag("RagPipeline").d("rrf=%.4f path=${chunk.headingPath}".format(score))
                     Citation(
                         headingPath = chunk.headingPath,
@@ -201,26 +207,28 @@ class RagPipeline(
         }
     }
 
-    private fun rrf(
-        bm25Results: List<ChunkEntity>,
-        vecResults: List<ChunkEntity>,
-        topK: Int,
-        k: Int = 60,
-        docIdToDate: Map<Long, LocalDate?> = emptyMap(),
-    ): List<Pair<Float, ChunkEntity>> {
+    private data class RrfParams(
+        val bm25Results: List<ChunkEntity>,
+        val vecResults: List<ChunkEntity>,
+        val topK: Int,
+        val k: Int = 60,
+        val docIdToDate: Map<Long, LocalDate?> = emptyMap(),
+    )
+
+    private fun rrf(params: RrfParams): List<Pair<Float, ChunkEntity>> {
         val fused = RrfFuser.fuse(
-            rankLists = listOf(bm25Results, vecResults),
+            rankLists = listOf(params.bm25Results, params.vecResults),
             keyOf = { it.id },
-            k = k,
+            k = params.k,
         )
         val today = LocalDate.now()
         return fused
             .map { entry ->
-                val boost = freshnessBoost(docIdToDate[entry.item.docId], today)
+                val boost = freshnessBoost(params.docIdToDate[entry.item.docId], today)
                 Pair(entry.score + boost, entry.item)
             }
             .sortedByDescending { it.first }
-            .take(topK)
+            .take(params.topK)
     }
 
     companion object {

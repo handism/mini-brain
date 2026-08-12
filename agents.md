@@ -188,7 +188,7 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 
 **キャッシュ・パフォーマンス**
 - `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `buildPlannerHint` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
-- `SearchPipeline.multiVectorSearch` は Embedder の `Mutex` により実質直列で走ります（並列ではない）。サブクエリ N 件 ≒ 30ms × N の追加コスト。embed 前に 元クエリ + 展開クエリ + HyDE を正規化 + distinct してから embed し、同一テキストへの重複 embed を排除します。
+- `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
 
 **チューニング定数**
 - `mergeCandidatesRrf(weights=...)` の重みは `[meta=1.5, vector=1.0, bm25=1.2]`。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新すること。

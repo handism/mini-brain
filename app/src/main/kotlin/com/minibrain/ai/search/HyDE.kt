@@ -38,8 +38,7 @@ class HyDE(private val llmService: LlmService) {
 
         val cleaned = sb.toString()
             .lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+            .mapNotNull { it.trim().ifBlank { null } }
             .joinToString(" ")
             .take(MAX_CHARS)
         return cleaned.ifBlank { null }
