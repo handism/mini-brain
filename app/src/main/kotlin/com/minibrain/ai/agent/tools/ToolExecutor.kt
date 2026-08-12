@@ -328,7 +328,7 @@ class ToolExecutor(
 
     private fun parseJsonArray(json: String): List<String> = runCatching {
         val arr = JSONArray(json)
-        (0 until arr.length()).map { i -> arr.getString(i) }
+        List(arr.length()) { i -> arr.getString(i) }
     }.onFailure { Timber.tag(TAG).w(it, "parseJsonArray failed: $json") }
      .getOrElse { emptyList() }
 }
