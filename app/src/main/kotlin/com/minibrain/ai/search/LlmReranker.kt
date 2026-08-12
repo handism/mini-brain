@@ -40,8 +40,7 @@ class LlmReranker(private val llmService: LlmService) {
         if (indices.isEmpty()) return candidates.take(topK)
 
         val reranked = indices
-            .filter { it in limited.indices }
-            .map { limited[it] }
+            .mapNotNull { limited.getOrNull(it) }
             .take(topK)
 
         // インデックスが足りない場合は元順で補完
