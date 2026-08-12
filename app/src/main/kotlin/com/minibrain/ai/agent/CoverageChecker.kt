@@ -42,7 +42,7 @@ class CoverageChecker(private val llmService: LlmService) {
                 if (line.startsWith("no")) {
                     val parts = line.substringAfter("no").trimStart(',', ' ')
                     val missing = if (parts.isBlank()) emptyList()
-                    else parts.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                    else parts.split(",").mapNotNull { it.trim().ifBlank { null } }
                     Timber.tag(TAG).d("coverage=false missing=$missing")
                     return CoverageResult(canAnswer = false, missingInformation = missing)
                 }
