@@ -242,7 +242,7 @@ class DocumentRepository(
                 doc.headings?.let { json ->
                     runCatching {
                         val arr = org.json.JSONArray(json)
-                        (0 until arr.length()).map { i -> arr.getString(i) }
+                        List(arr.length()) { i -> arr.getString(i) }
                     }.getOrElse { emptyList() }
                 } ?: emptyList()
             }.take(10).toList()
