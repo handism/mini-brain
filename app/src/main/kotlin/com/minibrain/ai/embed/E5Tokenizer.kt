@@ -50,6 +50,10 @@ class E5Tokenizer private constructor(
         private val MULTI_SPACE = Regex(" {2,}")
 
         fun load(file: File): E5Tokenizer {
+            return TokenizerJsonParser(file).parse()
+        }
+
+        private class TokenizerJsonParser(private val file: File) {
             var charsmapBase64: String? = null
             var replacement = '▁'
             var unkId = 3
@@ -57,81 +61,87 @@ class E5Tokenizer private constructor(
             var scores = DoubleArray(280_000)
             var pieceCount = 0
 
-            JsonReader.of(file.source().buffer()).use { reader ->
+            fun parse(): E5Tokenizer {
+                JsonReader.of(file.source().buffer()).use { reader ->
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "normalizer" -> scanStrings(reader) { name, value ->
+                                if (name == "precompiled_charsmap") charsmapBase64 = value
+                            }
+                            "pre_tokenizer" -> scanStrings(reader) { name, value ->
+                                if (name == "replacement" && value.isNotEmpty()) replacement = value[0]
+                            }
+                            "model" -> readModel(reader)
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+
+                require(pieceCount > 0) { "tokenizer.json に vocab がありません: ${file.absolutePath}" }
+                val base64 = requireNotNull(charsmapBase64) {
+                    "tokenizer.json に precompiled_charsmap がありません: ${file.absolutePath}"
+                }
+                val charsMap = PrecompiledCharsMap.parse(Base64.getDecoder().decode(base64))
+                val model = UnigramModel(pieceIds, scores.copyOf(pieceCount), unkId)
+                return E5Tokenizer(charsMap, replacement, model)
+            }
+
+            private fun readModel(reader: JsonReader) {
                 reader.beginObject()
                 while (reader.hasNext()) {
                     when (reader.nextName()) {
-                        "normalizer" -> scanStrings(reader) { name, value ->
-                            if (name == "precompiled_charsmap") charsmapBase64 = value
-                        }
-                        "pre_tokenizer" -> scanStrings(reader) { name, value ->
-                            if (name == "replacement" && value.isNotEmpty()) replacement = value[0]
-                        }
-                        "model" -> {
-                            reader.beginObject()
-                            while (reader.hasNext()) {
-                                when (reader.nextName()) {
-                                    "unk_id" -> unkId = reader.nextInt()
-                                    "vocab" -> {
-                                        reader.beginArray()
-                                        while (reader.hasNext()) {
-                                            reader.beginArray()
-                                            val piece = reader.nextString()
-                                            val score = reader.nextDouble()
-                                            reader.endArray()
-                                            if (pieceCount == scores.size) {
-                                                scores = scores.copyOf(scores.size * 2)
-                                            }
-                                            scores[pieceCount] = score
-                                            pieceIds[piece] = pieceCount
-                                            pieceCount++
-                                        }
-                                        reader.endArray()
-                                    }
-                                    else -> reader.skipValue()
-                                }
-                            }
-                            reader.endObject()
-                        }
+                        "unk_id" -> unkId = reader.nextInt()
+                        "vocab" -> readVocab(reader)
                         else -> reader.skipValue()
                     }
                 }
                 reader.endObject()
             }
 
-            require(pieceCount > 0) { "tokenizer.json に vocab がありません: ${file.absolutePath}" }
-            val base64 = requireNotNull(charsmapBase64) {
-                "tokenizer.json に precompiled_charsmap がありません: ${file.absolutePath}"
-            }
-            val charsMap = PrecompiledCharsMap.parse(Base64.getDecoder().decode(base64))
-            val model = UnigramModel(pieceIds, scores.copyOf(pieceCount), unkId)
-            return E5Tokenizer(charsMap, replacement, model)
-        }
-
-        private fun scanStrings(reader: JsonReader, onString: (name: String, value: String) -> Unit) {
-            scanValue(reader, null, onString)
-        }
-
-        private fun scanValue(reader: JsonReader, name: String?, onString: (String, String) -> Unit) {
-            when (reader.peek()) {
-                JsonReader.Token.BEGIN_OBJECT -> {
-                    reader.beginObject()
-                    while (reader.hasNext()) {
-                        val childName = reader.nextName()
-                        scanValue(reader, childName, onString)
-                    }
-                    reader.endObject()
-                }
-                JsonReader.Token.BEGIN_ARRAY -> {
+            private fun readVocab(reader: JsonReader) {
+                reader.beginArray()
+                while (reader.hasNext()) {
                     reader.beginArray()
-                    while (reader.hasNext()) scanValue(reader, name, onString)
+                    val piece = reader.nextString()
+                    val score = reader.nextDouble()
                     reader.endArray()
+                    if (pieceCount == scores.size) {
+                        scores = scores.copyOf(scores.size * 2)
+                    }
+                    scores[pieceCount] = score
+                    pieceIds[piece] = pieceCount
+                    pieceCount++
                 }
-                JsonReader.Token.STRING -> {
-                    val value = reader.nextString()
-                    if (name != null) onString(name, value)
+                reader.endArray()
+            }
+
+            private fun scanStrings(reader: JsonReader, onString: (name: String, value: String) -> Unit) {
+                scanValue(reader, null, onString)
+            }
+
+            private fun scanValue(reader: JsonReader, name: String?, onString: (String, String) -> Unit) {
+                when (reader.peek()) {
+                    JsonReader.Token.BEGIN_OBJECT -> {
+                        reader.beginObject()
+                        while (reader.hasNext()) {
+                            val childName = reader.nextName()
+                            scanValue(reader, childName, onString)
+                        }
+                        reader.endObject()
+                    }
+                    JsonReader.Token.BEGIN_ARRAY -> {
+                        reader.beginArray()
+                        while (reader.hasNext()) scanValue(reader, name, onString)
+                        reader.endArray()
+                    }
+                    JsonReader.Token.STRING -> {
+                        val value = reader.nextString()
+                        if (name != null) onString(name, value)
+                    }
+                    else -> reader.skipValue()
                 }
-                else -> reader.skipValue()
             }
         }
     }
