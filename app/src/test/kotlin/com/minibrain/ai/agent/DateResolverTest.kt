@@ -161,6 +161,18 @@ class DateResolverTest {
         assertEquals(LocalDate.of(2024, 1, 1), range!!.start)
     }
 
+    @Test
+    fun `invalid era month 13 returns null`() {
+        val range = DateResolver.resolveDateRange("令和6年13月", today)
+        assertNull(range)
+    }
+
+    @Test
+    fun `invalid era month 0 returns null`() {
+        val range = DateResolver.resolveDateRange("令和6年0月", today)
+        assertNull(range)
+    }
+
     // ─────────────── ドット/スラッシュ日付 ───────────────
 
     @Test
