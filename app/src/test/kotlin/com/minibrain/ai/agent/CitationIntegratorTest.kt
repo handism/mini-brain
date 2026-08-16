@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.minibrain.util.TokenEstimator
+import io.mockk.mockk
 
 class CitationIntegratorTest {
 
@@ -90,5 +91,27 @@ class CitationIntegratorTest {
     fun `empty results returns empty list`() {
         val integrated = CitationIntegrator.integrate(emptyList())
         assertTrue(integrated.isEmpty())
+    }
+
+    @Test
+    fun `priorityOf correctly resolves source priority`() {
+        val method = CitationIntegrator::class.java.getDeclaredMethod("priorityOf", SourceType::class.java).apply {
+            isAccessible = true
+        }
+
+        // Known sources in SOURCE_PRIORITY
+        assertEquals(0, method.invoke(CitationIntegrator, SourceType.READ_FILE))
+        assertEquals(1, method.invoke(CitationIntegrator, SourceType.GREP))
+        assertEquals(2, method.invoke(CitationIntegrator, SourceType.METADATA))
+        assertEquals(3, method.invoke(CitationIntegrator, SourceType.BM25))
+        assertEquals(4, method.invoke(CitationIntegrator, SourceType.VECTOR))
+        assertEquals(5, method.invoke(CitationIntegrator, SourceType.RRF))
+        assertEquals(6, method.invoke(CitationIntegrator, SourceType.GLOB))
+        assertEquals(7, method.invoke(CitationIntegrator, SourceType.FOLDER))
+        assertEquals(8, method.invoke(CitationIntegrator, SourceType.UNKNOWN))
+
+        // Unknown source fallback (SOURCE_PRIORITY.size)
+        val mockSource = mockk<SourceType>()
+        assertEquals(9, method.invoke(CitationIntegrator, mockSource))
     }
 }
