@@ -116,7 +116,7 @@ object MarkdownChunker {
     private fun splitLongSection(headingPath: String, body: String): List<Chunk> {
         val paragraphs = splitIntoParagraphs(body)
         val chunks = mutableListOf<Chunk>()
-        var buffer = StringBuilder()
+        val buffer = StringBuilder()
 
         for (para in paragraphs) {
             // もし単一の段落が最大サイズを超えている場合、文字数で分割する
@@ -124,7 +124,9 @@ object MarkdownChunker {
                 // 現在のバッファをフラッシュ
                 if (buffer.isNotEmpty()) {
                     chunks.add(Chunk(headingPath, buffer.toString().trim()))
-                    buffer = StringBuilder(buffer.takeLast(OVERLAP_CHARS)).append("\n\n")
+                    val keepLen = minOf(buffer.length, OVERLAP_CHARS)
+                    buffer.delete(0, buffer.length - keepLen)
+                    buffer.append("\n\n")
                 }
 
                 var remainingPara = para
@@ -140,8 +142,9 @@ object MarkdownChunker {
             if (buffer.isNotEmpty() && buffer.length + para.length + 2 > MAX_CHUNK_CHARS) {
                 chunks.add(Chunk(headingPath, buffer.toString().trim()))
                 // overlap: 最後の OVERLAP_CHARS 文字を引き継ぐ
-                val overlap = buffer.takeLast(OVERLAP_CHARS)
-                buffer = StringBuilder(overlap).append("\n\n")
+                val keepLen = minOf(buffer.length, OVERLAP_CHARS)
+                buffer.delete(0, buffer.length - keepLen)
+                buffer.append("\n\n")
             }
             buffer.append(para).append("\n\n")
         }
