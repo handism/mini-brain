@@ -298,10 +298,7 @@ class ToolExecutor(
         val citations = mutableListOf<Citation>()
         val lines = mutableListOf<String>()
         val cachedChunksList = cache.chunkVectors().first
-        val chunksByDoc = HashMap<Long, String>()
-        for (chunk in cachedChunksList) {
-            chunksByDoc.putIfAbsent(chunk.docId, chunk.text)
-        }
+        val chunksByDoc = cachedChunksList.asReversed().associateBy({ it.docId }, { it.text })
         for (doc in docs) {
             val snippet = chunksByDoc[doc.id] ?: doc.firstParagraph ?: ""
             citations.add(Citation(
