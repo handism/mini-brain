@@ -1,5 +1,6 @@
 package com.minibrain.data.md
 
+import com.minibrain.util.DateValidator
 import java.time.LocalDate
 
 object MarkdownMetaExtractor {
@@ -61,15 +62,8 @@ object MarkdownMetaExtractor {
     fun extractDateFromContent(content: String): String? {
         val today = LocalDate.now()
 
-        fun safeDate(y: String, m: String, d: String): String? = runCatching {
-            val date = LocalDate.of(y.toInt(), m.toInt(), d.toInt())
-            if (date.year < 1990 || date.isAfter(today)) null else date.toString()
-        }.getOrNull()
-
-        fun safeMonth(y: String, m: String): String? = runCatching {
-            val date = LocalDate.of(y.toInt(), m.toInt(), 1)
-            if (date.year < 1990 || date.isAfter(today)) null else date.toString()
-        }.getOrNull()
+        fun safeDate(y: String, m: String, d: String = "1"): String? =
+            DateValidator.parseDayNotInFuture(y, m, d, today)
 
         // 1. YAML frontmatter の date 系フィールド
         val lineSeq = content.lineSequence().iterator()
@@ -107,7 +101,7 @@ object MarkdownMetaExtractor {
         }
         for (heading in headings) {
             HEADING_JP_MONTH_REGEX.find(heading)?.destructured?.let { (y, m) ->
-                safeMonth(y, m)?.let { return it }
+                safeDate(y, m)?.let { return it }
             }
         }
 
