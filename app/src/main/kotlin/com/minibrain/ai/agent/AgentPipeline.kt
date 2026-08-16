@@ -243,7 +243,17 @@ class AgentPipeline(
                 val notFound = mutableListOf<String>()
                 // パスの正規化 (スラッシュとハイフンを除外) をループ外で一度だけ行うことで高速化
                 val normalizedDocs = allDocs.map { doc ->
-                    doc to doc.relativePath.filter { c -> c != '/' && c != '-' }
+                    val path = doc.relativePath
+                    val len = path.length
+                    val arr = CharArray(len)
+                    var p = 0
+                    for (i in 0 until len) {
+                        val c = path[i]
+                        if (c != '/' && c != '-') {
+                            arr[p++] = c
+                        }
+                    }
+                    doc to String(arr, 0, p)
                 }
                 for (date in dates) {
                     // 区切り文字を除いた8桁数字 (YYYYMMDD) でパスを検索
