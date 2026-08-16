@@ -14,6 +14,7 @@ import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.rag.SourceType
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.search.NGramTokenizer
 import kotlinx.coroutines.Dispatchers
@@ -107,44 +108,13 @@ class ToolExecutor(
     }
 
     private suspend fun executeReadFile(call: ToolCall, tool: AgentTool.ReadFile): ToolResult {
-        val doc = withContext(Dispatchers.IO) {
-            when {
-                tool.docId != null -> documentDao.getById(tool.docId)
-                tool.path != null -> {
-                    val keyword = tool.path.substringAfterLast("/").removeSuffix(".md")
-                    documentDao.searchByPath(treeUri, keyword).firstOrNull()
-                }
-                else -> null
-            }
-        } ?: return ToolResult(call, "FILE NOT FOUND", emptyList())
+        val doc = findDocument(tool) ?: return ToolResult(call, "FILE NOT FOUND", emptyList())
 
         val chunks = withContext(Dispatchers.IO) {
             chunkDao.getByDoc(doc.id).sortedBy { it.headingPath }
         }
 
-        val headings = doc.headings?.let { parseFirstHeadings(it, 5) } ?: ""
-        val tags = doc.tags?.let { parseJsonArray(it) }?.joinToString(", ") ?: ""
-
-        val sb = StringBuilder("FILE: ${doc.relativePath}\n")
-        if (headings.isNotBlank()) sb.append("headings: [$headings]\n")
-        if (tags.isNotBlank()) sb.append("tags: [$tags]\n")
-        sb.append("---\n")
-
-        var totalChars = sb.length
-        for (chunk in chunks) {
-            val section = "## ${chunk.headingPath}\n${chunk.text}\n\n"
-            if (totalChars + section.length > READ_FILE_MAX_CHARS) {
-                val truncated = "## ${chunk.headingPath}\n${chunk.text.take(READ_SECTION_MAX_CHARS)}...[truncated]\n\n"
-                sb.append(truncated)
-                totalChars += truncated.length
-                if (totalChars > READ_FILE_MAX_CHARS) break
-            } else {
-                sb.append(section)
-                totalChars += section.length
-            }
-        }
-
-        val fullText = sb.toString().trimEnd()
+        val fullText = buildTruncatedContent(doc, chunks)
         val citations = if (fullText.length > SUMMARIZE_THRESHOLD_CHARS) {
             // 巨大ファイルは要約してから単一の citation として投入
             val summary = runCatching { llmService.summarize(fullText) }
@@ -171,6 +141,42 @@ class ToolExecutor(
             }
         }
         return ToolResult(call, fullText, citations)
+    }
+
+    private suspend fun findDocument(tool: AgentTool.ReadFile): DocumentEntity? = withContext(Dispatchers.IO) {
+        when {
+            tool.docId != null -> documentDao.getById(tool.docId)
+            tool.path != null -> {
+                val keyword = tool.path.substringAfterLast("/").removeSuffix(".md")
+                documentDao.searchByPath(treeUri, keyword).firstOrNull()
+            }
+            else -> null
+        }
+    }
+
+    private fun buildTruncatedContent(doc: DocumentEntity, chunks: List<ChunkEntity>): String {
+        val headings = doc.headings?.let { parseFirstHeadings(it, 5) } ?: ""
+        val tags = doc.tags?.let { parseJsonArray(it) }?.joinToString(", ") ?: ""
+
+        val sb = StringBuilder("FILE: ${doc.relativePath}\n")
+        if (headings.isNotBlank()) sb.append("headings: [$headings]\n")
+        if (tags.isNotBlank()) sb.append("tags: [$tags]\n")
+        sb.append("---\n")
+
+        var totalChars = sb.length
+        for (chunk in chunks) {
+            val section = "## ${chunk.headingPath}\n${chunk.text}\n\n"
+            if (totalChars + section.length > READ_FILE_MAX_CHARS) {
+                val truncated = "## ${chunk.headingPath}\n${chunk.text.take(READ_SECTION_MAX_CHARS)}...[truncated]\n\n"
+                sb.append(truncated)
+                totalChars += truncated.length
+                if (totalChars > READ_FILE_MAX_CHARS) break
+            } else {
+                sb.append(section)
+                totalChars += section.length
+            }
+        }
+        return sb.toString().trimEnd()
     }
 
     private suspend fun executeGrep(call: ToolCall, tool: AgentTool.Grep): ToolResult {
