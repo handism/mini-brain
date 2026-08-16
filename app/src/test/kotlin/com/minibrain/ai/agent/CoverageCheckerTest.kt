@@ -8,7 +8,34 @@ import org.junit.Test
 
 class CoverageCheckerTest {
 
-    private fun citation(snippet: String) = Citation(headingPath = "note.md", snippet = snippet)
+    private fun citation(snippet: String, topicMatch: Boolean = false) = Citation(headingPath = "note.md", snippet = snippet, topicMatch = topicMatch)
+
+    // --- isTopicMatchShortCircuit ---
+
+    @Test
+    fun `日付クエリかつtopicMatch付き候補で短絡する`() {
+        val candidates = listOf(citation("サウナしきじを訪問", topicMatch = true))
+        assertTrue(CoverageChecker.isTopicMatchShortCircuit("サウナしきじにいつ行った？", candidates))
+    }
+
+    @Test
+    fun `日付クエリでもtopicMatchがなければ短絡しない`() {
+        val candidates = listOf(citation("サウナしきじは静岡の有名サウナ", topicMatch = false))
+        assertFalse(CoverageChecker.isTopicMatchShortCircuit("サウナしきじにいつ行った？", candidates))
+    }
+
+    @Test
+    fun `日付クエリでなければtopicMatch付き候補があっても短絡しない`() {
+        val candidates = listOf(citation("サウナしきじを訪問", topicMatch = true))
+        assertFalse(CoverageChecker.isTopicMatchShortCircuit("サウナしきじについてまとめて", candidates))
+    }
+
+    @Test
+    fun `上位5件より後ろのtopicMatch付き候補は短絡対象外`() {
+        val candidates = List(5) { citation("topicMatchなし候補 $it", topicMatch = false) } +
+            citation("訪問記録", topicMatch = true)
+        assertFalse(CoverageChecker.isTopicMatchShortCircuit("いつ行った？", candidates))
+    }
 
     // --- isDateShortCircuit ---
 
