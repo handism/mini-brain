@@ -79,6 +79,8 @@ class DocumentRepository(
         }
     }
 
+    private data class PendingDoc(val docEntity: DocumentEntity, val mdFile: MdFile)
+
     private val _indexingState = MutableStateFlow<IndexingState>(IndexingState.Idle)
     val indexingState: StateFlow<IndexingState> = _indexingState
 
@@ -108,7 +110,6 @@ class DocumentRepository(
             val docsToDelete = mutableListOf<Long>()
 
             // To maintain batching, we group the raw chunks and their metadata
-            data class PendingDoc(val docEntity: DocumentEntity, val mdFile: MdFile)
             val pendingDocs = mutableListOf<PendingDoc>()
 
             mdFiles.forEachIndexed { index, mdFile ->
@@ -165,81 +166,13 @@ class DocumentRepository(
             }
 
             // Update unchanged docs that needed metadata refresh
-            if (docsToUpdate.isNotEmpty()) {
-                documentDao.updateAll(docsToUpdate)
-            }
+            refreshMetadata(docsToUpdate)
 
             // Delete old FTS and Chunks
-            if (docsToDelete.isNotEmpty()) {
-                docsToDelete.chunked(900).forEach { batch ->
-                    writableDb.beginTransaction()
-                    try {
-                        deleteFtsByDocIds(batch)
-                        chunkDao.deleteByDocIds(batch)
-                        writableDb.setTransactionSuccessful()
-                    } finally {
-                        writableDb.endTransaction()
-                    }
-                }
-            }
+            deleteOldDocs(docsToDelete, writableDb)
 
             // Insert new docs
-            val docsToInsertList = pendingDocs.map { it.docEntity }
-            if (docsToInsertList.isNotEmpty()) {
-                val insertedDocIds = documentDao.insertAll(docsToInsertList)
-
-                val chunkBuffer = mutableListOf<ChunkEntity>()
-
-                // Embed and collect chunks using the generated IDs
-                pendingDocs.forEachIndexed { i, pending ->
-                    // Emit progress state during the heavy embedding phase
-                    _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
-
-                    val docId = insertedDocIds[i]
-                    val rawChunks = MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
-                    val chunkEntities = rawChunks.mapNotNull { chunk ->
-                        runCatching {
-                            val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
-                            ChunkEntity(
-                                docId = docId,
-                                headingPath = chunk.headingPath,
-                                text = chunk.text,
-                                embedding = EmbedderService.floatArrayToBytes(embedding),
-                            )
-                        }.onFailure { e ->
-                            Timber.tag("DocumentRepository").e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
-                        }.getOrNull()
-                    }
-
-                    chunkBuffer.addAll(chunkEntities)
-
-                    // Flush buffer to DB in a single SQLite transaction to avoid high memory pressure (OOM) and auto-commits
-                    if (chunkBuffer.size >= 900) {
-                        writableDb.beginTransaction()
-                        try {
-                            val chunkIds = chunkDao.insertAll(chunkBuffer)
-                            insertFts(ftsStmt, chunkIds, chunkBuffer)
-                            writableDb.setTransactionSuccessful()
-                        } finally {
-                            writableDb.endTransaction()
-                        }
-                        totalChunks += chunkBuffer.size
-                        chunkBuffer.clear()
-                    }
-                }
-
-                if (chunkBuffer.isNotEmpty()) {
-                    writableDb.beginTransaction()
-                    try {
-                        val chunkIds = chunkDao.insertAll(chunkBuffer)
-                        insertFts(ftsStmt, chunkIds, chunkBuffer)
-                        writableDb.setTransactionSuccessful()
-                    } finally {
-                        writableDb.endTransaction()
-                    }
-                    totalChunks += chunkBuffer.size
-                }
-            }
+            totalChunks += insertNewDocsAndChunks(pendingDocs, writableDb, ftsStmt)
 
         } finally {
             ftsStmt.close()
@@ -249,6 +182,93 @@ class DocumentRepository(
         indexFolderEmbeddings(treeUri, mdFiles)
 
         _indexingState.value = IndexingState.Done(total, totalChunks)
+    }
+
+
+    private suspend fun refreshMetadata(docsToUpdate: List<DocumentEntity>) {
+        if (docsToUpdate.isNotEmpty()) {
+            documentDao.updateAll(docsToUpdate)
+        }
+    }
+
+    private suspend fun deleteOldDocs(docsToDelete: List<Long>, writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
+        if (docsToDelete.isNotEmpty()) {
+            docsToDelete.chunked(900).forEach { batch ->
+                writableDb.beginTransaction()
+                try {
+                    deleteFtsByDocIds(batch)
+                    chunkDao.deleteByDocIds(batch)
+                    writableDb.setTransactionSuccessful()
+                } finally {
+                    writableDb.endTransaction()
+                }
+            }
+        }
+    }
+
+    private suspend fun insertNewDocsAndChunks(
+        pendingDocs: List<PendingDoc>,
+        writableDb: androidx.sqlite.db.SupportSQLiteDatabase,
+        ftsStmt: androidx.sqlite.db.SupportSQLiteStatement
+    ): Int {
+        var newTotalChunks = 0
+        val docsToInsertList = pendingDocs.map { it.docEntity }
+        if (docsToInsertList.isNotEmpty()) {
+            val insertedDocIds = documentDao.insertAll(docsToInsertList)
+
+            val chunkBuffer = mutableListOf<ChunkEntity>()
+
+            // Embed and collect chunks using the generated IDs
+            pendingDocs.forEachIndexed { i, pending ->
+                // Emit progress state during the heavy embedding phase
+                _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
+
+                val docId = insertedDocIds[i]
+                val rawChunks = MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
+                val chunkEntities = rawChunks.mapNotNull { chunk ->
+                    runCatching {
+                        val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
+                        ChunkEntity(
+                            docId = docId,
+                            headingPath = chunk.headingPath,
+                            text = chunk.text,
+                            embedding = EmbedderService.floatArrayToBytes(embedding),
+                        )
+                    }.onFailure { e ->
+                        Timber.tag("DocumentRepository").e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
+                    }.getOrNull()
+                }
+
+                chunkBuffer.addAll(chunkEntities)
+
+                // Flush buffer to DB in a single SQLite transaction to avoid high memory pressure (OOM) and auto-commits
+                if (chunkBuffer.size >= 900) {
+                    writableDb.beginTransaction()
+                    try {
+                        val chunkIds = chunkDao.insertAll(chunkBuffer)
+                        insertFts(ftsStmt, chunkIds, chunkBuffer)
+                        writableDb.setTransactionSuccessful()
+                    } finally {
+                        writableDb.endTransaction()
+                    }
+                    newTotalChunks += chunkBuffer.size
+                    chunkBuffer.clear()
+                }
+            }
+
+            if (chunkBuffer.isNotEmpty()) {
+                writableDb.beginTransaction()
+                try {
+                    val chunkIds = chunkDao.insertAll(chunkBuffer)
+                    insertFts(ftsStmt, chunkIds, chunkBuffer)
+                    writableDb.setTransactionSuccessful()
+                } finally {
+                    writableDb.endTransaction()
+                }
+                newTotalChunks += chunkBuffer.size
+            }
+        }
+        return newTotalChunks
     }
 
     private suspend fun indexFolderEmbeddings(treeUri: Uri, mdFiles: List<MdFile>) {
