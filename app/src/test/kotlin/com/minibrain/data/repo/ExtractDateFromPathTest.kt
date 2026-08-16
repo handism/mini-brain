@@ -100,4 +100,10 @@ class ExtractDateFromPathTest {
         // 13月は LocalDate.of で失敗 → 後続パターンも失敗 → null
         assertNull(extract("notes/2024-13-50.md"))
     }
+
+    @Test
+    fun invalidDayFallsThroughToNull() {
+        // 2月30日は LocalDate.of で DateTimeException 失敗 → 後続パターンも失敗 → null
+        assertNull(extract("notes/2024-02-30.md"))
+    }
 }
