@@ -203,7 +203,40 @@ class MarkdownMetaExtractorTest {
     }
 
     @Test
+    fun invalidMonthReturnsNull() {
+        val md = """
+            ---
+            date: 2024-13-15
+            ---
+            本文
+        """.trimIndent()
+        assertNull(extract(md))
+    }
+
+    @Test
+    fun invalidDayReturnsNull() {
+        val md = """
+            ---
+            date: 2024-02-30
+            ---
+            本文
+        """.trimIndent()
+        assertNull(extract(md))
+    }
+
+    @Test
+    fun invalidHeadingDateReturnsNull() {
+        val md = """
+            # 2024年02月30日
+
+            本文
+        """.trimIndent()
+        assertNull(extract(md))
+    }
+
+    @Test
     fun noDateReturnsNull() {
         assertNull(extract("# タイトル\n\n本文だけ"))
     }
 }
+
