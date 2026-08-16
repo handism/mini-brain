@@ -18,6 +18,7 @@ import com.minibrain.data.md.MdFile
 import com.minibrain.data.md.MdFileReader
 import org.json.JSONArray
 import com.minibrain.data.search.NGramTokenizer
+import com.minibrain.util.DateValidator
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -62,20 +63,16 @@ class DocumentRepository(
         // ユニットテストから呼び出せるよう @VisibleForTesting に昇格。
         @VisibleForTesting
         internal fun extractDateFromPath(relativePath: String): String? {
-            val yearRange = 1990..LocalDate.now().year
-
             for (pattern in FULL_DATE_PATTERNS) {
                 val match = pattern.find(relativePath) ?: continue
                 val (y, m, d) = match.destructured
-                val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), d.toInt()) }.getOrNull()
-                if (date != null && date.year in yearRange) return date.toString()
+                DateValidator.parseDay(y, m, d)?.let { return it }
             }
 
             for (pattern in MONTH_DATE_PATTERNS) {
                 val match = pattern.find(relativePath) ?: continue
                 val (y, m) = match.destructured
-                val date = runCatching { LocalDate.of(y.toInt(), m.toInt(), 1) }.getOrNull()
-                if (date != null && date.year in yearRange) return date.toString()
+                DateValidator.parseMonth(y, m)?.let { return it }
             }
 
             return null
