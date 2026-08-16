@@ -122,26 +122,44 @@ class AgentPipeline(
     )
 
     private suspend fun runReActLoop(params: ReActParams): List<Citation> {
-        val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, params.treeUri, llmService, params.cache)
-        val baseHint = buildPlannerHint(params.question, params.dateRange, params.cache)
-        val plannerHint = when {
-            params.explorerHint != null && baseHint != null -> "${params.explorerHint} / $baseHint"
-            params.explorerHint != null -> params.explorerHint
-            else -> baseHint
-        }
-        val observations = mutableListOf<Observation>()
-        val toolResults = mutableListOf<ToolResult>()
-        var consecutiveParseErrors = 0
+        return ReActLoopExecutor(params).execute()
+    }
 
-        for (iteration in 1..MAX_ITERATIONS) {
-            params.onStatus?.invoke("検索中... (ステップ $iteration/$MAX_ITERATIONS)")
-            Timber.tag(TAG).d("ReAct iteration=$iteration hint=$plannerHint obs=${observations.size}")
+    private inner class ReActLoopExecutor(
+        private val params: ReActParams,
+    ) {
+        private val executor = ToolExecutor(documentDao, chunkDao, embedderService, ragPipeline, params.treeUri, llmService, params.cache)
+        private val observations = mutableListOf<Observation>()
+        private val toolResults = mutableListOf<ToolResult>()
+        private var consecutiveParseErrors = 0
 
-            if (!llmService.isReady()) {
-                Timber.tag(TAG).d("LLM not ready — exit ReAct loop")
-                break
+        suspend fun execute(): List<Citation> {
+            val baseHint = buildPlannerHint(params.question, params.dateRange, params.cache)
+            val plannerHint = when {
+                params.explorerHint != null && baseHint != null -> "${params.explorerHint} / ${baseHint}"
+                params.explorerHint != null -> params.explorerHint
+                else -> baseHint
             }
 
+            for (iteration in 1..MAX_ITERATIONS) {
+                params.onStatus?.invoke("検索中... (ステップ ${iteration}/${MAX_ITERATIONS})")
+                Timber.tag(TAG).d("ReAct iteration=${iteration} hint=${plannerHint} obs=${observations.size}")
+
+                if (!llmService.isReady()) {
+                    Timber.tag(TAG).d("LLM not ready — exit ReAct loop")
+                    break
+                }
+
+                val decision = generateDecision(plannerHint)
+                if (handleDecision(decision, iteration)) {
+                    break
+                }
+            }
+
+            return CitationIntegrator.integrate(toolResults)
+        }
+
+        private suspend fun generateDecision(plannerHint: String?): PlannerDecision {
             val prompt = PlannerPrompt.build(params.question, plannerHint, observations)
             val sb = StringBuilder()
             runCatching {
@@ -149,49 +167,58 @@ class AgentPipeline(
             }.onFailure { Timber.tag(TAG).w(it, "planner LLM failed") }
 
             val decision = PlannerPrompt.parseDecision(sb.toString())
-            Timber.tag(TAG).d("decision=$decision raw=${sb.take(200)}")
+            Timber.tag(TAG).d("decision=${decision} raw=${sb.take(200)}")
+            return decision
+        }
 
-            when (decision) {
+        private suspend fun handleDecision(decision: PlannerDecision, iteration: Int): Boolean {
+            return when (decision) {
                 is PlannerDecision.Finalize -> {
                     Timber.tag(TAG).d("finalize: ${decision.reason}")
                     params.traceEvents += PlannerDecisionEvent(iteration, "finalize: ${decision.reason}")
-                    break
+                    true
                 }
                 is PlannerDecision.ParseError -> {
-                    consecutiveParseErrors++
-                    Timber.tag(TAG).w("parse error ($consecutiveParseErrors)")
-                    params.traceEvents += PlannerDecisionEvent(iteration, "parse_error")
-                    if (consecutiveParseErrors >= 2) {
-                        Timber.tag(TAG).d("2 consecutive parse errors — RRF fallback")
-                        params.onStatus?.invoke("フォールバック検索中...")
-                        val fallbackCitations = ragPipeline.retrieveTopChunks(params.question, params.treeUri, cache = params.cache)
-                        val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(params.question))
-                        toolResults += ToolResult(fallbackCall, "fallback", fallbackCitations)
-                        params.traceEvents += ToolCallEvent(iteration, "rrf_search", "\"${params.question}\"")
-                        params.traceEvents += ObservationEvent(iteration, "${fallbackCitations.size} citations returned")
-                        break
-                    }
-                    continue
+                    handleParseError(iteration)
                 }
                 is PlannerDecision.Call -> {
-                    consecutiveParseErrors = 0
-                    val toolCall = ToolCall(iteration, decision.tool)
-                    val tool = decision.tool
-                    params.traceEvents += ToolCallEvent(iteration, tool.traceName, tool.traceArgs)
-                    params.onStatus?.invoke(tool.progressLabel)
-                    val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
-                    toolResults += result
-                    params.traceEvents += ObservationEvent(
-                        iteration,
-                        tool.observationKind(result.citations.size, result.summary.length),
-                    )
-                    addObservation(observations, toolCall, result.summary)
-                    Timber.tag(TAG).d("tool=$tool citations=${result.citations.size}")
+                    handleToolCall(decision.tool, iteration)
+                    false
                 }
             }
         }
 
-        return CitationIntegrator.integrate(toolResults)
+        private suspend fun handleParseError(iteration: Int): Boolean {
+            consecutiveParseErrors++
+            Timber.tag(TAG).w("parse error (${consecutiveParseErrors})")
+            params.traceEvents += PlannerDecisionEvent(iteration, "parse_error")
+            if (consecutiveParseErrors >= 2) {
+                Timber.tag(TAG).d("2 consecutive parse errors — RRF fallback")
+                params.onStatus?.invoke("フォールバック検索中...")
+                val fallbackCitations = ragPipeline.retrieveTopChunks(params.question, params.treeUri, cache = params.cache)
+                val fallbackCall = ToolCall(iteration, AgentTool.RrfSearch(params.question))
+                toolResults += ToolResult(fallbackCall, "fallback", fallbackCitations)
+                params.traceEvents += ToolCallEvent(iteration, "rrf_search", "\"${params.question}\"")
+                params.traceEvents += ObservationEvent(iteration, "${fallbackCitations.size} citations returned")
+                return true
+            }
+            return false
+        }
+
+        private suspend fun handleToolCall(tool: AgentTool, iteration: Int) {
+            consecutiveParseErrors = 0
+            val toolCall = ToolCall(iteration, tool)
+            params.traceEvents += ToolCallEvent(iteration, tool.traceName, tool.traceArgs)
+            params.onStatus?.invoke(tool.progressLabel)
+            val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
+            toolResults += result
+            params.traceEvents += ObservationEvent(
+                iteration,
+                tool.observationKind(result.citations.size, result.summary.length),
+            )
+            addObservation(observations, toolCall, result.summary)
+            Timber.tag(TAG).d("tool=${tool} citations=${result.citations.size}")
+        }
     }
 
     private suspend fun buildPlannerHint(
