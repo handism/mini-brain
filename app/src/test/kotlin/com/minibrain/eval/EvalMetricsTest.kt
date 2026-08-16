@@ -88,6 +88,24 @@ class EvalMetricsTest {
     }
 
     @Test
+    fun `正解がない場合で取得結果もない場合は P=1 R=1`() {
+        val case = EvalCase("c6", "q6", emptyList())
+        val citations = emptyList<Citation>()
+        val result = EvalMetrics.compute(listOf(case to citations), k = 3)
+        assertEquals(1.0, result.precisionAtK, 1e-9)
+        assertEquals(1.0, result.recallAtK, 1e-9)
+    }
+
+    @Test
+    fun `正解がない場合で取得結果がある場合は P=0 R=1`() {
+        val case = EvalCase("c7", "q7", emptyList())
+        val citations = listOf(cit("wrong.md"))
+        val result = EvalMetrics.compute(listOf(case to citations), k = 3)
+        assertEquals(0.0, result.precisionAtK, 1e-9)
+        assertEquals(1.0, result.recallAtK, 1e-9)
+    }
+
+    @Test
     fun `Kが0以下の場合はIllegalArgumentExceptionを投げる`() {
         val case = EvalCase("c1", "q1", listOf("a.md"))
         val citations = listOf(cit("a.md"))
