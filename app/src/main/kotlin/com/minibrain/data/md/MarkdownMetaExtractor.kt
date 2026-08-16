@@ -58,18 +58,18 @@ object MarkdownMetaExtractor {
     fun extractTags(markdown: String): List<String> =
         TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct().toList()
 
+    internal fun safeDate(y: String, m: String, d: String, today: LocalDate = LocalDate.now()): String? = runCatching {
+        val date = LocalDate.of(y.toInt(), m.toInt(), d.toInt())
+        if (date.year < 1990 || date.isAfter(today)) null else date.toString()
+    }.getOrNull()
+
+    internal fun safeMonth(y: String, m: String, today: LocalDate = LocalDate.now()): String? = runCatching {
+        val date = LocalDate.of(y.toInt(), m.toInt(), 1)
+        if (date.year < 1990 || date.isAfter(today)) null else date.toString()
+    }.getOrNull()
+
     fun extractDateFromContent(content: String): String? {
         val today = LocalDate.now()
-
-        fun safeDate(y: String, m: String, d: String): String? = runCatching {
-            val date = LocalDate.of(y.toInt(), m.toInt(), d.toInt())
-            if (date.year < 1990 || date.isAfter(today)) null else date.toString()
-        }.getOrNull()
-
-        fun safeMonth(y: String, m: String): String? = runCatching {
-            val date = LocalDate.of(y.toInt(), m.toInt(), 1)
-            if (date.year < 1990 || date.isAfter(today)) null else date.toString()
-        }.getOrNull()
 
         // 1. YAML frontmatter の date 系フィールド
         val lineSeq = content.lineSequence().iterator()
@@ -78,7 +78,7 @@ object MarkdownMetaExtractor {
                 val t = lineSeq.next().trim()
                 if (t == "---" || t == "...") break
                 YAML_DATE_REGEX.find(t)?.destructured?.let { (y, m, d) ->
-                    safeDate(y, m, d)?.let { return it }
+                    safeDate(y, m, d, today)?.let { return it }
                 }
             }
         }
@@ -86,13 +86,13 @@ object MarkdownMetaExtractor {
         // 2. 「ラベル: YYYY/MM/DD」形式の行
         LABELED_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
             val (y, m, d) = it.destructured
-            safeDate(y, m, d)
+            safeDate(y, m, d, today)
         }?.let { return it }
 
         // 3. 本文中の最初の YYYY/MM/DD または YYYY-MM-DD（1990〜今日の範囲のみ）
         BODY_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
             val (y, m, d) = it.destructured
-            safeDate(y, m, d)
+            safeDate(y, m, d, today)
         }?.let { return it }
 
         // 4. 見出し中の YYYY年MM月DD日 / YYYY年MM月
@@ -102,12 +102,12 @@ object MarkdownMetaExtractor {
         val headings = extractHeadings(content)
         for (heading in headings) {
             HEADING_JP_DATE_REGEX.find(heading)?.destructured?.let { (y, m, d) ->
-                safeDate(y, m, d)?.let { return it }
+                safeDate(y, m, d, today)?.let { return it }
             }
         }
         for (heading in headings) {
             HEADING_JP_MONTH_REGEX.find(heading)?.destructured?.let { (y, m) ->
-                safeMonth(y, m)?.let { return it }
+                safeMonth(y, m, today)?.let { return it }
             }
         }
 

@@ -3,6 +3,7 @@ package com.minibrain.data.md
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.time.LocalDate
 
 class MarkdownMetaExtractorTest {
 
@@ -205,5 +206,71 @@ class MarkdownMetaExtractorTest {
     @Test
     fun noDateReturnsNull() {
         assertNull(extract("# タイトル\n\n本文だけ"))
+    }
+
+    @Test
+    fun testSafeDate_valid() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertEquals("2024-12-15", MarkdownMetaExtractor.safeDate("2024", "12", "15", today))
+    }
+
+    @Test
+    fun testSafeDate_futureDate() {
+        val today = LocalDate.of(2024, 12, 1)
+        assertNull("Future date should return null", MarkdownMetaExtractor.safeDate("2024", "12", "15", today))
+    }
+
+    @Test
+    fun testSafeDate_before1990() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertNull("Dates before 1990 should return null", MarkdownMetaExtractor.safeDate("1989", "12", "31", today))
+    }
+
+    @Test
+    fun testSafeDate_invalidMonth() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertNull("Invalid month should return null (runCatching catches exception)", MarkdownMetaExtractor.safeDate("2024", "13", "1", today))
+    }
+
+    @Test
+    fun testSafeDate_invalidDay() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertNull("Invalid day should return null (runCatching catches exception)", MarkdownMetaExtractor.safeDate("2024", "2", "30", today))
+    }
+
+    @Test
+    fun testSafeDate_invalidFormat() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertNull("Invalid string format should return null", MarkdownMetaExtractor.safeDate("YYYY", "MM", "DD", today))
+    }
+
+    @Test
+    fun testSafeMonth_valid() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertEquals("2024-12-01", MarkdownMetaExtractor.safeMonth("2024", "12", today))
+    }
+
+    @Test
+    fun testSafeMonth_futureDate() {
+        val today = LocalDate.of(2024, 11, 1)
+        assertNull("Future month should return null", MarkdownMetaExtractor.safeMonth("2024", "12", today))
+    }
+
+    @Test
+    fun testSafeMonth_before1990() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertNull("Month before 1990 should return null", MarkdownMetaExtractor.safeMonth("1989", "12", today))
+    }
+
+    @Test
+    fun testSafeMonth_invalidMonth() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertNull("Invalid month should return null", MarkdownMetaExtractor.safeMonth("2024", "13", today))
+    }
+
+    @Test
+    fun testSafeMonth_invalidFormat() {
+        val today = LocalDate.of(2025, 1, 1)
+        assertNull("Invalid string format should return null", MarkdownMetaExtractor.safeMonth("YYYY", "MM", today))
     }
 }
