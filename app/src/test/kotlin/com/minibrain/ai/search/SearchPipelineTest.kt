@@ -170,5 +170,47 @@ class SearchPipelineTest {
         assertTrue(topicMatchCitation != null)
         assertTrue(topicMatchCitation!!.topicMatch)
     }
+
+    @Test
+    fun `metadataSearch correctly uses firstChunkOf lazy loading`() = runTest {
+        val query = "胃腸炎と胃についての記録"
+        val treeUri = "tree/uri"
+
+        coEvery { queryExpander.expand(query) } returns listOf(query)
+        coEvery { hyde.generateHypothetical(query) } returns null
+
+        // Topic match needs documents where the filename is contained in the query
+        val doc1 = DocumentEntity(id = 7, treeUri = treeUri, fileUri = "uri1", fileName = "胃.md", relativePath = "胃.md", lastModified = 0L, contentHash = "", firstParagraph = "first paragraph 1", documentDate = null)
+        val doc2 = DocumentEntity(id = 8, treeUri = treeUri, fileUri = "uri2", fileName = "胃腸炎.md", relativePath = "胃腸炎.md", lastModified = 0L, contentHash = "", firstParagraph = "first paragraph 2", documentDate = null)
+        coEvery { cache.documents() } returns listOf(doc1, doc2)
+
+        val chunk1 = ChunkEntity(id = 1, docId = 7, text = "long chunk text that exceeds first paragraph and contains topic match snippet for doc 1", embedding = ByteArray(0), headingPath = "A")
+        val chunk2 = ChunkEntity(id = 2, docId = 8, text = "long chunk text for doc 2", embedding = ByteArray(0), headingPath = "B")
+
+        coEvery { cache.chunkVectors() } returns Pair(listOf(chunk1, chunk2), emptyArray<FloatArray>())
+
+        // Mock other pipeline steps to return empty or pass-through
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
+        coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
+        coEvery { llmReranker.rerank(query, any(), any()) } answers {
+            @Suppress("UNCHECKED_CAST")
+            it.invocation.args[1] as List<Citation>
+        }
+
+        val result = searchPipeline.search(query, treeUri, cache = cache)
+
+        // Verify that topic match citations have the expanded snippet from the chunks
+        val citation1 = result.citations.find { it.docId == 7L }
+        assertTrue(citation1 != null)
+        assertEquals("long chunk text that exceeds first paragraph and contains topic match snippet for doc 1", citation1?.snippet)
+
+        val citation2 = result.citations.find { it.docId == 8L }
+        assertTrue(citation2 != null)
+        assertEquals("long chunk text for doc 2", citation2?.snippet)
+
+        // Verify lazy loading: chunkVectors() should be called exactly once
+        // even though multiple documents triggered topicMatch snippet generation
+        coVerify(exactly = 1) { cache.chunkVectors() }
+    }
 }
 
