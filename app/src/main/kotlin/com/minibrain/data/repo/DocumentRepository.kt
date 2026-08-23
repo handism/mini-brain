@@ -43,19 +43,12 @@ class DocumentRepository(
     private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
     companion object {
-        private val FULL_DATE_PATTERNS = listOf(
-            Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
-            Regex("""(\d{4})/(\d{1,2})/(\d{1,2})"""),
-            Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
-            Regex("""(\d{4})_(\d{1,2})_(\d{1,2})"""),
-            Regex("""(\d{4})\.(\d{1,2})\.(\d{1,2})"""),
-            Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日"""),
+        private val COMBINED_FULL_DATE_PATTERN = Regex(
+            """(\d{4})-(\d{1,2})-(\d{1,2})|(\d{4})/(\d{1,2})/(\d{1,2})|(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)|(\d{4})_(\d{1,2})_(\d{1,2})|(\d{4})\.(\d{1,2})\.(\d{1,2})|(\d{4})年(\d{1,2})月(\d{1,2})日"""
         )
 
-        private val MONTH_DATE_PATTERNS = listOf(
-            Regex("""(?<!\d)(\d{4})-(\d{1,2})(?!\d|-\d)"""),
-            Regex("""(\d{4})年(\d{1,2})月(?!\d)"""),
-            Regex("""(?<!\d)(\d{4})(\d{2})(?!\d)"""),
+        private val COMBINED_MONTH_DATE_PATTERN = Regex(
+            """(?<!\d)(\d{4})-(\d{1,2})(?!\d|-\d)|(\d{4})年(\d{1,2})月(?!\d)|(?<!\d)(\d{4})(\d{2})(?!\d)"""
         )
 
         // パスやファイル名から日付メタを抽出する。完全日付（日まで揃う）を先に検査し、
@@ -63,16 +56,27 @@ class DocumentRepository(
         // ユニットテストから呼び出せるよう @VisibleForTesting に昇格。
         @VisibleForTesting
         internal fun extractDateFromPath(relativePath: String): String? {
-            for (pattern in FULL_DATE_PATTERNS) {
-                val match = pattern.find(relativePath) ?: continue
-                val (y, m, d) = match.destructured
-                DateValidator.parseDay(y, m, d)?.let { return it }
+            COMBINED_FULL_DATE_PATTERN.findAll(relativePath).forEach { match ->
+                for (i in 1..16 step 3) {
+                    val y = match.groupValues[i]
+                    if (y.isNotEmpty()) {
+                        val m = match.groupValues[i+1]
+                        val d = match.groupValues[i+2]
+                        DateValidator.parseDay(y, m, d)?.let { return it }
+                        break
+                    }
+                }
             }
 
-            for (pattern in MONTH_DATE_PATTERNS) {
-                val match = pattern.find(relativePath) ?: continue
-                val (y, m) = match.destructured
-                DateValidator.parseMonth(y, m)?.let { return it }
+            COMBINED_MONTH_DATE_PATTERN.findAll(relativePath).forEach { match ->
+                for (i in 1..5 step 2) {
+                    val y = match.groupValues[i]
+                    if (y.isNotEmpty()) {
+                        val m = match.groupValues[i+1]
+                        DateValidator.parseMonth(y, m)?.let { return it }
+                        break
+                    }
+                }
             }
 
             return null
