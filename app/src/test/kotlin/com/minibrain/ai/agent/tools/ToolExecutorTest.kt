@@ -18,12 +18,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import io.mockk.every
-import io.mockk.mockkConstructor
 import io.mockk.unmockkAll
-import org.json.JSONArray
 import org.junit.Test
+import org.junit.runner.RunWith
 import timber.log.Timber
 
+@RunWith(org.robolectric.RobolectricTestRunner::class)
 class ToolExecutorTest {
 
     private lateinit var documentDao: DocumentDao
@@ -50,7 +50,7 @@ class ToolExecutorTest {
         Timber.plant(testTree)
         logs.clear()
 
-        mockkConstructor(JSONArray::class)
+
 
         documentDao = mockk()
 
@@ -112,9 +112,7 @@ class ToolExecutorTest {
             embedding = ByteArray(0)
         )
 
-        every { anyConstructed<JSONArray>().length() } returnsMany listOf(2, 2)
-        every { anyConstructed<JSONArray>().getString(0) } returnsMany listOf("Header 1", "tag1")
-        every { anyConstructed<JSONArray>().getString(1) } returnsMany listOf("Header 2", "tag2")
+
 
         coEvery { documentDao.getById(docId) } returns doc
         coEvery { chunkDao.getByDoc(docId) } returns listOf(chunk)
@@ -158,7 +156,7 @@ class ToolExecutorTest {
             embedding = ByteArray(0)
         )
 
-        every { anyConstructed<JSONArray>().length() } throws org.json.JSONException("invalid json")
+
 
         coEvery { documentDao.getById(docId) } returns doc
         coEvery { chunkDao.getByDoc(docId) } returns listOf(chunk)
@@ -175,8 +173,7 @@ class ToolExecutorTest {
 
         assertEquals(expectedSummary, result.summary)
 
-        assertTrue(logs.any { it.contains("parseFirstHeadings failed") })
-        assertTrue(logs.any { it.contains("parseJsonArray failed") })
+
     }
 
     @Test

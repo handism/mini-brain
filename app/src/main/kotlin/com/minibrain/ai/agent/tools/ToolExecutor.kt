@@ -19,6 +19,8 @@ import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.search.NGramTokenizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.util.JsonReader
+import java.io.StringReader
 import org.json.JSONArray
 import timber.log.Timber
 
@@ -323,14 +325,31 @@ class ToolExecutor(
     }
 
     private fun parseFirstHeadings(json: String, count: Int): String = runCatching {
-        val arr = JSONArray(json)
-        (0 until minOf(arr.length(), count)).joinToString(", ") { i -> arr.getString(i) }
+        if (count <= 0) return@runCatching ""
+        val reader = JsonReader(StringReader(json))
+        reader.beginArray()
+        var countFound = 0
+        val sb = StringBuilder()
+        while (reader.hasNext() && countFound < count) {
+            val str = reader.nextString()
+            if (countFound > 0) sb.append(", ")
+            sb.append(str)
+            countFound++
+        }
+        reader.close()
+        sb.toString()
     }.onFailure { Timber.tag(TAG).w(it, "parseFirstHeadings failed: $json") }
      .getOrElse { "" }
 
     private fun parseJsonArray(json: String): List<String> = runCatching {
-        val arr = JSONArray(json)
-        List(arr.length()) { i -> arr.getString(i) }
+        val reader = JsonReader(StringReader(json))
+        reader.beginArray()
+        val list = mutableListOf<String>()
+        while (reader.hasNext()) {
+            list.add(reader.nextString())
+        }
+        reader.close()
+        list
     }.onFailure { Timber.tag(TAG).w(it, "parseJsonArray failed: $json") }
      .getOrElse { emptyList() }
 }
