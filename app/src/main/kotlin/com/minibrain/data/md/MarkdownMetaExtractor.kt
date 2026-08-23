@@ -59,11 +59,11 @@ object MarkdownMetaExtractor {
     fun extractTags(markdown: String): List<String> =
         TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct().toList()
 
+    internal fun safeDate(y: String, m: String, d: String = "1", today: LocalDate = LocalDate.now()): String? =
+        DateValidator.parseDayNotInFuture(y, m, d, today)
+
     fun extractDateFromContent(content: String): String? {
         val today = LocalDate.now()
-
-        fun safeDate(y: String, m: String, d: String = "1"): String? =
-            DateValidator.parseDayNotInFuture(y, m, d, today)
 
         // 1. YAML frontmatter の date 系フィールド
         val lineSeq = content.lineSequence().iterator()
@@ -72,7 +72,7 @@ object MarkdownMetaExtractor {
                 val t = lineSeq.next().trim()
                 if (t == "---" || t == "...") break
                 YAML_DATE_REGEX.find(t)?.destructured?.let { (y, m, d) ->
-                    safeDate(y, m, d)?.let { return it }
+                    safeDate(y, m, d, today)?.let { return it }
                 }
             }
         }
@@ -80,13 +80,13 @@ object MarkdownMetaExtractor {
         // 2. 「ラベル: YYYY/MM/DD」形式の行
         LABELED_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
             val (y, m, d) = it.destructured
-            safeDate(y, m, d)
+            safeDate(y, m, d, today)
         }?.let { return it }
 
         // 3. 本文中の最初の YYYY/MM/DD または YYYY-MM-DD（1990〜今日の範囲のみ）
         BODY_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
             val (y, m, d) = it.destructured
-            safeDate(y, m, d)
+            safeDate(y, m, d, today)
         }?.let { return it }
 
         // 4. 見出し中の YYYY年MM月DD日 / YYYY年MM月
@@ -96,12 +96,12 @@ object MarkdownMetaExtractor {
         val headings = extractHeadings(content)
         for (heading in headings) {
             HEADING_JP_DATE_REGEX.find(heading)?.destructured?.let { (y, m, d) ->
-                safeDate(y, m, d)?.let { return it }
+                safeDate(y, m, d, today)?.let { return it }
             }
         }
         for (heading in headings) {
             HEADING_JP_MONTH_REGEX.find(heading)?.destructured?.let { (y, m) ->
-                safeDate(y, m)?.let { return it }
+                safeDate(y, m, today = today)?.let { return it }
             }
         }
 

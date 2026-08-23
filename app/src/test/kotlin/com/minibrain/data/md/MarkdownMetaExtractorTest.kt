@@ -238,5 +238,28 @@ class MarkdownMetaExtractorTest {
     fun noDateReturnsNull() {
         assertNull(extract("# タイトル\n\n本文だけ"))
     }
-}
 
+    @Test
+    fun testSafeDate_valid() {
+        val today = java.time.LocalDate.of(2024, 5, 1)
+        assertEquals("2024-04-15", MarkdownMetaExtractor.safeDate("2024", "4", "15", today))
+    }
+
+    @Test
+    fun testSafeDate_futureReturnsNull() {
+        val today = java.time.LocalDate.of(2024, 5, 1)
+        assertNull(MarkdownMetaExtractor.safeDate("2024", "5", "2", today))
+    }
+
+    @Test
+    fun testSafeDate_invalidDateReturnsNull() {
+        val today = java.time.LocalDate.of(2024, 5, 1)
+        assertNull(MarkdownMetaExtractor.safeDate("2024", "2", "30", today))
+    }
+
+    @Test
+    fun testSafeDate_defaultDay() {
+        val today = java.time.LocalDate.of(2024, 5, 1)
+        assertEquals("2024-04-01", MarkdownMetaExtractor.safeDate("2024", "4", today = today))
+    }
+}
