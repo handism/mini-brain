@@ -65,6 +65,47 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun `downloadAll catches moveFile exception and emits Error`() = runTest {
+        mockkConstructor(OkHttpClient.Builder::class)
+        val mockClient = mockk<OkHttpClient>()
+        val mockCall = mockk<Call>()
+        val mockResponse = mockk<okhttp3.Response>()
+        val mockResponseBody = mockk<okhttp3.ResponseBody>()
+
+        every { anyConstructed<OkHttpClient.Builder>().build() } returns mockClient
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } returns mockResponse
+        every { mockResponse.isSuccessful } returns true
+        every { mockResponse.code } returns 200
+        every { mockResponse.body } returns mockResponseBody
+        every { mockResponseBody.contentLength() } returns 100L
+
+        val data = ByteArray(100)
+        every { mockResponseBody.byteStream() } answers { java.io.ByteArrayInputStream(data) }
+
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_test3")
+        every { mockContext.filesDir } returns filesDir
+
+        try {
+            val downloader = spyk(ModelDownloader(mockContext))
+            every { downloader["verifyHash"](any<File>(), any<String>()) } returns true
+
+            val modelsDir = File(filesDir, "models")
+            File(modelsDir, ModelDownloader.EMBEDDER_FILE_NAME).mkdirs()
+            File(modelsDir, "${ModelDownloader.EMBEDDER_FILE_NAME}/dummy").createNewFile()
+
+            val results = downloader.downloadAll().toList()
+            val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
+
+            assertTrue(errorResult != null)
+            assertTrue(errorResult!!.message.contains("ファイルの移動に失敗しました"))
+        } finally {
+            unmockkConstructor(OkHttpClient.Builder::class)
+        }
+    }
+
+    @Test
     fun `downloadAll catches Exception and emits Error`() = runTest {
         val mockContext = mockk<Context>()
         val filesDir = tempFolder.newFolder("models")
