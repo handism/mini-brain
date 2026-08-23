@@ -5,6 +5,7 @@ import io.mockk.every
 import io.mockk.mockkConstructor
 import io.mockk.mockkStatic
 import io.mockk.unmockkAll
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -110,6 +111,30 @@ class LlmServiceTest {
             fail("Expected Exception")
         } catch (e: Exception) {
             assertTrue(e.message!!.contains("CPUモードでの初期化に失敗しました"))
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun `close releases engine resources and updates state`() = runBlocking {
+        val service = LlmService()
+
+        val tempFile = File.createTempFile("model", ".bin")
+        RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
+
+        mockkConstructor(Engine::class)
+        every { anyConstructed<Engine>().initialize() } returns Unit
+        every { anyConstructed<Engine>().close() } returns Unit
+
+        try {
+            service.initialize(tempFile, forceCpu = true)
+            assertTrue(service.isReady())
+
+            service.close()
+
+            assertFalse(service.isReady())
+            verify { anyConstructed<Engine>().close() }
         } finally {
             tempFile.delete()
         }
