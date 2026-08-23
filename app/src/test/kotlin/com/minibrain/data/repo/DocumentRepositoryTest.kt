@@ -176,10 +176,13 @@ class DocumentRepositoryTest {
             floatArrayOf(0.1f, 0.2f)
         }
 
-        io.mockk.coEvery { chunkDao.insertAll(any<List<com.minibrain.data.db.entities.ChunkEntity>>()) } returns listOf(2L)
+        io.mockk.coEvery { chunkDao.insertAll(any<List<com.minibrain.data.db.entities.ChunkEntity>>()) } answers {
+            val arg = firstArg<List<com.minibrain.data.db.entities.ChunkEntity>>()
+            List(arg.size) { (it + 1).toLong() }
+        }
         io.mockk.every { writableDb.execSQL(any(), any<Array<Any?>>()) } returns Unit
 
-        io.mockk.coEvery { folderEmbeddingDao.upsert(any()) } returns Unit
+        io.mockk.coEvery { folderEmbeddingDao.upsertAll(any()) } returns Unit
 
         try {
             repository.indexFolder(treeUri)

@@ -243,32 +243,35 @@ class DocumentRepository(
 
                 // Flush buffer to DB in a single SQLite transaction to avoid high memory pressure (OOM) and auto-commits
                 if (chunkBuffer.size >= 900) {
-                    writableDb.beginTransaction()
-                    try {
-                        val chunkIds = chunkDao.insertAll(chunkBuffer)
-                        insertFts(ftsStmt, chunkIds, chunkBuffer)
-                        writableDb.setTransactionSuccessful()
-                    } finally {
-                        writableDb.endTransaction()
-                    }
-                    newTotalChunks += chunkBuffer.size
-                    chunkBuffer.clear()
+                    newTotalChunks += flushChunkBuffer(writableDb, ftsStmt, chunkBuffer, clearBuffer = true)
                 }
             }
 
-            if (chunkBuffer.isNotEmpty()) {
-                writableDb.beginTransaction()
-                try {
-                    val chunkIds = chunkDao.insertAll(chunkBuffer)
-                    insertFts(ftsStmt, chunkIds, chunkBuffer)
-                    writableDb.setTransactionSuccessful()
-                } finally {
-                    writableDb.endTransaction()
-                }
-                newTotalChunks += chunkBuffer.size
-            }
+            newTotalChunks += flushChunkBuffer(writableDb, ftsStmt, chunkBuffer, clearBuffer = false)
         }
         return newTotalChunks
+    }
+
+    private suspend inline fun flushChunkBuffer(
+        writableDb: androidx.sqlite.db.SupportSQLiteDatabase,
+        ftsStmt: androidx.sqlite.db.SupportSQLiteStatement,
+        chunkBuffer: MutableList<ChunkEntity>,
+        clearBuffer: Boolean
+    ): Int {
+        if (chunkBuffer.isEmpty()) return 0
+        writableDb.beginTransaction()
+        try {
+            val chunkIds = chunkDao.insertAll(chunkBuffer)
+            insertFts(ftsStmt, chunkIds, chunkBuffer)
+            writableDb.setTransactionSuccessful()
+        } finally {
+            writableDb.endTransaction()
+        }
+        val size = chunkBuffer.size
+        if (clearBuffer) {
+            chunkBuffer.clear()
+        }
+        return size
     }
 
     private suspend fun indexFolderEmbeddings(treeUri: Uri, mdFiles: List<MdFile>) {
