@@ -13,6 +13,7 @@ import io.mockk.MockKAnnotations
 import io.mockk.impl.annotations.MockK
 import io.mockk.impl.annotations.RelaxedMockK
 import org.junit.Before
+import kotlinx.coroutines.flow.first
 
 class DocumentRepositoryTest {
 
@@ -209,5 +210,19 @@ class DocumentRepositoryTest {
         }
 
         io.mockk.verify { cursor.close() }
+    }
+
+    @org.junit.Test
+    fun testObserveChunkCount_delegatesToDao() = kotlinx.coroutines.test.runTest {
+        val treeUri = "content://tree/uri"
+        val expectedCount = 42
+
+        io.mockk.every { chunkDao.observeCountByTree(treeUri) } returns kotlinx.coroutines.flow.flowOf(expectedCount)
+
+        val resultFlow = repository.observeChunkCount(treeUri)
+        val result = resultFlow.first()
+
+        org.junit.Assert.assertEquals(expectedCount, result)
+        io.mockk.verify { chunkDao.observeCountByTree(treeUri) }
     }
 }
