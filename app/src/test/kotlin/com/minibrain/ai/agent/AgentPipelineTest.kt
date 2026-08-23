@@ -15,6 +15,10 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import com.minibrain.ai.agent.AgentTraceEvent
+import com.minibrain.ai.agent.ToolCallEvent
+import com.minibrain.ai.agent.ObservationEvent
+import com.minibrain.ai.agent.PlannerDecisionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -143,5 +147,34 @@ class AgentPipelineTest {
         assertEquals(1, result.citations.size)
         assertEquals(fallbackCitation, result.citations.first())
         coVerify(exactly = 1) { ragPipeline.retrieveTopChunks(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun testReActLoopExecuteSuccess() = runTest {
+        val query = "何か探す"
+
+        coEvery {
+            searchPipeline.search(any(), any(), any(), any(), any())
+        } returns SearchPipelineResult(emptyList(), emptyList())
+
+        every { llmService.isReady() } returns true
+
+        val toolCallStr = "TOOL: glob\nPATTERN: 2023/08/*"
+        val finalizeStr = "ACTION: finalize\nREASON: found"
+
+        var callCount = 0
+        coEvery { llmService.generateStream(any()) } answers {
+            callCount++
+            if (callCount == 1) {
+                flowOf(toolCallStr)
+            } else {
+                flowOf(finalizeStr)
+            }
+        }
+
+        val result = pipeline.run(query, "content://test")
+
+        val toolCallEvents = result.traceEvents.filterIsInstance<ToolCallEvent>()
+        assertTrue(toolCallEvents.isNotEmpty())
     }
 }
