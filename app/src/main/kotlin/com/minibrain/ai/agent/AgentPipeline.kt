@@ -241,28 +241,41 @@ class AgentPipeline(
 
                 val found = mutableListOf<String>()
                 val notFound = mutableListOf<String>()
-                // パスの正規化 (スラッシュとハイフンを除外) をループ外で一度だけ行うことで高速化
-                val normalizedDocs = allDocs.map { doc ->
-                    val path = doc.relativePath
-                    val len = path.length
-                    val arr = CharArray(len)
-                    var p = 0
-                    for (i in 0 until len) {
-                        val c = path[i]
-                        if (c != '/' && c != '-') {
-                            arr[p++] = c
-                        }
-                    }
-                    doc to String(arr, 0, p)
-                }
+                // 中間文字列を生成せず、インデックス探索でパスを直接検索して高速化
                 for (date in dates) {
-                    // 区切り文字を除いた8桁数字 (YYYYMMDD) でパスを検索
-                    val digits = date.replace("-", "")
-                    val matches = normalizedDocs.filter { (_, normalizedPath) ->
-                        normalizedPath.contains(digits)
-                    }.take(3)
+                    val searchArray = date.replace("-", "").toCharArray()
+                    val firstChar = searchArray[0]
+                    val matches = allDocs.asSequence().filter { doc ->
+                        val path = doc.relativePath
+                        var isFound = false
+                        for (i in 0 until path.length) {
+                            if (path[i] == firstChar) {
+                                var pIdx = i + 1
+                                var sIdx = 1
+                                while (pIdx < path.length && sIdx < searchArray.size) {
+                                    val c = path[pIdx]
+                                    if (c == '/' || c == '-') {
+                                        pIdx++
+                                        continue
+                                    }
+                                    if (c == searchArray[sIdx]) {
+                                        sIdx++
+                                        pIdx++
+                                    } else {
+                                        break
+                                    }
+                                }
+                                if (sIdx == searchArray.size) {
+                                    isFound = true
+                                    break
+                                }
+                            }
+                        }
+                        isFound
+                    }.take(3).toList()
+
                     if (matches.isNotEmpty()) {
-                        found += matches.map { (doc, _) -> "[d=${doc.id}] ${doc.relativePath}" }
+                        found += matches.map { doc -> "[d=${doc.id}] ${doc.relativePath}" }
                     } else {
                         notFound += date
                     }
