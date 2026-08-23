@@ -19,7 +19,6 @@ import com.minibrain.data.md.MdFileReader
 import org.json.JSONArray
 import com.minibrain.data.search.NGramTokenizer
 import com.minibrain.util.DateValidator
-import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
