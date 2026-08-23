@@ -2,6 +2,7 @@ package com.minibrain.ai.agent
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -276,5 +277,30 @@ class DateResolverTest {
     @Test
     fun `isDiaryQuery detects dot date`() {
         assertTrue(DateResolver.isDiaryQuery("2024.05.01のメモ"))
+    }
+
+    // ─────────────── isDateQuery ───────────────
+
+    @Test
+    fun `isDateQuery detects time asking questions`() {
+        assertTrue(DateResolver.isDateQuery("いつ行ったの？"))
+        assertTrue(DateResolver.isDateQuery("何月にあった？"))
+        assertTrue(DateResolver.isDateQuery("何日だった？"))
+        assertTrue(DateResolver.isDateQuery("何年だった？"))
+        assertTrue(DateResolver.isDateQuery("何年前？"))
+        assertTrue(DateResolver.isDateQuery("数ヶ月前"))
+        assertTrue(DateResolver.isDateQuery("去年の話"))
+        assertTrue(DateResolver.isDateQuery("先月は何した？"))
+        assertTrue(DateResolver.isDateQuery("先週の出来事"))
+        assertTrue(DateResolver.isDateQuery("いつから始めた？"))
+        assertTrue(DateResolver.isDateQuery("いつまでかかる？"))
+    }
+
+    @Test
+    fun `isDateQuery returns false for unrelated queries`() {
+        assertFalse(DateResolver.isDateQuery("誰と行った？"))
+        assertFalse(DateResolver.isDateQuery("どこにある？"))
+        assertFalse(DateResolver.isDateQuery("何が起こった？"))
+        assertFalse(DateResolver.isDateQuery("今日のこと"))
     }
 }
