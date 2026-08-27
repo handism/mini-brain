@@ -90,6 +90,7 @@ class LlmServiceTest {
             fail("Expected Exception")
         } catch (e: Exception) {
             assertTrue(e.message!!.contains("GPU/CPU 両方で失敗しました"))
+            assertTrue(logs.any { it.contains("CPU initialization failed") })
         } finally {
             tempFile.delete()
         }
@@ -110,6 +111,7 @@ class LlmServiceTest {
             fail("Expected Exception")
         } catch (e: Exception) {
             assertTrue(e.message!!.contains("CPUモードでの初期化に失敗しました"))
+            assertTrue(logs.any { it.contains("CPU initialization failed") })
         } finally {
             tempFile.delete()
         }
