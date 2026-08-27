@@ -26,6 +26,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+private val hRuleRegex = Regex("[-*_]{3,}")
+private val numberedMatchRegex = Regex("\\d+\\.\\s.*")
+private val numberedItemRegex = Regex("^(\\d+)\\.\\s(.*)")
+
 internal sealed class MdBlock {
     data class Heading(val level: Int, val text: String) : MdBlock()
     data class Paragraph(val text: String) : MdBlock()
@@ -58,11 +62,11 @@ internal fun parse(text: String): List<MdBlock> {
             line.startsWith("### ") -> blocks.add(MdBlock.Heading(3, line.removePrefix("### ")))
             line.startsWith("## ") -> blocks.add(MdBlock.Heading(2, line.removePrefix("## ")))
             line.startsWith("# ") -> blocks.add(MdBlock.Heading(1, line.removePrefix("# ")))
-            trimmed.matches(Regex("[-*_]{3,}")) -> blocks.add(MdBlock.HRule)
+            trimmed.matches(hRuleRegex) -> blocks.add(MdBlock.HRule)
             trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") ->
                 blocks.add(MdBlock.BulletItem(trimmed.substring(2)))
-            trimmed.matches(Regex("\\d+\\.\\s.*")) -> {
-                val m = Regex("^(\\d+)\\.\\s(.*)").find(trimmed)
+            trimmed.matches(numberedMatchRegex) -> {
+                val m = numberedItemRegex.find(trimmed)
                 if (m != null) blocks.add(MdBlock.NumberedItem(m.groupValues[1].toInt(), m.groupValues[2]))
             }
             line.isBlank() -> { /* ブロック間の空行はスキップ */ }
@@ -73,7 +77,7 @@ internal fun parse(text: String): List<MdBlock> {
                     val nt = next.trimStart()
                     if (next.isBlank() || nt.startsWith("#") || nt.startsWith("```") ||
                         nt.startsWith("- ") || nt.startsWith("* ") || nt.startsWith("+ ") ||
-                        nt.matches(Regex("\\d+\\.\\s.*")) || nt.matches(Regex("[-*_]{3,}"))) break
+                        nt.matches(numberedMatchRegex) || nt.matches(hRuleRegex)) break
                     i++
                     para.add(lines[i])
                 }
