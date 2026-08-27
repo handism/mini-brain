@@ -67,12 +67,10 @@ object MarkdownChunker {
             }
             headingStack.add(Pair(level, title))
 
-            val headingPath = buildString {
-                append(fileName)
-                for (item in headingStack) {
-                    append(" > ")
-                    append(item.second)
-                }
+            val headingPath = if (headingStack.isEmpty()) {
+                fileName
+            } else {
+                headingStack.joinToString(separator = " > ", prefix = "$fileName > ") { it.second }
             }
             val bodyStart = match.range.last + 1
             val bodyEnd = if (i + 1 < matches.size) matches[i + 1].range.first else markdown.length
