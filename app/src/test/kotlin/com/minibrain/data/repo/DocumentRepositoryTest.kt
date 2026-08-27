@@ -12,6 +12,8 @@ import com.minibrain.data.db.daos.FolderEmbeddingDao
 import io.mockk.MockKAnnotations
 import io.mockk.impl.annotations.MockK
 import io.mockk.impl.annotations.RelaxedMockK
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import org.junit.Before
 
 class DocumentRepositoryTest {
@@ -238,5 +240,31 @@ class DocumentRepositoryTest {
 
         // Verify state is Idle
         org.junit.Assert.assertEquals(com.minibrain.data.repo.IndexingState.Idle, repository.indexingState.value)
+    }
+
+    @org.junit.Test
+    fun observeDocCount_returnsFlowFromDao() = kotlinx.coroutines.test.runTest {
+        val treeUri = "content://test-tree-uri"
+        val expectedFlow = flowOf(0, 5, 10)
+        io.mockk.every { documentDao.observeCountByTree(treeUri) } returns expectedFlow
+
+        val resultFlow = repository.observeDocCount(treeUri)
+        val resultList = resultFlow.toList()
+
+        org.junit.Assert.assertEquals(listOf(0, 5, 10), resultList)
+        io.mockk.verify(exactly = 1) { documentDao.observeCountByTree(treeUri) }
+    }
+
+    @org.junit.Test
+    fun observeChunkCount_returnsFlowFromDao() = kotlinx.coroutines.test.runTest {
+        val treeUri = "content://test-tree-uri"
+        val expectedFlow = flowOf(0, 50, 100)
+        io.mockk.every { chunkDao.observeCountByTree(treeUri) } returns expectedFlow
+
+        val resultFlow = repository.observeChunkCount(treeUri)
+        val resultList = resultFlow.toList()
+
+        org.junit.Assert.assertEquals(listOf(0, 50, 100), resultList)
+        io.mockk.verify(exactly = 1) { chunkDao.observeCountByTree(treeUri) }
     }
 }
