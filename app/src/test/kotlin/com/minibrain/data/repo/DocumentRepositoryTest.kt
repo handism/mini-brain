@@ -326,4 +326,66 @@ class DocumentRepositoryTest {
         org.junit.Assert.assertEquals(listOf(0, 50, 100), resultList)
         io.mockk.verify(exactly = 1) { chunkDao.observeCountByTree(treeUri) }
     }
+
+    @org.junit.Test
+    fun testDeleteOldDocs_exceptionInTransaction_rollsBack_viaIndexFolder() = kotlinx.coroutines.test.runTest {
+        val treeUriStr = "content://tree/uri"
+
+        io.mockk.mockkStatic(android.net.Uri::class)
+        val treeUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(treeUriStr) } returns treeUri
+        io.mockk.every { treeUri.toString() } returns treeUriStr
+
+        val fileUriStr = "content://tree/uri/old.md"
+        val fileUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(fileUriStr) } returns fileUri
+        io.mockk.every { fileUri.toString() } returns fileUriStr
+
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        val mdFile = io.mockk.mockk<com.minibrain.data.md.MdFile>(relaxed = true) {
+            io.mockk.every { uri } returns fileUri
+            io.mockk.every { name } returns "old.md"
+            io.mockk.every { relativePath } returns "old.md"
+            io.mockk.every { lastModified } returns 0L
+            io.mockk.every { contentHash } returns "hash_new"
+            io.mockk.every { content } returns "# New Content"
+        }
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+
+        val docEntity = io.mockk.mockk<com.minibrain.data.db.entities.DocumentEntity>(relaxed = true) {
+            io.mockk.every { id } returns 1L
+            io.mockk.every { this@mockk.treeUri } returns treeUriStr
+            io.mockk.every { this@mockk.fileUri } returns fileUriStr
+            io.mockk.every { fileName } returns "old.md"
+            io.mockk.every { relativePath } returns "old.md"
+            io.mockk.every { lastModified } returns 0L
+            io.mockk.every { contentHash } returns "hash_old"
+        }
+        io.mockk.coEvery { documentDao.getByFileUris(any()) } returns listOf(docEntity)
+        io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
+
+        io.mockk.every { writableDb.execSQL(any(), any<Array<Any?>>()) } throws RuntimeException("Delete FTS failed")
+
+        val stmt = io.mockk.mockk<androidx.sqlite.db.SupportSQLiteStatement>(relaxed = true)
+        io.mockk.every { writableDb.compileStatement(any()) } returns stmt
+
+        io.mockk.every { writableDb.beginTransaction() } returns Unit
+        io.mockk.every { writableDb.setTransactionSuccessful() } returns Unit
+        io.mockk.every { writableDb.endTransaction() } returns Unit
+        io.mockk.coEvery { documentDao.updateAll(any()) } returns Unit
+
+        try {
+            repository.indexFolder(treeUri)
+            org.junit.Assert.fail("Expected exception")
+        } catch (e: Exception) {
+            org.junit.Assert.assertEquals("Delete FTS failed", e.message)
+        } finally {
+            io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
+            io.mockk.unmockkStatic(android.net.Uri::class)
+        }
+
+        io.mockk.verify(exactly = 1) { writableDb.beginTransaction() }
+        io.mockk.verify(exactly = 0) { writableDb.setTransactionSuccessful() }
+        io.mockk.verify(exactly = 1) { writableDb.endTransaction() }
+    }
 }
