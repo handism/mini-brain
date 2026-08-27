@@ -141,4 +141,24 @@ class LlmServiceTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun `initialize falls back to CPU if GPU throws Error`() = runBlocking {
+        val service = LlmService()
+
+        val tempFile = File.createTempFile("model", ".bin")
+        RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
+
+        mockkConstructor(Engine::class)
+        // First call to initialize (GPU) throws Error (e.g. native library missing), second (CPU) succeeds
+        every { anyConstructed<Engine>().initialize() } throws UnsatisfiedLinkError("Native library missing") andThen Unit
+
+        try {
+            service.initialize(tempFile, forceCpu = false)
+            assertTrue(service.isReady())
+            assertTrue(logs.any { it.contains("GPU initialization failed, falling back to CPU") })
+        } finally {
+            tempFile.delete()
+        }
+    }
 }
