@@ -195,6 +195,62 @@ class DocumentRepositoryTest {
         }
     }
 
+
+    @org.junit.Test
+    fun testIndexFolder_batchInsertException_rollsBack() = kotlinx.coroutines.test.runTest {
+        val treeUriStr = "content://tree/uri"
+
+        io.mockk.mockkStatic(android.net.Uri::class)
+        val treeUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(treeUriStr) } returns treeUri
+        io.mockk.every { treeUri.toString() } returns treeUriStr
+
+        val fileUriStr = "content://tree/uri/file1.md"
+        val fileUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(fileUriStr) } returns fileUri
+        io.mockk.every { fileUri.toString() } returns fileUriStr
+
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        val mdFile = com.minibrain.data.md.MdFile(
+            uri = fileUri,
+            name = "file1.md",
+            relativePath = "file1.md",
+            lastModified = 0L,
+            contentHash = "hash1",
+            content = "# Heading 1\nThis is paragraph 1.\n# Heading 2\nThis is paragraph 2."
+        )
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+
+        io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
+        io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
+        io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
+        io.mockk.coEvery { documentDao.insertAll(any()) } answers { val arg = firstArg<List<Any>>(); List(arg.size) { (it + 1).toLong() } }
+
+        io.mockk.coEvery { embedder.embed(any(), any()) } returns floatArrayOf(0.1f, 0.2f)
+
+        io.mockk.coEvery { chunkDao.insertAll(any<List<com.minibrain.data.db.entities.ChunkEntity>>()) } answers { val arg = firstArg<List<Any>>(); List(arg.size) { (it + 1).toLong() } }
+
+        // Force an exception during FTS insertion
+        val stmt = io.mockk.mockk<androidx.sqlite.db.SupportSQLiteStatement>(relaxed = true)
+        io.mockk.every { writableDb.compileStatement(any()) } returns stmt
+        io.mockk.every { stmt.executeInsert() } throws RuntimeException("DB batch insertion failed")
+
+        try {
+            repository.indexFolder(treeUri)
+            org.junit.Assert.fail("Expected exception")
+        } catch (e: Exception) {
+            org.junit.Assert.assertEquals("DB batch insertion failed", e.message)
+        }
+
+        io.mockk.verify { writableDb.beginTransaction() }
+        io.mockk.verify(exactly = 0) { writableDb.setTransactionSuccessful() }
+        io.mockk.verify { writableDb.endTransaction() }
+        io.mockk.verify { stmt.close() }
+
+        io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
+        io.mockk.unmockkStatic(android.net.Uri::class)
+    }
+
     @org.junit.Test
     fun testFtsCount_cursorException_closesCursor() = kotlinx.coroutines.test.runTest {
         io.mockk.coEvery { chunkDao.count() } returns 1
