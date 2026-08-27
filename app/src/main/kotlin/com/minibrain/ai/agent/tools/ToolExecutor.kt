@@ -1,6 +1,5 @@
 package com.minibrain.ai.agent.tools
 
-import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.AgentTool
 import com.minibrain.ai.agent.ToolCall
 import com.minibrain.ai.agent.ToolResult
