@@ -210,4 +210,33 @@ class DocumentRepositoryTest {
 
         io.mockk.verify { cursor.close() }
     }
+
+    @org.junit.Test
+    fun testClearFolder_deletesFtsAndDaos_resetsState() = kotlinx.coroutines.test.runTest {
+        val treeUri = "content://tree/uri"
+
+        // Mock DB for deleteFtsByTree
+        io.mockk.every { writableDb.execSQL(any<String>(), any<Array<Any?>>()) } returns Unit
+
+        // Mock DAOs
+        io.mockk.coEvery { chunkDao.deleteAllByTree(any()) } returns Unit
+        io.mockk.coEvery { documentDao.deleteAllByTree(any()) } returns Unit
+
+        repository.clearFolder(treeUri)
+
+        // Verify FTS deletion query execution
+        io.mockk.verify {
+            writableDb.execSQL(
+                match { it.contains("DELETE FROM chunks_fts WHERE rowid IN") },
+                match { it.contentEquals(arrayOf(treeUri)) }
+            )
+        }
+
+        // Verify DAO deletions
+        io.mockk.coVerify { chunkDao.deleteAllByTree(treeUri) }
+        io.mockk.coVerify { documentDao.deleteAllByTree(treeUri) }
+
+        // Verify state is Idle
+        org.junit.Assert.assertEquals(com.minibrain.data.repo.IndexingState.Idle, repository.indexingState.value)
+    }
 }
