@@ -170,5 +170,30 @@ class SearchPipelineTest {
         assertTrue(topicMatchCitation != null)
         assertTrue(topicMatchCitation!!.topicMatch)
     }
+
+    @Test
+    fun `search deduplicates and normalizes expanded queries correctly`() = runTest {
+        val originalQuery = "   original   query   " // will be normalized to "original query"
+        val expanded = listOf("expanded 1", " expanded  1 ", "", "  ") // " expanded  1 " becomes "expanded 1", "" and "  " ignored
+        val hypothetical = "original   query" // duplicate of normalized original
+
+        coEvery { queryExpander.expand(originalQuery) } returns expanded
+        coEvery { hyde.generateHypothetical(originalQuery) } returns hypothetical
+
+        coEvery { cache.documents() } returns emptyList()
+        coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
+        coEvery { chunkDao.bm25SearchByTree(any(), any(), any()) } returns emptyList()
+
+        coEvery { llmReranker.rerank(any(), any(), any()) } returns emptyList()
+
+        val capturedQueries = mutableListOf<String>()
+        coEvery { ragPipeline.vectorOnlyTopK(capture(capturedQueries), any(), any(), any()) } returns emptyList()
+
+        searchPipeline.search(originalQuery, "tree/uri", cache = cache)
+
+        assertEquals(2, capturedQueries.size)
+        assertEquals("original query", capturedQueries[0])
+        assertEquals("expanded 1", capturedQueries[1])
+    }
 }
 
