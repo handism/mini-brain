@@ -12,6 +12,41 @@ class MarkdownMetaExtractorTest {
     private fun extractFirstParagraph(content: String, maxChars: Int = 200): String =
         MarkdownMetaExtractor.extractFirstParagraph(content, maxChars)
 
+    private fun extractHeadings(content: String): List<String> =
+        MarkdownMetaExtractor.extractHeadings(content)
+
+    @Test
+    fun extractHeadings_multipleLevels() {
+        val md = """
+            # Heading 1
+            ## Heading 2
+            ### Heading 3
+            #### Heading 4
+            ##### Heading 5
+            ###### Heading 6
+        """.trimIndent()
+        val expected = listOf("Heading 1", "Heading 2", "Heading 3", "Heading 4", "Heading 5", "Heading 6")
+        assertEquals(expected, extractHeadings(md))
+    }
+
+    @Test
+    fun extractHeadings_ignoresInvalidHeadings() {
+        val md = """
+            ####### Invalid Heading 7
+            #NoSpaceHeading
+             # Indented Heading
+            This is # not a heading
+            #   Trimming Test
+        """.trimIndent()
+        val expected = listOf("Trimming Test")
+        assertEquals(expected, extractHeadings(md))
+    }
+
+    @Test
+    fun extractHeadings_emptyString() {
+        assertEquals(emptyList<String>(), extractHeadings(""))
+    }
+
     @Test
     fun testExtractFirstParagraph_basic() {
         val md = """
