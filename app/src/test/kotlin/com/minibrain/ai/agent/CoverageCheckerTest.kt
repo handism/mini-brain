@@ -1,12 +1,21 @@
 package com.minibrain.ai.agent
 
+import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoverageCheckerTest {
+
+    private val llmService = mockk<LlmService>()
+    private val coverageChecker = CoverageChecker(llmService)
 
     private fun citation(snippet: String, topicMatch: Boolean = false) = Citation(headingPath = "note.md", snippet = snippet, topicMatch = topicMatch)
 
@@ -115,5 +124,66 @@ class CoverageCheckerTest {
     @Test
     fun `空文字はcanAnswer=trueにフォールバック`() {
         assertTrue(CoverageChecker.parse("").canAnswer)
+    }
+
+    // --- check ---
+
+    @Test
+    fun `check - 日付クエリかつ日付プレフィックス付き候補で短絡する`() = runTest {
+        val candidates = listOf(citation("[日付: 2024-05-01] サウナしきじを訪問"))
+        val result = coverageChecker.check("サウナしきじにいつ行った？", candidates)
+        assertTrue(result.canAnswer)
+        assertTrue(result.missingInformation.isEmpty())
+    }
+
+    @Test
+    fun `check - 日付クエリかつtopicMatch付き候補で短絡する`() = runTest {
+        val candidates = listOf(citation("サウナしきじを訪問", topicMatch = true))
+        val result = coverageChecker.check("サウナしきじにいつ行った？", candidates)
+        assertTrue(result.canAnswer)
+        assertTrue(result.missingInformation.isEmpty())
+    }
+
+    @Test
+    fun `check - LLMの準備ができていない場合はcanAnswer=trueにフォールバック`() = runTest {
+        val candidates = listOf(citation("サウナしきじは静岡の有名サウナ"))
+        every { llmService.isReady() } returns false
+
+        val result = coverageChecker.check("サウナしきじの魅力は？", candidates)
+        assertTrue(result.canAnswer)
+        assertTrue(result.missingInformation.isEmpty())
+    }
+
+    @Test
+    fun `check - LLMがyesを返した場合はcanAnswer=true`() = runTest {
+        val candidates = listOf(citation("サウナしきじは静岡の有名サウナ"))
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } returns flowOf("y", "e", "s")
+
+        val result = coverageChecker.check("サウナしきじの魅力は？", candidates)
+        assertTrue(result.canAnswer)
+        assertTrue(result.missingInformation.isEmpty())
+    }
+
+    @Test
+    fun `check - LLMがnoと不足キーワードを返した場合はcanAnswer=false`() = runTest {
+        val candidates = listOf(citation("サウナしきじは静岡の有名サウナ"))
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } returns flowOf("no", ", ", "location", ", ", "price")
+
+        val result = coverageChecker.check("サウナしきじの場所と料金は？", candidates)
+        assertFalse(result.canAnswer)
+        assertEquals(listOf("location", "price"), result.missingInformation)
+    }
+
+    @Test
+    fun `check - LLMの生成で例外が発生した場合はcanAnswer=trueにフォールバック`() = runTest {
+        val candidates = listOf(citation("サウナしきじは静岡の有名サウナ"))
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } returns flow { throw RuntimeException("LLM error") }
+
+        val result = coverageChecker.check("サウナしきじの魅力は？", candidates)
+        assertTrue(result.canAnswer)
+        assertTrue(result.missingInformation.isEmpty())
     }
 }
