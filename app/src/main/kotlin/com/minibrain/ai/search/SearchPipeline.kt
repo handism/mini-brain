@@ -1,6 +1,5 @@
 package com.minibrain.ai.search
 
-import androidx.sqlite.db.SimpleSQLiteQuery
 import com.minibrain.ai.agent.BM25SearchHitEvent
 import com.minibrain.ai.agent.AgentTraceEvent
 import com.minibrain.ai.agent.CandidateMergeEvent
