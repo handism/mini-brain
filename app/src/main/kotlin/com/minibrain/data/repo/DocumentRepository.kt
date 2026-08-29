@@ -195,7 +195,7 @@ class DocumentRepository(
             docsToDelete.chunked(900).forEach { batch ->
                 writableDb.beginTransaction()
                 try {
-                    deleteFtsByDocIds(batch)
+                    chunkDao.deleteFtsByDocIds(batch)
                     chunkDao.deleteByDocIds(batch)
                     writableDb.setTransactionSuccessful()
                 } finally {
@@ -395,15 +395,6 @@ class DocumentRepository(
             stmt.executeInsert()
             stmt.clearBindings()
         }
-    }
-
-    private fun deleteFtsByDocIds(docIds: List<Long>) {
-        if (docIds.isEmpty()) return
-        val placeholders = docIds.joinToString(",") { "?" }
-        db.openHelper.writableDatabase.execSQL(
-            "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE docId IN ($placeholders))",
-            docIds.toTypedArray()
-        )
     }
 
     private fun extractDateFromPath(relativePath: String): String? =
