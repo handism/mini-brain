@@ -12,6 +12,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        if (intent?.action != null && intent.action != android.content.Intent.ACTION_MAIN) {
+            finish()
+            return
+        }
+
         enableEdgeToEdge()
         setContent {
             MiniBrainTheme {
