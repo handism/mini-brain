@@ -319,5 +319,36 @@ class MarkdownMetaExtractorTest {
     fun testExtractTags_noTags() {
         assertEquals(emptyList<String>(), MarkdownMetaExtractor.extractTags("Just some normal text without tags."))
     }
+
+    @Test
+    fun testSafeDate_validDate() {
+        val today = java.time.LocalDate.of(2024, 12, 15)
+        assertEquals("2024-12-15", MarkdownMetaExtractor.safeDate("2024", "12", "15", today))
+    }
+
+    @Test
+    fun testSafeDate_futureDateReturnsNull() {
+        val today = java.time.LocalDate.of(2024, 12, 15)
+        assertNull(MarkdownMetaExtractor.safeDate("2024", "12", "16", today))
+    }
+
+    @Test
+    fun testSafeDate_defaultDayIsOne() {
+        val today = java.time.LocalDate.of(2024, 12, 15)
+        assertEquals("2024-12-01", MarkdownMetaExtractor.safeDate("2024", "12", today = today))
+    }
+
+    @Test
+    fun testSafeDate_invalidDateReturnsNull() {
+        val today = java.time.LocalDate.of(2024, 12, 15)
+        assertNull(MarkdownMetaExtractor.safeDate("2024", "13", "15", today))
+        assertNull(MarkdownMetaExtractor.safeDate("2024", "12", "32", today))
+    }
+
+    @Test
+    fun testSafeDate_outOfRangeYearReturnsNull() {
+        val today = java.time.LocalDate.of(2024, 12, 15)
+        assertNull(MarkdownMetaExtractor.safeDate("1899", "12", "15", today))
+    }
 }
 

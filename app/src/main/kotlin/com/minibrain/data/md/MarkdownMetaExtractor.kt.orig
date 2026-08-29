@@ -59,10 +59,12 @@ object MarkdownMetaExtractor {
     fun extractTags(markdown: String): List<String> =
         TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct().toList()
 
-    internal fun safeDate(y: String, m: String, d: String = "1", today: LocalDate = LocalDate.now()): String? =
-        DateValidator.parseDayNotInFuture(y, m, d, today)
-
     fun extractDateFromContent(content: String): String? {
+        val today = LocalDate.now()
+
+        fun safeDate(y: String, m: String, d: String = "1"): String? =
+            DateValidator.parseDayNotInFuture(y, m, d, today)
+
         // 1. YAML frontmatter の date 系フィールド
         val lineSeq = content.lineSequence().iterator()
         if (lineSeq.hasNext() && lineSeq.next().trim() == "---") {
