@@ -19,8 +19,8 @@ object MarkdownMetaExtractor {
     private val HEADING_JP_DATE_REGEX = Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日""")
     private val HEADING_JP_MONTH_REGEX = Regex("""(\d{4})年(\d{1,2})月(?!\d)""")
 
-    fun extractHeadings(markdown: String): List<String> =
-        HEADING_REGEX.findAll(markdown).map { it.groupValues[1].trim() }.toList()
+    fun extractHeadings(markdown: String): Sequence<String> =
+        HEADING_REGEX.findAll(markdown).map { it.groupValues[1].trim() }
 
     fun extractFirstParagraph(markdown: String, maxChars: Int = 200): String {
         val lineSeq = markdown.lineSequence().iterator()
@@ -56,8 +56,8 @@ object MarkdownMetaExtractor {
         return sb.toString().trim().take(maxChars)
     }
 
-    fun extractTags(markdown: String): List<String> =
-        TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct().toList()
+    fun extractTags(markdown: String): Sequence<String> =
+        TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct()
 
     fun extractDateFromContent(content: String): String? {
         val today = LocalDate.now()

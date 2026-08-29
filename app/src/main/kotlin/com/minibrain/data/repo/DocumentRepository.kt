@@ -127,11 +127,11 @@ class DocumentRepository(
                         docsToUpdate.add(
                             existing.copy(
                                 headings = existing.headings
-                                    ?: JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
+                                    ?: JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content).toList()).toString(),
                                 firstParagraph = existing.firstParagraph
                                     ?: MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
                                 tags = existing.tags
-                                    ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+                                    ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content).toList()).toString(),
                                 documentDate = existing.documentDate
                                     ?: extractDateFromPath(mdFile.relativePath)
                                     ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
@@ -154,9 +154,9 @@ class DocumentRepository(
                     relativePath = mdFile.relativePath,
                     lastModified = mdFile.lastModified,
                     contentHash = mdFile.contentHash,
-                    headings = JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
+                    headings = JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content).toList()).toString(),
                     firstParagraph = MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
-                    tags = JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+                    tags = JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content).toList()).toString(),
                     documentDate = extractDateFromPath(mdFile.relativePath)
                         ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
                 )
