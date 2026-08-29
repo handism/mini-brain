@@ -59,6 +59,9 @@ interface ChunkDao {
     @Query("DELETE FROM chunks WHERE docId IN (:docIds)")
     suspend fun deleteByDocIds(docIds: List<Long>)
 
+    @Query("DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE docId IN (:docIds))")
+    suspend fun deleteFtsByDocIds(docIds: List<Long>)
+
     @Query("DELETE FROM chunks WHERE docId IN (SELECT id FROM documents WHERE treeUri = :treeUri)")
     suspend fun deleteAllByTree(treeUri: String)
 
