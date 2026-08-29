@@ -65,7 +65,7 @@ class RagPipeline(
 
             Timber.tag("RagPipeline").d("vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
 
-            val allDocIds = (vecResults.map { it.second.docId } + bm25Results.map { it.docId }).distinct()
+            val allDocIds = (vecResults.asSequence().map { it.second.docId } + bm25Results.asSequence().map { it.docId }).distinct().toList()
             val docIdToDate: Map<Long, LocalDate?> = if (cache != null) {
                 cache.documents().associate { doc ->
                     doc.id to doc.documentDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
