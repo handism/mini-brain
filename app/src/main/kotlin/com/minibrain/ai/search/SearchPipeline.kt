@@ -67,6 +67,23 @@ class SearchPipeline(
         private const val TOPIC_MATCH_SNIPPET_CHARS = 500
         private val METADATA_SPLIT_REGEX = Regex("""[\s　、。・]+""")
         private val WHITESPACE_NORMALIZE_REGEX = Regex("""\s+""")
+
+        internal fun buildUniqueNormalizedQueries(
+            originalQuery: String?,
+            expanded: List<String>,
+            hypothetical: String?
+        ): Set<String> {
+            val ordered = LinkedHashSet<String>()
+            fun addIfValid(s: String?) {
+                if (s.isNullOrBlank()) return
+                val normalized = s.trim().replace(WHITESPACE_NORMALIZE_REGEX, " ")
+                if (normalized.isNotEmpty()) ordered.add(normalized)
+            }
+            addIfValid(originalQuery)
+            expanded.forEach(::addIfValid)
+            addIfValid(hypothetical)
+            return ordered
+        }
     }
 
     suspend fun search(
@@ -255,15 +272,11 @@ class SearchPipeline(
     private suspend fun multiVectorSearch(
         request: MultiVectorSearchRequest
     ): List<Citation> {
-        val ordered = LinkedHashSet<String>()
-        fun addIfValid(s: String?) {
-            if (s.isNullOrBlank()) return
-            val normalized = s.trim().replace(WHITESPACE_NORMALIZE_REGEX, " ")
-            if (normalized.isNotEmpty()) ordered.add(normalized)
-        }
-        addIfValid(request.originalQuery)
-        request.expanded.forEach(::addIfValid)
-        addIfValid(request.hypothetical)
+        val ordered = buildUniqueNormalizedQueries(
+            originalQuery = request.originalQuery,
+            expanded = request.expanded,
+            hypothetical = request.hypothetical
+        )
 
         val seen = HashSet<String>()
         val out = mutableListOf<Citation>()
