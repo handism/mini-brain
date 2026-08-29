@@ -101,4 +101,61 @@ class OnboardingViewModelTest {
         assertTrue(failureState.message.contains("端末のメモリ不足の可能性があります"))
         assertTrue(failureState.canTryCpu)
     }
+
+    @Test
+    fun `checkAndPrepare when crashed last time shows Failure state`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[any<Preferences.Key<Boolean>>()] } returns true
+        every { testDataStore.data } returns flowOf(testPrefs)
+        coEvery { testDataStore.updateData(any()) } returns testPrefs
+
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val modelDownloader = mockk<ModelDownloader>(relaxed = true)
+        every { container.modelDownloader } returns modelDownloader
+        every { modelDownloader.isAllReady() } returns true
+
+        val viewModel = OnboardingViewModel(app)
+
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertTrue("Expected failure state but got $state", state is OnboardingUiState.Failure)
+        val failureState = state as OnboardingUiState.Failure
+        assertTrue(failureState.message.contains("GPU"))
+        assertTrue(failureState.canTryCpu)
+    }
+
+    @Test
+    fun `checkAndPrepare when models not ready shows Required state`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[any<Preferences.Key<Boolean>>()] } returns false
+        every { testDataStore.data } returns flowOf(testPrefs)
+        coEvery { testDataStore.updateData(any()) } returns testPrefs
+
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val modelDownloader = mockk<ModelDownloader>(relaxed = true)
+        every { container.modelDownloader } returns modelDownloader
+        every { modelDownloader.isAllReady() } returns false
+
+        val viewModel = OnboardingViewModel(app)
+
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertTrue("Expected Required state but got $state", state is OnboardingUiState.Required)
+    }
 }
