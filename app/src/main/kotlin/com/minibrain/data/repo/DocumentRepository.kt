@@ -22,6 +22,8 @@ import com.minibrain.util.DateValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -94,9 +96,13 @@ class DocumentRepository(
         var totalChunks = 0
 
         // 既存のドキュメントのチャンク数をキャッシュしてN+1問題を回避する
-        val existingDocs = mdFiles.map { it.uri.toString() }.chunked(900).flatMap { chunk ->
-            documentDao.getByFileUris(chunk)
-        }.associateBy { it.fileUri }
+        val existingDocs = kotlinx.coroutines.coroutineScope {
+            mdFiles.map { it.uri.toString() }.chunked(900)
+                .map { chunk -> async { documentDao.getByFileUris(chunk) } }
+                .awaitAll()
+                .flatten()
+                .associateBy { it.fileUri }
+        }
         val chunkCountsMap = chunkDao.getChunkCountsGroupedByDoc().associateBy({ it.docId }, { it.chunkCount })
 
         val writableDb = db.openHelper.writableDatabase
@@ -273,15 +279,17 @@ class DocumentRepository(
         return size
     }
 
-    private suspend fun indexFolderEmbeddings(treeUri: Uri, mdFiles: List<MdFile>) {
+    private suspend fun indexFolderEmbeddings(treeUri: Uri, mdFiles: List<MdFile>) = kotlinx.coroutines.coroutineScope {
         val byFolder = mdFiles
             .filter { it.relativePath.contains('/') }
             .groupBy { it.relativePath.substringBeforeLast('/') }
 
         val allFileUrisToFetch = byFolder.values.flatten().map { it.uri.toString() }
-        val allDocsMap = allFileUrisToFetch.chunked(900).flatMap { chunk ->
-            documentDao.getByFileUris(chunk)
-        }.associateBy { it.fileUri }
+        val allDocsMap = allFileUrisToFetch.chunked(900)
+            .map { chunk -> async { documentDao.getByFileUris(chunk) } }
+            .awaitAll()
+            .flatten()
+            .associateBy { it.fileUri }
 
         val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
 

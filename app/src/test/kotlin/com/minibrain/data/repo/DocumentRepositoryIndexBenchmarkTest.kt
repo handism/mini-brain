@@ -15,6 +15,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,13 +37,14 @@ class DocumentRepositoryIndexBenchmarkTest {
 
         coEvery { embedder.embed(any(), any()) } returns FloatArray(384) { 0.1f }
 
-        val dummyMdFiles = (1..100).map {
+        // Use 10,000 files to create roughly 12 chunks (10000 / 900 = 11.1)
+        val dummyMdFiles = (1..10000).map {
             MdFile(
                 uri = Uri.parse("file://test/$it.md"),
                 name = "$it.md",
-                relativePath = "$it.md",
+                relativePath = "folder/$it.md",
                 lastModified = 0L,
-                content = "# Heading\nSome content $it. " + "Lots of words to make it chunk. ".repeat(10),
+                content = "# Heading\nSome content $it. " + "Lots of words to make it chunk. ",
                 contentHash = "hash$it"
             )
         }
@@ -50,10 +52,13 @@ class DocumentRepositoryIndexBenchmarkTest {
         mockkObject(MdFileReader)
         coEvery { MdFileReader.listMdFiles(any(), any()) } returns dummyMdFiles
 
-        coEvery { documentDao.getByFileUris(any()) } returns emptyList()
+        coEvery { documentDao.getByFileUris(any()) } coAnswers {
+            delay(50) // Simulate DB I/O delay
+            emptyList()
+        }
         coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
         coEvery { documentDao.insert(any()) } returns 1L
-        coEvery { documentDao.insertAll(any()) } returns (1..100).map { it.toLong() }
+        coEvery { documentDao.insertAll(any()) } returns (1..10000).map { it.toLong() }
         coEvery { chunkDao.insertAll(any()) } returns listOf(1L)
 
         val stmt = mockk<androidx.sqlite.db.SupportSQLiteStatement>(relaxed = true)
@@ -70,6 +75,6 @@ class DocumentRepositoryIndexBenchmarkTest {
         repo.indexFolder(Uri.parse("file://test"))
         val time1 = System.currentTimeMillis() - start
 
-        println("Indexing 100 files took $time1 ms")
+        println("Indexing 10000 files took $time1 ms")
     }
 }
