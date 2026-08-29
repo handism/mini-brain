@@ -3,7 +3,6 @@ package com.minibrain.data.repo
 import android.content.Context
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
-import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.AppDatabase
 import com.minibrain.data.db.daos.ChunkDao
