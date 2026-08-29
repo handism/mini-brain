@@ -56,8 +56,8 @@ object MarkdownMetaExtractor {
         return sb.toString().trim().take(maxChars)
     }
 
-    fun extractTags(markdown: String): List<String> =
-        TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct().toList()
+    fun extractTags(markdown: String): Sequence<String> =
+        TAG_REGEX.findAll(markdown).map { it.groupValues[1] }.distinct()
 
     fun extractDateFromContent(content: String): String? {
         val today = LocalDate.now()

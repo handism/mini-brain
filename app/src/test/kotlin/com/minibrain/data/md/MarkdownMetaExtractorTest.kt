@@ -277,47 +277,47 @@ class MarkdownMetaExtractorTest {
     @Test
     fun testExtractTags_normalTags() {
         val md = "Here are some tags #tag1 #tag2 and #日本語"
-        assertEquals(listOf("tag1", "tag2", "日本語"), MarkdownMetaExtractor.extractTags(md))
+        assertEquals(listOf("tag1", "tag2", "日本語"), MarkdownMetaExtractor.extractTags(md).toList())
     }
 
     @Test
     fun testExtractTags_duplicateTags() {
         val md = "#tag1 #tag1 #tag2"
-        assertEquals(listOf("tag1", "tag2"), MarkdownMetaExtractor.extractTags(md))
+        assertEquals(listOf("tag1", "tag2"), MarkdownMetaExtractor.extractTags(md).toList())
     }
 
     @Test
     fun testExtractTags_withHyphens() {
         val md = "#my-tag #another-tag-123"
-        assertEquals(listOf("my-tag", "another-tag-123"), MarkdownMetaExtractor.extractTags(md))
+        assertEquals(listOf("my-tag", "another-tag-123"), MarkdownMetaExtractor.extractTags(md).toList())
     }
 
     @Test
     fun testExtractTags_ignoreHeadings() {
         val md = "# Heading 1\n## Heading 2\n#tag"
-        assertEquals(listOf("tag"), MarkdownMetaExtractor.extractTags(md))
+        assertEquals(listOf("tag"), MarkdownMetaExtractor.extractTags(md).toList())
     }
 
     @Test
     fun testExtractTags_ignoreDoubleHashes() {
         val md = "This is not a ##tag but this is a #real-tag"
-        assertEquals(listOf("real-tag"), MarkdownMetaExtractor.extractTags(md))
+        assertEquals(listOf("real-tag"), MarkdownMetaExtractor.extractTags(md).toList())
     }
 
     @Test
     fun testExtractTags_ignoreWordsWithHash() {
         val md = "Some text with a word#hash inside and a real #tag"
-        assertEquals(listOf("tag"), MarkdownMetaExtractor.extractTags(md))
+        assertEquals(listOf("tag"), MarkdownMetaExtractor.extractTags(md).toList())
     }
 
     @Test
     fun testExtractTags_emptyString() {
-        assertEquals(emptyList<String>(), MarkdownMetaExtractor.extractTags(""))
+        assertEquals(emptyList<String>(), MarkdownMetaExtractor.extractTags("").toList())
     }
 
     @Test
     fun testExtractTags_noTags() {
-        assertEquals(emptyList<String>(), MarkdownMetaExtractor.extractTags("Just some normal text without tags."))
+        assertEquals(emptyList<String>(), MarkdownMetaExtractor.extractTags("Just some normal text without tags.").toList())
     }
 }
 
