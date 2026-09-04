@@ -143,6 +143,42 @@ class LlmServiceTest {
     }
 
     @Test
+    fun `summarize returns fallback text if not initialized`() = runBlocking {
+        val service = LlmService()
+        val longText = "A".repeat(1000)
+
+        val result = service.summarize(longText)
+
+        assertEquals(500, result.length)
+        assertEquals("A".repeat(500), result)
+    }
+
+    @Test
+    fun `summarize returns fallback text if generation throws exception`() = runBlocking {
+        val service = LlmService()
+
+        val tempFile = File.createTempFile("model", ".bin")
+        RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
+
+        mockkConstructor(Engine::class)
+        every { anyConstructed<Engine>().initialize() } returns Unit
+        every { anyConstructed<Engine>().createConversation() } throws RuntimeException("Generation failed")
+
+        try {
+            service.initialize(tempFile, forceCpu = true)
+            assertTrue(service.isReady())
+
+            val longText = "B".repeat(1000)
+            val result = service.summarize(longText)
+
+            assertEquals(500, result.length)
+            assertEquals("B".repeat(500), result)
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
     fun `initialize falls back to CPU if GPU throws Error`() = runBlocking {
         val service = LlmService()
 
