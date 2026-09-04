@@ -40,6 +40,8 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.minibrain.R
+import com.minibrain.ai.agent.AgentTraceEvent
+import com.minibrain.ai.rag.Citation
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.ui.vm.ChatMessage
 import kotlinx.coroutines.delay
@@ -157,53 +159,71 @@ fun AssistantMessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
             }
 
             if (msg.citations.isNotEmpty() && !msg.isStreaming) {
-                AnimatedVisibility(visible = citationsExpanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        msg.citations.forEach { citation ->
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceContainerLow,
-                                        RoundedCornerShape(8.dp),
-                                    )
-                                    .padding(8.dp),
-                            ) {
-                                Column {
-                                    Text(
-                                        citation.headingPath,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                    Text(
-                                        citation.snippet,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 3,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                CitationList(citations = msg.citations, expanded = citationsExpanded)
             }
 
             if (!msg.isStreaming && showSearchLog && msg.traceEvents.isNotEmpty()) {
-                TextButton(
-                    onClick = { traceExpanded = !traceExpanded },
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                SearchLogSection(
+                    traceEvents = msg.traceEvents,
+                    expanded = traceExpanded,
+                    onExpandedChange = { traceExpanded = it }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CitationList(citations: List<Citation>, expanded: Boolean) {
+    AnimatedVisibility(visible = expanded) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            citations.forEach { citation ->
+                Box(
+                    modifier = Modifier
+                        .background(
+                            MaterialTheme.colorScheme.surfaceContainerLow,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(8.dp),
                 ) {
-                    Icon(
-                        if (traceExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(stringResource(R.string.search_log), style = MaterialTheme.typography.labelSmall)
-                }
-                AnimatedVisibility(visible = traceExpanded) {
-                    AgentTraceSection(msg.traceEvents)
+                    Column {
+                        Text(
+                            text = citation.headingPath,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = citation.snippet,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun SearchLogSection(
+    traceEvents: List<AgentTraceEvent>,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit
+) {
+    TextButton(
+        onClick = { onExpandedChange(!expanded) },
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+    ) {
+        Icon(
+            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(text = stringResource(R.string.search_log), style = MaterialTheme.typography.labelSmall)
+    }
+    AnimatedVisibility(visible = expanded) {
+        AgentTraceSection(traceEvents)
     }
 }
 
