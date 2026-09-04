@@ -321,6 +321,53 @@ class DocumentRepositoryTest {
     }
 
     @org.junit.Test
+    fun testIndexFolder_chunkerException_skipsDocAndContinues() = kotlinx.coroutines.test.runTest {
+        val treeUriStr = "content://tree/uri"
+
+        io.mockk.mockkStatic(android.net.Uri::class)
+        val treeUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(treeUriStr) } returns treeUri
+        io.mockk.every { treeUri.toString() } returns treeUriStr
+
+        val fileUriStr = "content://tree/uri/file1.md"
+        val fileUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(fileUriStr) } returns fileUri
+        io.mockk.every { fileUri.toString() } returns fileUriStr
+
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        val mdFile = com.minibrain.data.md.MdFile(
+            uri = fileUri,
+            name = "file1.md",
+            relativePath = "file1.md",
+            lastModified = 0L,
+            contentHash = "hash1",
+            content = "# Malformed chunking text"
+        )
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+
+        io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
+        io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
+        io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
+        io.mockk.coEvery { documentDao.insertAll(any()) } answers { val arg = firstArg<List<Any>>(); List(arg.size) { (it + 1).toLong() } }
+
+        io.mockk.mockkObject(com.minibrain.data.md.MarkdownChunker)
+        io.mockk.every { com.minibrain.data.md.MarkdownChunker.chunk(any(), any()) } throws RuntimeException("Chunking failed")
+
+        io.mockk.every { writableDb.execSQL(any(), any<Array<Any?>>()) } returns Unit
+        io.mockk.coEvery { folderEmbeddingDao.upsertAll(any()) } returns Unit
+
+        try {
+            repository.indexFolder(treeUri)
+            // Verify chunk insertion was skipped since chunker failed and returned empty list
+            io.mockk.coVerify(exactly = 0) { chunkDao.insertAll(any()) }
+        } finally {
+            io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
+            io.mockk.unmockkObject(com.minibrain.data.md.MarkdownChunker)
+            io.mockk.unmockkStatic(android.net.Uri::class)
+        }
+    }
+
+    @org.junit.Test
     fun testIndexFolder_batchInsertException_rollsBack() = kotlinx.coroutines.test.runTest {
         val treeUriStr = "content://tree/uri"
 

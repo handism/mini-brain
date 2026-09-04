@@ -28,7 +28,7 @@ class EvalRunnerTest {
         // Plant a fake Timber tree to capture logs and prevent MockKException for static methods
         Timber.plant(object : Timber.Tree() {
             override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-                // No-op for tests, or print to stdout if debugging needed
+                println("[$tag] $message")
             }
         })
         evalRunner = EvalRunner(searchPipeline)
