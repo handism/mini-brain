@@ -223,7 +223,12 @@ class DocumentRepository(
                 _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
 
                 val docId = insertedDocIds[i]
-                val rawChunks = MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
+                val rawChunks = try {
+                    MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
+                } catch (e: Exception) {
+                    Timber.tag("DocumentRepository").e(e, "chunking failed: ${pending.mdFile.relativePath}")
+                    emptyList()
+                }
                 val chunkEntities = rawChunks.mapNotNull { chunk ->
                     runCatching {
                         val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
