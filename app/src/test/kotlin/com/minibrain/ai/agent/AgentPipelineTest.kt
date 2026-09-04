@@ -15,10 +15,6 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
-import com.minibrain.ai.agent.AgentTraceEvent
-import com.minibrain.ai.agent.ToolCallEvent
-import com.minibrain.ai.agent.ObservationEvent
-import com.minibrain.ai.agent.PlannerDecisionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
