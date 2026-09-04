@@ -195,7 +195,7 @@ class DocumentRepository(
             docsToDelete.chunked(900).forEach { batch ->
                 writableDb.beginTransaction()
                 try {
-                    deleteFtsByDocIds(batch)
+                    chunkDao.deleteFtsByDocIds(batch)
                     chunkDao.deleteByDocIds(batch)
                     writableDb.setTransactionSuccessful()
                 } finally {
@@ -223,7 +223,12 @@ class DocumentRepository(
                 _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
 
                 val docId = insertedDocIds[i]
-                val rawChunks = MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
+                val rawChunks = try {
+                    MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
+                } catch (e: Exception) {
+                    Timber.tag("DocumentRepository").e(e, "chunking failed: ${pending.mdFile.relativePath}")
+                    emptyList()
+                }
                 val chunkEntities = rawChunks.mapNotNull { chunk ->
                     runCatching {
                         val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
@@ -395,15 +400,6 @@ class DocumentRepository(
             stmt.executeInsert()
             stmt.clearBindings()
         }
-    }
-
-    private fun deleteFtsByDocIds(docIds: List<Long>) {
-        if (docIds.isEmpty()) return
-        val placeholders = docIds.joinToString(",") { "?" }
-        db.openHelper.writableDatabase.execSQL(
-            "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE docId IN ($placeholders))",
-            docIds.toTypedArray()
-        )
     }
 
     private fun extractDateFromPath(relativePath: String): String? =

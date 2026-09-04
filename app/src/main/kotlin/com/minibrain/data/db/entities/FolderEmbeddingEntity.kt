@@ -17,8 +17,14 @@ data class FolderEmbeddingEntity(
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is FolderEmbeddingEntity) return false
-        return id == other.id && path == other.path && treeUri == other.treeUri
+        return id == other.id && path == other.path && treeUri == other.treeUri && embedding.contentEquals(other.embedding)
     }
 
-    override fun hashCode(): Int = 31 * (31 * id.hashCode() + path.hashCode()) + treeUri.hashCode()
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + path.hashCode()
+        result = 31 * result + treeUri.hashCode()
+        result = 31 * result + embedding.contentHashCode()
+        return result
+    }
 }
