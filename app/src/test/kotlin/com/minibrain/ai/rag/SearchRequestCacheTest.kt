@@ -77,6 +77,7 @@ class SearchRequestCacheTest {
         override suspend fun count(): Int = 0
         override suspend fun deleteByDoc(docId: Long) {}
         override suspend fun deleteByDocIds(docIds: List<Long>) {}
+        override suspend fun deleteFtsByDocIds(docIds: List<Long>) {}
         override suspend fun deleteAllByTree(treeUri: String) {}
 
         override suspend fun bm25Search(matchQuery: String, limit: Int): List<ChunkEntity> = emptyList()

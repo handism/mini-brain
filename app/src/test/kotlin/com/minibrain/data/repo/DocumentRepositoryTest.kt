@@ -364,7 +364,7 @@ class DocumentRepositoryTest {
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns listOf(docEntity)
         io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
 
-        io.mockk.every { writableDb.execSQL(any(), any<Array<Any?>>()) } throws RuntimeException("Delete FTS failed")
+        io.mockk.coEvery { chunkDao.deleteFtsByDocIds(any()) } throws RuntimeException("Delete FTS failed")
 
         val stmt = io.mockk.mockk<androidx.sqlite.db.SupportSQLiteStatement>(relaxed = true)
         io.mockk.every { writableDb.compileStatement(any()) } returns stmt
