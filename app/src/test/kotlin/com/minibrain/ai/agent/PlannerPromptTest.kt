@@ -127,9 +127,13 @@ class PlannerPromptTest {
 
     @Test
     fun parseDecision_returnsParseErrorWhenTimelineSearchMissingRequiredKeys() {
-        val raw = "TOOL: timeline_search\nSTART: 2025-06-01"
-        val decision = PlannerPrompt.parseDecision(raw)
-        assertTrue(decision is PlannerDecision.ParseError)
+        val rawMissingEnd = "TOOL: timeline_search\nSTART: 2025-06-01"
+        val decision1 = PlannerPrompt.parseDecision(rawMissingEnd)
+        assertTrue(decision1 is PlannerDecision.ParseError)
+
+        val rawMissingStart = "TOOL: timeline_search\nEND: 2025-06-01"
+        val decision2 = PlannerPrompt.parseDecision(rawMissingStart)
+        assertTrue(decision2 is PlannerDecision.ParseError)
     }
 
     @Test
