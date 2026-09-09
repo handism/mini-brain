@@ -2,6 +2,7 @@ package com.minibrain.data.md
 
 import android.content.Context
 import android.net.Uri
+import androidx.annotation.VisibleForTesting
 import androidx.documentfile.provider.DocumentFile
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +70,8 @@ object MdFileReader {
         }.awaitAll().filterNotNull().flatten()
     }
 
-    private fun readText(context: Context, uri: Uri): String? = runCatching {
+    @VisibleForTesting
+    internal fun readText(context: Context, uri: Uri): String? = runCatching {
         context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
     }.getOrNull()
 
