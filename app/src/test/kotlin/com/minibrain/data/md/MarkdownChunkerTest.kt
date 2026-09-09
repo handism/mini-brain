@@ -113,6 +113,39 @@ class MarkdownChunkerTest {
     }
 
     @Test
+    fun testChunkingVeryLongBlockWithoutLineBreaks() {
+        // A single very long paragraph (2500 characters) with no line breaks
+        val longPara = (0 until 2500).joinToString("") { (it % 10).toString() }
+        val chunks = MarkdownChunker.chunk(longPara, "test.md")
+
+        // MAX_CHUNK_CHARS = 800, OVERLAP = 120
+        // Expected splits:
+        // Chunk 0: 800 chars (0 to 800)
+        // Chunk 1: 800 chars (starts at 800 - 120 = 680, ends at 680 + 800 = 1480)
+        // Chunk 2: 800 chars (starts at 1480 - 120 = 1360, ends at 1360 + 800 = 2160)
+        // Chunk 3: 460 chars (starts at 2160 - 120 = 2040, ends at 2500)
+        assertTrue(chunks.size == 4)
+        assertEquals(800, chunks[0].text.length)
+        assertEquals(800, chunks[1].text.length)
+        assertEquals(800, chunks[2].text.length)
+        assertEquals(460, chunks[3].text.length)
+
+        // Verify overlap length and content logic implicitly via length validation
+        // combined with start and end checks
+        val overlap1 = chunks[0].text.takeLast(120)
+        val overlap2 = chunks[1].text.take(120)
+        assertEquals(overlap1, overlap2)
+
+        val overlap3 = chunks[1].text.takeLast(120)
+        val overlap4 = chunks[2].text.take(120)
+        assertEquals(overlap3, overlap4)
+
+        val overlap5 = chunks[2].text.takeLast(120)
+        val overlap6 = chunks[3].text.take(120)
+        assertEquals(overlap5, overlap6)
+    }
+
+    @Test
     fun testChunkingCodeBlocksAndParagraphs() {
         val longBody = "A".repeat(400)
         val markdown = """
