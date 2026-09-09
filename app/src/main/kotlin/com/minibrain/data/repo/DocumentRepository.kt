@@ -21,6 +21,9 @@ import com.minibrain.data.search.NGramTokenizer
 import com.minibrain.util.DateValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -229,18 +232,22 @@ class DocumentRepository(
                     Timber.tag("DocumentRepository").e(e, "chunking failed: ${pending.mdFile.relativePath}")
                     emptyList()
                 }
-                val chunkEntities = rawChunks.mapNotNull { chunk ->
-                    runCatching {
-                        val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
-                        ChunkEntity(
-                            docId = docId,
-                            headingPath = chunk.headingPath,
-                            text = chunk.text,
-                            embedding = EmbedderService.floatArrayToBytes(embedding),
-                        )
-                    }.onFailure { e ->
-                        Timber.tag("DocumentRepository").e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
-                    }.getOrNull()
+                val chunkEntities = coroutineScope {
+                    rawChunks.map { chunk ->
+                        async {
+                            runCatching {
+                                val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
+                                ChunkEntity(
+                                    docId = docId,
+                                    headingPath = chunk.headingPath,
+                                    text = chunk.text,
+                                    embedding = EmbedderService.floatArrayToBytes(embedding),
+                                )
+                            }.onFailure { e ->
+                                Timber.tag("DocumentRepository").e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
+                            }.getOrNull()
+                        }
+                    }.awaitAll().filterNotNull()
                 }
 
                 chunkBuffer.addAll(chunkEntities)
