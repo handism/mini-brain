@@ -128,7 +128,7 @@ fun HomeScreen(
 
                 // インデックス状態
                 when (val s = indexState) {
-                    is IndexingState.Idle -> {}
+                    is IndexingState.Idle -> { /* No UI to display when idle */ }
                     is IndexingState.Progress -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
