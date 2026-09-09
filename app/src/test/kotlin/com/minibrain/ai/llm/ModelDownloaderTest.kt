@@ -10,6 +10,8 @@ import io.mockk.mockkConstructor
 import io.mockk.unmockkConstructor
 import okhttp3.Call
 import okhttp3.OkHttpClient
+import okhttp3.Response
+import okhttp3.ResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -44,6 +46,37 @@ class ModelDownloaderTest {
             val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
             assertTrue(errorResult != null)
             assertTrue(errorResult!!.message.contains("Mocked network error"))
+        } finally {
+            unmockkConstructor(OkHttpClient.Builder::class)
+        }
+    }
+
+    @Test
+    fun `downloadAll handles HTTP error response`() = runTest {
+        mockkConstructor(OkHttpClient.Builder::class)
+        val mockClient = mockk<OkHttpClient>()
+        val mockCall = mockk<Call>()
+        val mockResponse = mockk<Response>()
+
+        every { anyConstructed<OkHttpClient.Builder>().build() } returns mockClient
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } returns mockResponse
+        every { mockResponse.isSuccessful } returns false
+        every { mockResponse.code } returns 404
+        every { mockResponse.message } returns "Not Found"
+        every { mockResponse.body } returns null
+
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_http_error")
+        every { mockContext.filesDir } returns filesDir
+
+        try {
+            val downloader = ModelDownloader(mockContext)
+            val results = downloader.downloadAll().toList()
+
+            val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
+            assertTrue("Expected an error result", errorResult != null)
+            assertEquals("HTTP 404: Not Found", errorResult!!.message)
         } finally {
             unmockkConstructor(OkHttpClient.Builder::class)
         }
