@@ -53,6 +53,13 @@ class PlannerPromptTest {
     }
 
     @Test
+    fun parseDecision_returnsParseErrorWhenBuildToolReturnsNull() {
+        val raw = "TOOL: unknown-tool\nQUERY: something"
+        val decision = PlannerPrompt.parseDecision(raw)
+        assertTrue(decision is PlannerDecision.ParseError)
+    }
+
+    @Test
     fun parseDecision_handlesNoiseBeforeKeys() {
         val raw = "Sure! Here is my decision:\nTOOL: list_dir\nFOLDER: proj"
         val decision = PlannerPrompt.parseDecision(raw)
