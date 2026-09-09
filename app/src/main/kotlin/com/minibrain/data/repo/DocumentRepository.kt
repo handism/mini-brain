@@ -289,6 +289,7 @@ class DocumentRepository(
         }.associateBy { it.fileUri }
 
         val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
+        val embeddingCache = mutableMapOf<String, FloatArray>()
 
         for ((folderPath, files) in byFolder) {
             val fileUris = files.map { it.uri.toString() }
@@ -310,7 +311,9 @@ class DocumentRepository(
             }
 
             runCatching {
-                val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
+                val embedding = embeddingCache.getOrPut(folderText) {
+                    embedder.embed(folderText, EmbedType.PASSAGE)
+                }
                 folderEmbeddings.add(
                     FolderEmbeddingEntity(
                         path = folderPath,
