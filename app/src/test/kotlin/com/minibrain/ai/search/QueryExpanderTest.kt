@@ -105,4 +105,22 @@ class QueryExpanderTest {
         val raw = "just a plain string without brackets"
         assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
     }
+
+    @Test
+    fun `parseJsonArray returns empty list for string missing opening bracket`() {
+        val raw = "apple\", \"banana\"]"
+        assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
+    }
+
+    @Test
+    fun `parseJsonArray returns empty list for string missing closing bracket`() {
+        val raw = "[\"apple\", \"banana\""
+        assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
+    }
+
+    @Test
+    fun `parseJsonArray returns empty list for string with inverted brackets`() {
+        val raw = "]\"apple\", \"banana\"["
+        assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
+    }
 }
