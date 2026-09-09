@@ -143,4 +143,40 @@ class LlmRerankerTest {
         assertEquals(2, result.size)
         assertEquals(candidates.take(2), result)
     }
+
+    @Test
+    fun `rerank returns truncated original candidates when LLM returns unclosed JSON array`() = runTest {
+        val candidates = createCandidates(4)
+        every { llmService.isReady() } returns true
+        coEvery { llmService.generateStream(any()) } returns flowOf("[1, 2")
+
+        val result = reranker.rerank("query", candidates, topK = 2)
+
+        assertEquals(2, result.size)
+        assertEquals(candidates.take(2), result)
+    }
+
+    @Test
+    fun `rerank returns truncated original candidates when LLM returns reversed brackets`() = runTest {
+        val candidates = createCandidates(4)
+        every { llmService.isReady() } returns true
+        coEvery { llmService.generateStream(any()) } returns flowOf("]1, 2[")
+
+        val result = reranker.rerank("query", candidates, topK = 2)
+
+        assertEquals(2, result.size)
+        assertEquals(candidates.take(2), result)
+    }
+
+    @Test
+    fun `rerank returns truncated original candidates when LLM returns invalid data without brackets`() = runTest {
+        val candidates = createCandidates(4)
+        every { llmService.isReady() } returns true
+        coEvery { llmService.generateStream(any()) } returns flowOf("invalid data")
+
+        val result = reranker.rerank("query", candidates, topK = 2)
+
+        assertEquals(2, result.size)
+        assertEquals(candidates.take(2), result)
+    }
 }
