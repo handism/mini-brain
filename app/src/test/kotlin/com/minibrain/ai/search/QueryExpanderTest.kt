@@ -41,6 +41,15 @@ class QueryExpanderTest {
     }
 
     @Test
+    fun `expand returns original query when generateStream throws exception immediately`() = runTest {
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } throws RuntimeException("Immediate failure")
+
+        val result = expander.expand("test query")
+        assertEquals(listOf("test query"), result)
+    }
+
+    @Test
     fun `expand returns parsed queries including original query when successful`() = runTest {
         every { llmService.isReady() } returns true
         every { llmService.generateStream(any()) } returns flowOf("""["test query", "expanded query 1", "expanded query 2"]""")
@@ -103,6 +112,24 @@ class QueryExpanderTest {
     @Test
     fun `parseJsonArray returns empty list for string without brackets`() {
         val raw = "just a plain string without brackets"
+        assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
+    }
+
+    @Test
+    fun `parseJsonArray returns empty list for string missing opening bracket`() {
+        val raw = "apple\", \"banana\"]"
+        assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
+    }
+
+    @Test
+    fun `parseJsonArray returns empty list for string missing closing bracket`() {
+        val raw = "[\"apple\", \"banana\""
+        assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
+    }
+
+    @Test
+    fun `parseJsonArray returns empty list for string with inverted brackets`() {
+        val raw = "]\"apple\", \"banana\"["
         assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
     }
 }

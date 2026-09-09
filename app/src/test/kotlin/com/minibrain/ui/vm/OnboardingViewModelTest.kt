@@ -103,6 +103,48 @@ class OnboardingViewModelTest {
     }
 
     @Test
+    fun `initializeServices failure in embedder transitions to Failure state`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[any<Preferences.Key<Boolean>>()] } returns false
+        every { testDataStore.data } returns flowOf(testPrefs)
+        coEvery { testDataStore.updateData(any()) } returns testPrefs
+
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val embedderService = mockk<EmbedderService>(relaxed = true)
+        val llmService = mockk<LlmService>(relaxed = true)
+        val modelDownloader = mockk<ModelDownloader>(relaxed = true)
+
+        every { container.embedderService } returns embedderService
+        every { container.llmService } returns llmService
+        every { container.modelDownloader } returns modelDownloader
+
+        every { modelDownloader.isAllReady() } returns true
+        every { modelDownloader.embedderModelFile } returns File("embedder.onnx")
+        every { modelDownloader.tokenizerModelFile } returns File("tokenizer.json")
+        every { modelDownloader.llmModelFile } returns File("model.bin")
+
+        val errorMessage = "Embedder init failed"
+        coEvery { embedderService.initialize(any(), any()) } throws RuntimeException(errorMessage)
+
+        val viewModel = OnboardingViewModel(app)
+
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertTrue("Expected failure state but got $state", state is OnboardingUiState.Failure)
+        val failureState = state as OnboardingUiState.Failure
+        assertTrue(failureState.message.contains(errorMessage))
+        assertTrue(failureState.canTryCpu)
+    }
+
+    @Test
     fun `checkAndPrepare when crashed last time shows Failure state`() = runTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
         val container = mockk<AppContainer>(relaxed = true)

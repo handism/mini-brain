@@ -179,4 +179,16 @@ class LlmRerankerTest {
         assertEquals(2, result.size)
         assertEquals(candidates.take(2), result)
     }
+
+    @Test
+    fun `rerank falls back to truncated candidates when generateStream throws exception immediately`() = runTest {
+        val candidates = createCandidates(4)
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } throws RuntimeException("Immediate LLM failure")
+
+        val result = reranker.rerank("query", candidates, topK = 2)
+
+        assertEquals(2, result.size)
+        assertEquals(candidates.take(2), result)
+    }
 }
