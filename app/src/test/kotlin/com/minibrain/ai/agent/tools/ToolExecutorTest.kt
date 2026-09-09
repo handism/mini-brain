@@ -117,7 +117,7 @@ class ToolExecutorTest {
         every { anyConstructed<JSONArray>().getString(1) } returnsMany listOf("Header 2", "tag2")
 
         coEvery { documentDao.getById(docId) } returns doc
-        coEvery { chunkDao.getByDoc(docId) } returns listOf(chunk)
+        coEvery { chunkDao.getAllByTree(treeUri) } returns listOf(chunk)
 
         val call = ToolCall(1, AgentTool.ReadFile(docId = docId, path = null))
         val result = toolExecutor.execute(call)
@@ -161,7 +161,7 @@ class ToolExecutorTest {
         every { anyConstructed<JSONArray>().length() } throws org.json.JSONException("invalid json")
 
         coEvery { documentDao.getById(docId) } returns doc
-        coEvery { chunkDao.getByDoc(docId) } returns listOf(chunk)
+        coEvery { chunkDao.getAllByTree(treeUri) } returns listOf(chunk)
 
         val call = ToolCall(1, AgentTool.ReadFile(docId = docId, path = null))
         val result = toolExecutor.execute(call)

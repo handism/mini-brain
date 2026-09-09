@@ -40,6 +40,7 @@ class ToolExecutor(
     private val cache: SearchRequestCache,
 ) {
     private val queryVecCache = mutableMapOf<String, FloatArray>()
+    private var chunksByDocCache: Map<Long, List<ChunkEntity>>? = null
 
     private suspend fun allDocs(): List<DocumentEntity> = cache.documents()
 
@@ -109,9 +110,13 @@ class ToolExecutor(
     private suspend fun executeReadFile(call: ToolCall, tool: AgentTool.ReadFile): ToolResult {
         val doc = findDocument(tool) ?: return ToolResult(call, "FILE NOT FOUND", emptyList())
 
-        val chunks = withContext(Dispatchers.IO) {
-            chunkDao.getByDoc(doc.id).sortedBy { it.headingPath }
+        if (chunksByDocCache == null) {
+            val allChunks = withContext(Dispatchers.IO) {
+                chunkDao.getAllByTree(treeUri)
+            }
+            chunksByDocCache = allChunks.groupBy { it.docId }
         }
+        val chunks = chunksByDocCache?.get(doc.id)?.sortedBy { it.headingPath } ?: emptyList()
 
         val fullText = buildTruncatedContent(doc, chunks)
         val citations = if (fullText.length > SUMMARIZE_THRESHOLD_CHARS) {
