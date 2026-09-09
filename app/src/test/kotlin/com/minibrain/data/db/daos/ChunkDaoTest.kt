@@ -202,4 +202,39 @@ class ChunkDaoTest {
         assertEquals(1, resultsByTree.size)
         assertEquals(ids[1], resultsByTree[0].id)
     }
+
+    @Test
+    fun deleteFtsByDocIds() = runBlocking {
+        val ids = chunkDao.insertAll(listOf(
+            ChunkEntity(docId = docId1, headingPath = "Title", text = "apple banana", embedding = byteArrayOf()),
+            ChunkEntity(docId = docId2, headingPath = "Title", text = "orange grape", embedding = byteArrayOf())
+        ))
+
+        // Manually insert into FTS table since there's no trigger in the test DB
+        val stmt = db.openHelper.writableDatabase.compileStatement("INSERT INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)")
+        stmt.bindLong(1, ids[0])
+        stmt.bindString(2, "apple banana")
+        stmt.bindString(3, "Title")
+        stmt.executeInsert()
+
+        stmt.bindLong(1, ids[1])
+        stmt.bindString(2, "orange grape")
+        stmt.bindString(3, "Title")
+        stmt.executeInsert()
+
+        // Verify initial FTS search works
+        val initialResults = chunkDao.bm25Search("apple", 10)
+        assertEquals(1, initialResults.size)
+
+        // Delete FTS for docId1
+        chunkDao.deleteFtsByDocIds(listOf(docId1))
+
+        // Verify FTS search for apple (docId1) returns no results
+        val afterResults = chunkDao.bm25Search("apple", 10)
+        assertEquals(0, afterResults.size)
+
+        // Verify FTS search for orange (docId2) still works
+        val otherResults = chunkDao.bm25Search("orange", 10)
+        assertEquals(1, otherResults.size)
+    }
 }
