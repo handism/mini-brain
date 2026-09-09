@@ -57,10 +57,10 @@ object EvalMetrics {
         val retrievedPaths = topK.mapNotNull { it.relativePath?.lowercase() }
 
         val hits = retrievedPaths.filter { it in expected }.toSet()
-        val precision = if (topK.isEmpty()) {
-            if (expected.isEmpty()) 1.0 else 0.0
-        } else {
-            hits.size.toDouble() / topK.size
+        val precision = when {
+            hits.isNotEmpty() -> hits.size.toDouble() / topK.size
+            topK.isEmpty() -> if (expected.isEmpty()) 1.0 else 0.0
+            else -> 0.0
         }
         val recall = if (expected.isEmpty()) 1.0 else hits.size.toDouble() / expected.size
 
