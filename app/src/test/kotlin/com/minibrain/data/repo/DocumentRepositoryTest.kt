@@ -329,21 +329,34 @@ class DocumentRepositoryTest {
         io.mockk.every { android.net.Uri.parse(treeUriStr) } returns treeUri
         io.mockk.every { treeUri.toString() } returns treeUriStr
 
-        val fileUriStr = "content://tree/uri/file1.md"
-        val fileUri = io.mockk.mockk<android.net.Uri>()
-        io.mockk.every { android.net.Uri.parse(fileUriStr) } returns fileUri
-        io.mockk.every { fileUri.toString() } returns fileUriStr
+        val fileUriStr1 = "content://tree/uri/file1.md"
+        val fileUri1 = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(fileUriStr1) } returns fileUri1
+        io.mockk.every { fileUri1.toString() } returns fileUriStr1
+
+        val fileUriStr2 = "content://tree/uri/file2.md"
+        val fileUri2 = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { android.net.Uri.parse(fileUriStr2) } returns fileUri2
+        io.mockk.every { fileUri2.toString() } returns fileUriStr2
 
         io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
-        val mdFile = com.minibrain.data.md.MdFile(
-            uri = fileUri,
+        val mdFile1 = com.minibrain.data.md.MdFile(
+            uri = fileUri1,
             name = "file1.md",
             relativePath = "file1.md",
             lastModified = 0L,
             contentHash = "hash1",
             content = "# Malformed chunking text"
         )
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        val mdFile2 = com.minibrain.data.md.MdFile(
+            uri = fileUri2,
+            name = "file2.md",
+            relativePath = "file2.md",
+            lastModified = 0L,
+            contentHash = "hash2",
+            content = "# Valid chunking text"
+        )
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile1, mdFile2)
 
         io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
@@ -351,15 +364,22 @@ class DocumentRepositoryTest {
         io.mockk.coEvery { documentDao.insertAll(any()) } answers { val arg = firstArg<List<Any>>(); List(arg.size) { (it + 1).toLong() } }
 
         io.mockk.mockkObject(com.minibrain.data.md.MarkdownChunker)
-        io.mockk.every { com.minibrain.data.md.MarkdownChunker.chunk(any(), any()) } throws RuntimeException("Chunking failed")
+        io.mockk.every { com.minibrain.data.md.MarkdownChunker.chunk(any(), "file1.md") } throws RuntimeException("Chunking failed")
+        io.mockk.every { com.minibrain.data.md.MarkdownChunker.chunk(any(), "file2.md") } returns listOf(com.minibrain.data.md.Chunk("path", "Valid chunking text"))
+        io.mockk.coEvery { embedder.embed(any(), any()) } returns floatArrayOf(0.1f, 0.2f)
+        io.mockk.coEvery { chunkDao.insertAll(any<List<com.minibrain.data.db.entities.ChunkEntity>>()) } answers { val arg = firstArg<List<Any>>(); List(arg.size) { (it + 1).toLong() } }
 
         io.mockk.every { writableDb.execSQL(any(), any<Array<Any?>>()) } returns Unit
+        io.mockk.every { writableDb.compileStatement(any()) } returns io.mockk.mockk<androidx.sqlite.db.SupportSQLiteStatement>(relaxed = true)
+        io.mockk.every { writableDb.beginTransaction() } returns Unit
+        io.mockk.every { writableDb.setTransactionSuccessful() } returns Unit
+        io.mockk.every { writableDb.endTransaction() } returns Unit
         io.mockk.coEvery { folderEmbeddingDao.upsertAll(any()) } returns Unit
 
         try {
             repository.indexFolder(treeUri)
-            // Verify chunk insertion was skipped since chunker failed and returned empty list
-            io.mockk.coVerify(exactly = 0) { chunkDao.insertAll(any()) }
+            // Verify chunk insertion happened for the valid file but not the malformed one
+            io.mockk.coVerify(exactly = 1) { chunkDao.insertAll(match { it.size == 1 && it[0].text == "Valid chunking text" }) }
         } finally {
             io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
             io.mockk.unmockkObject(com.minibrain.data.md.MarkdownChunker)
