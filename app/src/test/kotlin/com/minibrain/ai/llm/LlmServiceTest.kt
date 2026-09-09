@@ -197,4 +197,25 @@ class LlmServiceTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun `initialize fails with correct message if CPU throws Error`() = runBlocking {
+        val service = LlmService()
+
+        val tempFile = File.createTempFile("model", ".bin")
+        RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
+
+        mockkConstructor(Engine::class)
+        every { anyConstructed<Engine>().initialize() } throws UnsatisfiedLinkError("CPU Native library missing")
+
+        try {
+            service.initialize(tempFile, forceCpu = true)
+            fail("Expected Exception")
+        } catch (e: Exception) {
+            assertTrue(e.message!!.contains("CPUモードでの初期化に失敗しました"))
+            assertTrue(logs.any { it.contains("CPU initialization failed") })
+        } finally {
+            tempFile.delete()
+        }
+    }
 }
