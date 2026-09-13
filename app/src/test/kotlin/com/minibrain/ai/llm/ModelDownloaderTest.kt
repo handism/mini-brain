@@ -113,4 +113,28 @@ class ModelDownloaderTest {
         val error = results[0] as DownloadResult.Error
         assertEquals("エラー: Simulated exception", error.message)
     }
+
+    @Test
+    fun `moveFile handles IOException and returns error message`() {
+        val mockContext = mockk<Context>()
+        val tempFile = File(System.getProperty("java.io.tmpdir"))
+        every { mockContext.filesDir } returns tempFile
+
+        val downloader = ModelDownloader(mockContext)
+        val src = File("src_dummy")
+        val dst = File("dst_dummy")
+
+        io.mockk.mockkStatic(java.nio.file.Files::class)
+        try {
+            every {
+                java.nio.file.Files.move(any(), any(), *anyVararg())
+            } throws java.io.IOException("Mocked IO exception")
+
+            val result = downloader.moveFile(src, dst)
+
+            assertEquals("ファイルの移動に失敗しました: Mocked IO exception", result)
+        } finally {
+            io.mockk.unmockkStatic(java.nio.file.Files::class)
+        }
+    }
 }

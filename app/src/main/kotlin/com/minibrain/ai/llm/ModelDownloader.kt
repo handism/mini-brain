@@ -1,6 +1,7 @@
 package com.minibrain.ai.llm
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -159,7 +160,8 @@ class ModelDownloader(private val context: Context) {
         }
     }.flowOn(Dispatchers.IO)
 
-    private fun moveFile(src: File, dst: File): String? = try {
+    @VisibleForTesting
+    internal fun moveFile(src: File, dst: File): String? = try {
         java.nio.file.Files.move(
             src.toPath(), dst.toPath(),
             java.nio.file.StandardCopyOption.REPLACE_EXISTING,
