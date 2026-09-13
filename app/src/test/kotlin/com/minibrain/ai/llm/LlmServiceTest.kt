@@ -218,4 +218,15 @@ class LlmServiceTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun `generateStream throws exception if not initialized`() = runBlocking {
+        val service = LlmService()
+        try {
+            service.generateStream("hello").collect { }
+            fail("Expected IllegalArgumentException")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("LlmService not initialized"))
+        }
+    }
 }
