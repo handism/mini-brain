@@ -22,6 +22,9 @@ import com.minibrain.util.DateValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -288,37 +291,37 @@ class DocumentRepository(
             documentDao.getByFileUris(chunk)
         }.associateBy { it.fileUri }
 
-        val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
+        val folderEmbeddings = coroutineScope {
+            byFolder.map { (folderPath, files) ->
+                async(Dispatchers.IO) {
+                    val fileUris = files.map { it.uri.toString() }
+                    val allDocs = fileUris.mapNotNull { allDocsMap[it] }
 
-        for ((folderPath, files) in byFolder) {
-            val fileUris = files.map { it.uri.toString() }
-            val allDocs = fileUris.mapNotNull { allDocsMap[it] }
+                    val headings = allDocs.asSequence().flatMap { doc ->
+                        doc.headings?.let { json ->
+                            runCatching {
+                                val arr = org.json.JSONArray(json)
+                                List(arr.length()) { i -> arr.getString(i) }
+                            }.getOrElse { emptyList() }
+                        } ?: emptyList()
+                    }.take(10).toList()
 
-            val headings = allDocs.asSequence().flatMap { doc ->
-                doc.headings?.let { json ->
+                    val folderText = buildString {
+                        append("フォルダ: $folderPath\n")
+                        append("ファイル: ${files.joinToString(", ") { it.name }}\n")
+                        if (headings.isNotEmpty()) append("見出し: ${headings.joinToString(", ")}")
+                    }
+
                     runCatching {
-                        val arr = org.json.JSONArray(json)
-                        List(arr.length()) { i -> arr.getString(i) }
-                    }.getOrElse { emptyList() }
-                } ?: emptyList()
-            }.take(10).toList()
-
-            val folderText = buildString {
-                append("フォルダ: $folderPath\n")
-                append("ファイル: ${files.joinToString(", ") { it.name }}\n")
-                if (headings.isNotEmpty()) append("見出し: ${headings.joinToString(", ")}")
-            }
-
-            runCatching {
-                val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
-                folderEmbeddings.add(
-                    FolderEmbeddingEntity(
-                        path = folderPath,
-                        treeUri = treeUri.toString(),
-                        embedding = EmbedderService.floatArrayToBytes(embedding),
-                    )
-                )
-            }
+                        val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
+                        FolderEmbeddingEntity(
+                            path = folderPath,
+                            treeUri = treeUri.toString(),
+                            embedding = EmbedderService.floatArrayToBytes(embedding),
+                        )
+                    }.getOrNull()
+                }
+            }.awaitAll().filterNotNull()
         }
 
         if (folderEmbeddings.isNotEmpty()) {
