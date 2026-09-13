@@ -113,4 +113,127 @@ class ModelDownloaderTest {
         val error = results[0] as DownloadResult.Error
         assertEquals("エラー: Simulated exception", error.message)
     }
+
+    @Test
+    fun `downloadAll handles empty response body`() = runTest {
+        mockkConstructor(OkHttpClient.Builder::class)
+        val mockClient = mockk<OkHttpClient>()
+        val mockCall = mockk<Call>()
+        val mockResponse = mockk<Response>()
+
+        every { anyConstructed<OkHttpClient.Builder>().build() } returns mockClient
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } returns mockResponse
+        every { mockResponse.isSuccessful } returns true
+        every { mockResponse.body } returns null
+
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_empty_body")
+        every { mockContext.filesDir } returns filesDir
+
+        try {
+            val downloader = ModelDownloader(mockContext)
+            val results = downloader.downloadAll().toList()
+
+            val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
+            assertTrue(errorResult != null)
+            assertEquals("レスポンスボディが空です", errorResult!!.message)
+        } finally {
+            unmockkConstructor(OkHttpClient.Builder::class)
+        }
+    }
+
+    @Test
+    fun `downloadAll handles incomplete download stream`() = runTest {
+        mockkConstructor(OkHttpClient.Builder::class)
+        val mockClient = mockk<OkHttpClient>()
+        val mockCall = mockk<Call>()
+        val mockResponse = mockk<Response>()
+        val mockBody = mockk<ResponseBody>()
+
+        every { anyConstructed<OkHttpClient.Builder>().build() } returns mockClient
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } returns mockResponse
+        every { mockResponse.isSuccessful } returns true
+        every { mockResponse.code } returns 200
+        every { mockResponse.body } returns mockBody
+        every { mockBody.contentLength() } returns 1024L
+        every { mockBody.byteStream() } returns java.io.ByteArrayInputStream(ByteArray(512))
+
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_incomplete")
+        every { mockContext.filesDir } returns filesDir
+
+        try {
+            val downloader = ModelDownloader(mockContext)
+            val results = downloader.downloadAll().toList()
+
+            val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
+            assertTrue(errorResult != null)
+            assertEquals("中断されました: 512 / 1024 bytes", errorResult!!.message)
+        } finally {
+            unmockkConstructor(OkHttpClient.Builder::class)
+        }
+    }
+
+    @Test
+    fun `downloadAll handles OkHttp execution Exception`() = runTest {
+        mockkConstructor(OkHttpClient.Builder::class)
+        val mockClient = mockk<OkHttpClient>()
+        val mockCall = mockk<Call>()
+
+        every { anyConstructed<OkHttpClient.Builder>().build() } returns mockClient
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } throws IOException("Simulated OkHttp execution error")
+
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_exception")
+        every { mockContext.filesDir } returns filesDir
+
+        try {
+            val downloader = ModelDownloader(mockContext)
+            val results = downloader.downloadAll().toList()
+
+            val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
+            assertTrue(errorResult != null)
+            assertEquals("接続失敗: Simulated OkHttp execution error", errorResult!!.message)
+        } finally {
+            unmockkConstructor(OkHttpClient.Builder::class)
+        }
+    }
+
+    @Test
+    fun `downloadAll handles 416 Range Not Satisfiable`() = runTest {
+        mockkConstructor(OkHttpClient.Builder::class)
+        val mockClient = mockk<OkHttpClient>()
+        val mockCall = mockk<Call>()
+        val mockResponse = mockk<Response>()
+
+        every { anyConstructed<OkHttpClient.Builder>().build() } returns mockClient
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } returns mockResponse
+        every { mockResponse.isSuccessful } returns false
+        every { mockResponse.code } returns 416
+        every { mockResponse.message } returns "Range Not Satisfiable"
+        every { mockResponse.body } returns null
+
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_416")
+        every { mockContext.filesDir } returns filesDir
+
+        val modelsDir = File(filesDir, "models").apply { mkdirs() }
+        val tempFile = File(modelsDir, "${ModelDownloader.EMBEDDER_FILE_NAME}.download")
+        tempFile.writeText("Dummy content")
+
+        try {
+            val downloader = ModelDownloader(mockContext)
+            val results = downloader.downloadAll().toList()
+
+            val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
+            assertTrue(errorResult != null)
+            assertEquals("Embedder のハッシュ検証に失敗しました。再試行してください。", errorResult!!.message)
+        } finally {
+            unmockkConstructor(OkHttpClient.Builder::class)
+        }
+    }
 }
