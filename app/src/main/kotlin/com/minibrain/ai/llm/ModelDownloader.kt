@@ -50,7 +50,8 @@ class ModelDownloader(private val context: Context) {
         return actualHash.equals(expectedHash, ignoreCase = true)
     }
 
-    private fun calculateSha256(file: File): String = try {
+    @androidx.annotation.VisibleForTesting
+    internal fun calculateSha256(file: File): String = try {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(8192)
@@ -159,7 +160,8 @@ class ModelDownloader(private val context: Context) {
         }
     }.flowOn(Dispatchers.IO)
 
-    private fun moveFile(src: File, dst: File): String? = try {
+    @androidx.annotation.VisibleForTesting
+    internal fun moveFile(src: File, dst: File): String? = try {
         java.nio.file.Files.move(
             src.toPath(), dst.toPath(),
             java.nio.file.StandardCopyOption.REPLACE_EXISTING,
