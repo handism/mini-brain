@@ -98,6 +98,37 @@ class SearchPipeline(
         val ctx = cache ?: SearchRequestCache(treeUri, chunkDao, documentDao)
         val traceEvents = mutableListOf<AgentTraceEvent>()
 
+        val expansionResult = performQueryExpansion(query, onStatus, traceEvents)
+
+        val retrievalResult = performParallelRetrieval(
+            query, treeUri, expansionResult.expanded, expansionResult.hypothetical,
+            dateRange, ctx, onStatus, traceEvents
+        )
+
+        val merged = performCandidateMerge(
+            retrievalResult.bm25Candidates,
+            retrievalResult.metaCandidates,
+            retrievalResult.vectorCandidates,
+            traceEvents
+        )
+
+        val final = performRerankingAndPinning(
+            query, merged, dateRange, retrievalResult.dateRangeHits, onStatus, traceEvents
+        )
+
+        return SearchPipelineResult(final, traceEvents)
+    }
+
+    private data class QueryExpansionResult(
+        val expanded: List<String>,
+        val hypothetical: String?
+    )
+
+    private suspend fun performQueryExpansion(
+        query: String,
+        onStatus: ((String) -> Unit)?,
+        traceEvents: MutableList<AgentTraceEvent>
+    ): QueryExpansionResult {
         // 1. Query Expansion (LLM 呼び出し — 単一スレッドのため逐次)
         onStatus?.invoke("クエリ展開中...")
         val expanded = queryExpander.expand(query)
@@ -113,6 +144,26 @@ class SearchPipeline(
             Timber.tag(TAG).d("hyde=${hypothetical.take(80)}")
         }
 
+        return QueryExpansionResult(expanded, hypothetical)
+    }
+
+    private data class RetrievalResult(
+        val bm25Candidates: List<Citation>,
+        val metaCandidates: List<Citation>,
+        val vectorCandidates: List<Citation>,
+        val dateRangeHits: List<Citation>
+    )
+
+    private suspend fun performParallelRetrieval(
+        query: String,
+        treeUri: String,
+        expanded: List<String>,
+        hypothetical: String?,
+        dateRange: DateRange?,
+        ctx: SearchRequestCache,
+        onStatus: ((String) -> Unit)?,
+        traceEvents: MutableList<AgentTraceEvent>
+    ): RetrievalResult {
         // 2. Parallel Retrieval
         onStatus?.invoke("並行検索中...")
         // dateRangeSearch は Reranker 後段の pin 注入でも再利用するため、別に保持する
@@ -145,6 +196,15 @@ class SearchPipeline(
         traceEvents += VectorSearchHitEvent(query, vectorCandidates.size)
         Timber.tag(TAG).d("bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
 
+        return RetrievalResult(bm25Candidates, metaCandidates, vectorCandidates, dateRangeHits)
+    }
+
+    private fun performCandidateMerge(
+        bm25Candidates: List<Citation>,
+        metaCandidates: List<Citation>,
+        vectorCandidates: List<Citation>,
+        traceEvents: MutableList<AgentTraceEvent>
+    ): List<Citation> {
         // 3. Candidate Merge (RRF rank 融合 + ソース別重み付け)
         // meta を先頭に置き、同キー衝突時に [日付:] snippet 付き Citation を残す
         val merged = mergeCandidatesRrf(
@@ -155,7 +215,17 @@ class SearchPipeline(
         )
         traceEvents += CandidateMergeEvent(merged.size)
         Timber.tag(TAG).d("merged=${merged.size} candidates")
+        return merged
+    }
 
+    private suspend fun performRerankingAndPinning(
+        query: String,
+        merged: List<Citation>,
+        dateRange: DateRange?,
+        dateRangeHits: List<Citation>,
+        onStatus: ((String) -> Unit)?,
+        traceEvents: MutableList<AgentTraceEvent>
+    ): List<Citation> {
         // 4. LLM Rerank (LLM 呼び出し — 逐次)
         onStatus?.invoke("候補を絞り込み中...")
         val reranked = llmReranker.rerank(query, merged, RERANK_TOP_K)
@@ -164,7 +234,7 @@ class SearchPipeline(
 
         // 4.5 dateRange 検出時は dateRangeSearch 上位 N 件を Reranker 結果の先頭に強制マージする（ADR-025）。
         // Reranker が日付ヒットを下位に圧縮するケースを救う最小介入。後段は Reranker 順を維持する。
-        val final = if (dateRange != null && dateRangeHits.isNotEmpty()) {
+        return if (dateRange != null && dateRangeHits.isNotEmpty()) {
             val pinned = dateRangeHits.take(DATE_RANGE_PIN_COUNT)
             val pinnedKeys = pinned.map { it.dedupeKey }.toHashSet()
             val rest = reranked.filterNot { it.dedupeKey in pinnedKeys }
@@ -172,8 +242,6 @@ class SearchPipeline(
                 Timber.tag(TAG).d("dateRange pin: pinned=${pinned.size} final=${it.size}")
             }
         } else reranked
-
-        return SearchPipelineResult(final, traceEvents)
     }
 
     private suspend fun bm25Search(query: String, treeUri: String): List<Citation> {

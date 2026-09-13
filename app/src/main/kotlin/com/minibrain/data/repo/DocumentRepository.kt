@@ -123,21 +123,7 @@ class DocumentRepository(
                 if (existing != null && existing.contentHash == mdFile.contentHash &&
                     existingChunkCount > 0
                 ) {
-                    if (existing.headings == null || existing.documentDate == null) {
-                        docsToUpdate.add(
-                            existing.copy(
-                                headings = existing.headings
-                                    ?: JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
-                                firstParagraph = existing.firstParagraph
-                                    ?: MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
-                                tags = existing.tags
-                                    ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
-                                documentDate = existing.documentDate
-                                    ?: extractDateFromPath(mdFile.relativePath)
-                                    ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
-                            )
-                        )
-                    }
+                    createUpdatedDocumentEntity(existing, mdFile)?.let { docsToUpdate.add(it) }
                     totalChunks += existingChunkCount
                     return@forEachIndexed
                 }
@@ -146,21 +132,7 @@ class DocumentRepository(
                     docsToDelete.add(existing.id)
                 }
 
-                val newDoc = DocumentEntity(
-                    id = existing?.id ?: 0,
-                    treeUri = treeUri.toString(),
-                    fileUri = mdFile.uri.toString(),
-                    fileName = mdFile.name,
-                    relativePath = mdFile.relativePath,
-                    lastModified = mdFile.lastModified,
-                    contentHash = mdFile.contentHash,
-                    headings = JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
-                    firstParagraph = MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
-                    tags = JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
-                    documentDate = extractDateFromPath(mdFile.relativePath)
-                        ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
-                )
-
+                val newDoc = createNewDocumentEntity(existing, treeUri, mdFile)
                 pendingDocs.add(PendingDoc(newDoc, mdFile))
             }
 
@@ -183,6 +155,41 @@ class DocumentRepository(
         _indexingState.value = IndexingState.Done(total, totalChunks)
     }
 
+
+
+    private fun createUpdatedDocumentEntity(existing: DocumentEntity, mdFile: MdFile): DocumentEntity? {
+        if (existing.headings == null || existing.documentDate == null) {
+            return existing.copy(
+                headings = existing.headings
+                    ?: JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
+                firstParagraph = existing.firstParagraph
+                    ?: MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
+                tags = existing.tags
+                    ?: JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+                documentDate = existing.documentDate
+                    ?: extractDateFromPath(mdFile.relativePath)
+                    ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
+            )
+        }
+        return null
+    }
+
+    private fun createNewDocumentEntity(existing: DocumentEntity?, treeUri: Uri, mdFile: MdFile): DocumentEntity {
+        return DocumentEntity(
+            id = existing?.id ?: 0,
+            treeUri = treeUri.toString(),
+            fileUri = mdFile.uri.toString(),
+            fileName = mdFile.name,
+            relativePath = mdFile.relativePath,
+            lastModified = mdFile.lastModified,
+            contentHash = mdFile.contentHash,
+            headings = JSONArray(MarkdownMetaExtractor.extractHeadings(mdFile.content)).toString(),
+            firstParagraph = MarkdownMetaExtractor.extractFirstParagraph(mdFile.content),
+            tags = JSONArray(MarkdownMetaExtractor.extractTags(mdFile.content)).toString(),
+            documentDate = extractDateFromPath(mdFile.relativePath)
+                ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
+        )
+    }
 
     private suspend fun refreshMetadata(docsToUpdate: List<DocumentEntity>) {
         if (docsToUpdate.isNotEmpty()) {
