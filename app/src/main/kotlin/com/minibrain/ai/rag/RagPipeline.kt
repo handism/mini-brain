@@ -143,8 +143,8 @@ class RagPipeline(
     ): List<Pair<Float, ChunkEntity>> =
         withContext(Dispatchers.Default) {
             val queryVec = embedderService.embed(question, EmbedType.QUERY)
-            // 同一 treeUri のキャッシュがあればロード+デコード済みベクトルを再利用する
-            if (cache != null && treeUri != null && cache.treeUri == treeUri) {
+            // キャッシュがあればロード+デコード済みベクトルを再利用する
+            if (cache != null && cache.treeUri == treeUri) {
                 return@withContext cache.cosineTopK(queryVec, k)
             }
             val chunks = if (treeUri != null) {
