@@ -78,115 +78,21 @@ fun HomeScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (treeUri == null) {
-                // フォルダ未選択
-                Spacer(Modifier.height(60.dp))
-                Icon(
-                    Icons.Default.FolderOpen,
-                    contentDescription = null,
-                    modifier = Modifier.size(72.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+            val uri = treeUri
+            if (uri == null) {
+                FolderUnselectedContent(
+                    onSelectFolder = { folderLauncher.launch(null) }
                 )
-                Spacer(Modifier.height(16.dp))
-                Text("mdフォルダを選択してください", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Markdownファイルが格納されたフォルダを選ぶと\n自動でインデックスを作成します",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(32.dp))
-                Button(
-                    onClick = { folderLauncher.launch(null) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null)
-                    Text("フォルダを選択", modifier = Modifier.padding(start = 8.dp))
-                }
             } else {
-                // フォルダ選択済み
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("知識ベース", style = MaterialTheme.typography.labelLarge)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            (Uri.parse(treeUri).lastPathSegment ?: treeUri.orEmpty())
-                                .removePrefix("primary:"),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(24.dp),
-                        ) {
-                            StatItem(label = "ファイル数", value = "$docCount")
-                            StatItem(label = "チャンク数", value = "$chunkCount")
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                // インデックス状態
-                when (val s = indexState) {
-                    is IndexingState.Idle -> { /* No UI to display when idle */ }
-                    is IndexingState.Progress -> {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Text(
-                                " インデックス中... ${s.current}/${s.total} ${s.fileName}",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(start = 8.dp),
-                            )
-                        }
-                        if (s.total > 0) {
-                            LinearProgressIndicator(
-                                progress = { s.current.toFloat() / s.total },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                    is IndexingState.Done -> {
-                        Text(
-                            "インデックス完了: ${s.fileCount}ファイル / ${s.chunkCount}チャンク",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    is IndexingState.Error -> {
-                        Text("エラー: ${s.message}", color = MaterialTheme.colorScheme.error)
-                    }
-                }
-
-                Spacer(Modifier.height(24.dp))
-
-                Button(
-                    onClick = onOpenChat,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = indexState !is IndexingState.Progress,
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
-                    Text("チャットを開く", modifier = Modifier.padding(start = 8.dp))
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FilledTonalButton(
-                        onClick = { vm.reindex() },
-                        modifier = Modifier.weight(1f),
-                        enabled = indexState !is IndexingState.Progress,
-                    ) {
-                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("再インデックス", modifier = Modifier.padding(start = 4.dp))
-                    }
-                    OutlinedButton(
-                        onClick = { folderLauncher.launch(null) },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("フォルダ変更", modifier = Modifier.padding(start = 4.dp))
-                    }
-                }
+                FolderSelectedContent(
+                    treeUri = uri,
+                    docCount = docCount,
+                    chunkCount = chunkCount,
+                    indexState = indexState,
+                    onOpenChat = onOpenChat,
+                    onReindex = { vm.reindex() },
+                    onChangeFolder = { folderLauncher.launch(null) }
+                )
             }
         }
     }
@@ -197,5 +103,130 @@ private fun StatItem(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, style = MaterialTheme.typography.titleLarge)
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun FolderUnselectedContent(
+    onSelectFolder: () -> Unit
+) {
+    // フォルダ未選択
+    Spacer(Modifier.height(60.dp))
+    Icon(
+        Icons.Default.FolderOpen,
+        contentDescription = null,
+        modifier = Modifier.size(72.dp),
+        tint = MaterialTheme.colorScheme.primary,
+    )
+    Spacer(Modifier.height(16.dp))
+    Text("mdフォルダを選択してください", style = MaterialTheme.typography.titleLarge)
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "Markdownファイルが格納されたフォルダを選ぶと\n自動でインデックスを作成します",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(32.dp))
+    Button(
+        onClick = onSelectFolder,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(Icons.Default.FolderOpen, contentDescription = null)
+        Text("フォルダを選択", modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+@Composable
+private fun FolderSelectedContent(
+    treeUri: String,
+    docCount: Int,
+    chunkCount: Int,
+    indexState: IndexingState,
+    onOpenChat: () -> Unit,
+    onReindex: () -> Unit,
+    onChangeFolder: () -> Unit,
+) {
+    // フォルダ選択済み
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("知識ベース", style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                (Uri.parse(treeUri).lastPathSegment ?: treeUri)
+                    .removePrefix("primary:"),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
+                StatItem(label = "ファイル数", value = "$docCount")
+                StatItem(label = "チャンク数", value = "$chunkCount")
+            }
+        }
+    }
+
+    Spacer(Modifier.height(16.dp))
+
+    // インデックス状態
+    when (val s = indexState) {
+        is IndexingState.Idle -> { /* No UI to display when idle */ }
+        is IndexingState.Progress -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text(
+                    " インデックス中... ${s.current}/${s.total} ${s.fileName}",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            if (s.total > 0) {
+                LinearProgressIndicator(
+                    progress = { s.current.toFloat() / s.total },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        is IndexingState.Done -> {
+            Text(
+                "インデックス完了: ${s.fileCount}ファイル / ${s.chunkCount}チャンク",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        is IndexingState.Error -> {
+            Text("エラー: ${s.message}", color = MaterialTheme.colorScheme.error)
+        }
+    }
+
+    Spacer(Modifier.height(24.dp))
+
+    Button(
+        onClick = onOpenChat,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = indexState !is IndexingState.Progress,
+    ) {
+        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
+        Text("チャットを開く", modifier = Modifier.padding(start = 8.dp))
+    }
+
+    Spacer(Modifier.height(12.dp))
+
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        FilledTonalButton(
+            onClick = onReindex,
+            modifier = Modifier.weight(1f),
+            enabled = indexState !is IndexingState.Progress,
+        ) {
+            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text("再インデックス", modifier = Modifier.padding(start = 4.dp))
+        }
+        OutlinedButton(
+            onClick = onChangeFolder,
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text("フォルダ変更", modifier = Modifier.padding(start = 4.dp))
+        }
     }
 }
