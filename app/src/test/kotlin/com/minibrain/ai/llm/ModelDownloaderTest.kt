@@ -113,4 +113,27 @@ class ModelDownloaderTest {
         val error = results[0] as DownloadResult.Error
         assertEquals("エラー: Simulated exception", error.message)
     }
+
+    @Test
+    fun `downloadAll emits Error when files are not ready after download`() = runTest {
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_not_ready")
+        every { mockContext.filesDir } returns filesDir
+
+        val downloader = spyk(ModelDownloader(mockContext))
+
+        // Mock the ready checks to simulate successful download but failing size/validation checks
+        every { downloader.isEmbedderReady() } returns true
+        every { downloader.isTokenizerReady() } returns true
+        every { downloader.isLlmReady() } returns true
+        every { downloader.isAllReady() } returns false
+
+        val results = downloader.downloadAll().toList()
+
+        val errorResult = results.find { it is DownloadResult.Error } as? DownloadResult.Error
+        assertTrue("Expected an error result", errorResult != null)
+        assertTrue(
+            errorResult!!.message.contains("ダウンロードが完了しましたが、ファイルが準備できていません")
+        )
+    }
 }
