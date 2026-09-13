@@ -20,6 +20,9 @@ import org.json.JSONArray
 import com.minibrain.data.search.NGramTokenizer
 import com.minibrain.util.DateValidator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -263,10 +266,19 @@ class DocumentRepository(
         clearBuffer: Boolean
     ): Int {
         if (chunkBuffer.isEmpty()) return 0
+
+        val bigrams = coroutineScope {
+            chunkBuffer.map { entity ->
+                async(Dispatchers.Default) {
+                    NGramTokenizer.toBigrams(entity.text) to NGramTokenizer.toBigrams(entity.headingPath)
+                }
+            }.awaitAll()
+        }
+
         writableDb.beginTransaction()
         try {
             val chunkIds = chunkDao.insertAll(chunkBuffer)
-            insertFts(ftsStmt, chunkIds, chunkBuffer)
+            insertFts(ftsStmt, chunkIds, bigrams)
             writableDb.setTransactionSuccessful()
         } finally {
             writableDb.endTransaction()
@@ -389,14 +401,11 @@ class DocumentRepository(
         }
     }
 
-    private fun insertFts(stmt: androidx.sqlite.db.SupportSQLiteStatement, ids: List<Long>, entities: List<ChunkEntity>) {
-        ids.zip(entities).forEach { (id, entity) ->
+    private fun insertFts(stmt: androidx.sqlite.db.SupportSQLiteStatement, ids: List<Long>, bigrams: List<Pair<String, String>>) {
+        ids.zip(bigrams).forEach { (id, bg) ->
             stmt.bindLong(1, id)
-            val textBigrams = NGramTokenizer.toBigrams(entity.text)
-            stmt.bindString(2, textBigrams)
-
-            val headingBigrams = NGramTokenizer.toBigrams(entity.headingPath)
-            stmt.bindString(3, headingBigrams)
+            stmt.bindString(2, bg.first)
+            stmt.bindString(3, bg.second)
             stmt.executeInsert()
             stmt.clearBindings()
         }
