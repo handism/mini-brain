@@ -72,6 +72,7 @@ class SearchRequestCacheTest {
         override suspend fun countByDoc(docId: Long): Int = 0
         override suspend fun getChunkCountsGroupedByDoc(): List<DocChunkCount> = emptyList()
         override suspend fun getAll(): List<ChunkEntity> = emptyList()
+        override suspend fun _getByScope(treeUri: String, scope: String): List<ChunkEntity> = emptyList()
         override suspend fun getByScope(treeUri: String, scope: String): List<ChunkEntity> = emptyList()
         override fun observeCountByTree(treeUri: String): Flow<Int> = kotlinx.coroutines.flow.flowOf(0)
         override suspend fun count(): Int = 0
