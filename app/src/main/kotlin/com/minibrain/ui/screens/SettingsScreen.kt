@@ -78,108 +78,160 @@ fun SettingsScreen(
                 .padding(padding)
                 .padding(16.dp),
         ) {
-            SectionTitle("知識ベース")
-
-            SettingItem(
-                label = "現在のフォルダ",
-                value = treeUri?.let { Uri.parse(it).lastPathSegment } ?: "未選択",
-            )
-            Spacer(Modifier.height(8.dp))
-            FilledTonalButton(
-                onClick = { vm.reindex() },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("再インデックス（変更ファイルのみ）")
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { folderLauncher.launch(null) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("フォルダを変更")
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            SectionTitle("チャット履歴")
-
-            OutlinedButton(
-                onClick = { showClearDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("チャット履歴をすべて削除", color = MaterialTheme.colorScheme.error)
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            SectionTitle("開発者")
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("検索ログを表示する", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "回答の下にエージェントの検索過程を表示します",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = showSearchLog,
-                    onCheckedChange = { vm.setShowSearchLog(it) },
-                )
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            SectionTitle("モデル情報")
-
-            SettingItem(label = "LLM モデル", value = "Gemma 4 E2B (LiteRT-LM)")
-            SettingItem(
-                label = "LLM ファイル",
-                value = if (vm.llmModelFile.exists()) "${vm.llmModelFile.length() / 1024 / 1024} MB" else "未ダウンロード",
-            )
-            SettingItem(label = "Embedder", value = "Universal Sentence Encoder Multilingual")
-            SettingItem(
-                label = "Embedder ファイル",
-                value = if (vm.embedderModelFile.exists()) "${vm.embedderModelFile.length() / 1024 / 1024} MB" else "未ダウンロード",
+            KnowledgeBaseSection(
+                treeUri = treeUri,
+                onReindex = { vm.reindex() },
+                onChangeFolder = { folderLauncher.launch(null) }
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            SectionTitle("プライバシー")
-
-            Text(
-                "すべての推論はオンデバイスで行われます。\n質問・回答・mdの内容はクラウドに送信されません。\nネットワーク通信は初回モデルダウンロード時のみです。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ChatHistorySection(
+                onClearChat = { showClearDialog = true }
             )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            DeveloperSection(
+                showSearchLog = showSearchLog,
+                onShowSearchLogChange = { vm.setShowSearchLog(it) }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            ModelInfoSection(
+                llmModelFile = vm.llmModelFile,
+                embedderModelFile = vm.embedderModelFile
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            PrivacySection()
         }
     }
 
     if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = { Text("チャット履歴を削除") },
-            text = { Text("すべてのチャット履歴が削除されます。この操作は取り消せません。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.clearChatHistory()
-                    showClearDialog = false
-                    scope.launch { snackbarHostState.showSnackbar("チャット履歴を削除しました") }
-                }) {
-                    Text("削除", color = MaterialTheme.colorScheme.error)
-                }
+        ClearChatDialog(
+            onConfirm = {
+                vm.clearChatHistory()
+                showClearDialog = false
+                scope.launch { snackbarHostState.showSnackbar("チャット履歴を削除しました") }
             },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) { Text("キャンセル") }
-            },
+            onDismiss = { showClearDialog = false }
         )
     }
 }
 
 @Composable
-private fun SectionTitle(title: String) {
-    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+private fun KnowledgeBaseSection(
+    treeUri: String?,
+    onReindex: () -> Unit,
+    onChangeFolder: () -> Unit,
+) {
+    SectionTitle("知識ベース")
+
+    SettingItem(
+        label = "現在のフォルダ",
+        value = treeUri?.let { Uri.parse(it).lastPathSegment } ?: "未選択",
+    )
     Spacer(Modifier.height(8.dp))
+    FilledTonalButton(
+        onClick = onReindex,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("再インデックス（変更ファイルのみ）")
+    }
+    Spacer(Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = onChangeFolder,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("フォルダを変更")
+    }
+}
+
+@Composable
+private fun ChatHistorySection(onClearChat: () -> Unit) {
+    SectionTitle("チャット履歴")
+
+    OutlinedButton(
+        onClick = onClearChat,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("チャット履歴をすべて削除", color = MaterialTheme.colorScheme.error)
+    }
+}
+
+@Composable
+private fun DeveloperSection(
+    showSearchLog: Boolean,
+    onShowSearchLogChange: (Boolean) -> Unit,
+) {
+    SectionTitle("開発者")
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("検索ログを表示する", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "回答の下にエージェントの検索過程を表示します",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = showSearchLog,
+            onCheckedChange = onShowSearchLogChange,
+        )
+    }
+}
+
+@Composable
+private fun ModelInfoSection(
+    llmModelFile: java.io.File,
+    embedderModelFile: java.io.File,
+) {
+    SectionTitle("モデル情報")
+
+    SettingItem(label = "LLM モデル", value = "Gemma 4 E2B (LiteRT-LM)")
+    SettingItem(
+        label = "LLM ファイル",
+        value = if (llmModelFile.exists()) "${llmModelFile.length() / 1024 / 1024} MB" else "未ダウンロード",
+    )
+    SettingItem(label = "Embedder", value = "Universal Sentence Encoder Multilingual")
+    SettingItem(
+        label = "Embedder ファイル",
+        value = if (embedderModelFile.exists()) "${embedderModelFile.length() / 1024 / 1024} MB" else "未ダウンロード",
+    )
+}
+
+@Composable
+private fun PrivacySection() {
+    SectionTitle("プライバシー")
+
+    Text(
+        "すべての推論はオンデバイスで行われます。\n質問・回答・mdの内容はクラウドに送信されません。\nネットワーク通信は初回モデルダウンロード時のみです。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ClearChatDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("チャット履歴を削除") },
+        text = { Text("すべてのチャット履歴が削除されます。この操作は取り消せません。") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("削除", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("キャンセル") }
+        },
+    )
 }
 
 @Composable
@@ -188,4 +240,10 @@ private fun SettingItem(label: String, value: String) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(8.dp))
 }
