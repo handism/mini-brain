@@ -50,7 +50,7 @@ class ReadinessCheckTest {
     @Test
     fun testReadinessChecks() {
         val mockContext = mockk<Context>()
-        every { mockContext.filesDir } returns tempFolder.root
+        every { mockContext.getDir("models", Context.MODE_PRIVATE) } returns tempFolder.root
 
         val downloader = ModelDownloader(mockContext)
 

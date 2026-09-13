@@ -28,7 +28,7 @@ sealed class DownloadResult {
 
 class ModelDownloader(private val context: Context) {
 
-    private val modelsDir: File = File(context.filesDir, "models").also { it.mkdirs() }
+    private val modelsDir: File = context.getDir("models", Context.MODE_PRIVATE)
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)

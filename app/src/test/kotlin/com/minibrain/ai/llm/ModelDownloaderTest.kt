@@ -37,7 +37,7 @@ class ModelDownloaderTest {
 
         val mockContext = mockk<Context>()
         val filesDir = tempFolder.newFolder("models")
-        every { mockContext.filesDir } returns filesDir
+        every { mockContext.getDir("models", Context.MODE_PRIVATE) } returns filesDir
 
         try {
             val downloader = ModelDownloader(mockContext)
@@ -68,7 +68,7 @@ class ModelDownloaderTest {
 
         val mockContext = mockk<Context>()
         val filesDir = tempFolder.newFolder("models_http_error")
-        every { mockContext.filesDir } returns filesDir
+        every { mockContext.getDir("models", Context.MODE_PRIVATE) } returns filesDir
 
         try {
             val downloader = ModelDownloader(mockContext)
@@ -86,7 +86,7 @@ class ModelDownloaderTest {
     fun `calculateSha256 exception returns empty string`() {
         val mockContext = mockk<Context>()
         val filesDir = tempFolder.newFolder("models_test")
-        every { mockContext.filesDir } returns filesDir
+        every { mockContext.getDir("models", Context.MODE_PRIVATE) } returns filesDir
         val downloader = ModelDownloader(mockContext)
 
         val method = ModelDownloader::class.java.getDeclaredMethod("calculateSha256", File::class.java)
@@ -101,7 +101,7 @@ class ModelDownloaderTest {
     fun `downloadAll catches Exception and emits Error`() = runTest {
         val mockContext = mockk<Context>()
         val filesDir = tempFolder.newFolder("models")
-        every { mockContext.filesDir } returns filesDir
+        every { mockContext.getDir("models", Context.MODE_PRIVATE) } returns filesDir
 
         val downloader = spyk(ModelDownloader(mockContext))
         every { downloader.isEmbedderReady() } throws RuntimeException("Simulated exception")
