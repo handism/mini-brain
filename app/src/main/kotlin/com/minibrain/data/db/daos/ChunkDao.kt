@@ -43,9 +43,14 @@ interface ChunkDao {
     @Query("""
         SELECT chunks.* FROM chunks 
         INNER JOIN documents ON chunks.docId = documents.id 
-        WHERE documents.treeUri = :treeUri AND documents.relativePath LIKE :scope || '%'
+        WHERE documents.treeUri = :treeUri AND documents.relativePath LIKE :scope || '%' ESCAPE '\'
     """)
-    suspend fun getByScope(treeUri: String, scope: String): List<ChunkEntity>
+    suspend fun _getByScope(treeUri: String, scope: String): List<ChunkEntity>
+
+    suspend fun getByScope(treeUri: String, scope: String): List<ChunkEntity> {
+        val escapedScope = scope.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return _getByScope(treeUri, escapedScope)
+    }
 
     @Query("SELECT COUNT(*) FROM chunks INNER JOIN documents ON chunks.docId = documents.id WHERE documents.treeUri = :treeUri")
     fun observeCountByTree(treeUri: String): Flow<Int>

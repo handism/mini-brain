@@ -89,11 +89,8 @@ class ModelDownloaderTest {
         every { mockContext.filesDir } returns filesDir
         val downloader = ModelDownloader(mockContext)
 
-        val method = ModelDownloader::class.java.getDeclaredMethod("calculateSha256", File::class.java)
-        method.isAccessible = true
-
         val file = File(filesDir, "non_existent_file_for_test.txt")
-        val result = method.invoke(downloader, file) as String
+        val result = downloader.calculateSha256(file)
         assertEquals("", result)
     }
 
@@ -113,6 +110,46 @@ class ModelDownloaderTest {
         val error = results[0] as DownloadResult.Error
         assertEquals("エラー: Simulated exception", error.message)
     }
+
+    @Test
+    fun `calculateSha256 handles MessageDigest exception`() {
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_test_sha_ex")
+        every { mockContext.filesDir } returns filesDir
+        val downloader = ModelDownloader(mockContext)
+
+        val file = File(filesDir, "test.txt").apply { writeText("dummy") }
+
+        io.mockk.mockkStatic(java.security.MessageDigest::class)
+        try {
+            every { java.security.MessageDigest.getInstance(any()) } throws java.security.NoSuchAlgorithmException("Mocked algorithm error")
+            val result = downloader.calculateSha256(file)
+            assertEquals("", result)
+        } finally {
+            io.mockk.unmockkStatic(java.security.MessageDigest::class)
+        }
+    }
+
+    @Test
+    fun `moveFile exception returns error message`() {
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_test_move")
+        every { mockContext.filesDir } returns filesDir
+        val downloader = ModelDownloader(mockContext)
+
+        val src = File(filesDir, "src.txt")
+        val dst = File(filesDir, "dst.txt")
+
+        io.mockk.mockkStatic(java.nio.file.Files::class)
+        try {
+            every { java.nio.file.Files.move(any<java.nio.file.Path>(), any<java.nio.file.Path>(), *anyVararg()) } throws java.io.IOException("Mocked move error")
+            val result = downloader.moveFile(src, dst)
+            assertTrue(result?.contains("Mocked move error") == true)
+        } finally {
+            io.mockk.unmockkStatic(java.nio.file.Files::class)
+        }
+    }
+
 
     @Test
     fun `downloadAll handles empty response body`() = runTest {
