@@ -67,87 +67,9 @@ class ModelDownloader(private val context: Context) {
 
     fun downloadAll(): Flow<DownloadResult> = flow {
         try {
-            if (!isEmbedderReady()) {
-                val tempFile = File(modelsDir, "$EMBEDDER_FILE_NAME.download")
-                var errorOccurred = false
-                downloadFile(EMBEDDER_URL, tempFile, EMBEDDER_FILE_NAME).collect { result ->
-                    when {
-                        result is DownloadResult.Done -> {
-                            if (verifyHash(tempFile, EMBEDDER_SHA256)) {
-                                val err = moveFile(tempFile, embedderModelFile)
-                                if (err != null) {
-                                    Timber.tag(TAG).e("Failed to move embedder temp file: $err")
-                                    tempFile.delete()
-                                    emit(DownloadResult.Error(err))
-                                    errorOccurred = true
-                                }
-                            } else {
-                                Timber.tag(TAG).e("Embedder hash verification failed")
-                                tempFile.delete()
-                                emit(DownloadResult.Error("Embedder のハッシュ検証に失敗しました。再試行してください。"))
-                                errorOccurred = true
-                            }
-                        }
-                        result is DownloadResult.Error -> { emit(result); errorOccurred = true }
-                        else -> emit(result)
-                    }
-                }
-                if (errorOccurred) return@flow
-            }
-            if (!isTokenizerReady()) {
-                val tempFile = File(modelsDir, "$TOKENIZER_FILE_NAME.download")
-                var errorOccurred = false
-                downloadFile(TOKENIZER_URL, tempFile, TOKENIZER_FILE_NAME).collect { result ->
-                    when {
-                        result is DownloadResult.Done -> {
-                            if (verifyHash(tempFile, TOKENIZER_SHA256)) {
-                                val err = moveFile(tempFile, tokenizerModelFile)
-                                if (err != null) {
-                                    Timber.tag(TAG).e("Failed to move tokenizer temp file: $err")
-                                    tempFile.delete()
-                                    emit(DownloadResult.Error(err))
-                                    errorOccurred = true
-                                }
-                            } else {
-                                Timber.tag(TAG).e("Tokenizer hash verification failed")
-                                tempFile.delete()
-                                emit(DownloadResult.Error("Tokenizer のハッシュ検証に失敗しました。再試行してください。"))
-                                errorOccurred = true
-                            }
-                        }
-                        result is DownloadResult.Error -> { emit(result); errorOccurred = true }
-                        else -> emit(result)
-                    }
-                }
-                if (errorOccurred) return@flow
-            }
-            if (!isLlmReady()) {
-                val tempFile = File(modelsDir, "$LLM_FILE_NAME.download")
-                var errorOccurred = false
-                downloadFile(LLM_URL, tempFile, LLM_FILE_NAME).collect { result ->
-                    when {
-                        result is DownloadResult.Done -> {
-                            if (verifyHash(tempFile, LLM_SHA256)) {
-                                val err = moveFile(tempFile, llmModelFile)
-                                if (err != null) {
-                                    Timber.tag(TAG).e("Failed to move LLM temp file: $err")
-                                    tempFile.delete()
-                                    emit(DownloadResult.Error(err))
-                                    errorOccurred = true
-                                }
-                            } else {
-                                Timber.tag(TAG).e("LLM hash verification failed")
-                                tempFile.delete()
-                                emit(DownloadResult.Error("LLM のハッシュ検証に失敗しました。再試行してください。"))
-                                errorOccurred = true
-                            }
-                        }
-                        result is DownloadResult.Error -> { emit(result); errorOccurred = true }
-                        else -> emit(result)
-                    }
-                }
-                if (errorOccurred) return@flow
-            }
+            if (downloadEmbedder()) return@flow
+            if (downloadTokenizer()) return@flow
+            if (downloadLlm()) return@flow
             if (isAllReady()) {
                 emit(DownloadResult.Done(llmModelFile))
             } else {
@@ -158,6 +80,93 @@ class ModelDownloader(private val context: Context) {
             emit(DownloadResult.Error("エラー: ${e.localizedMessage}"))
         }
     }.flowOn(Dispatchers.IO)
+
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<DownloadResult>.downloadEmbedder(): Boolean {
+        if (isEmbedderReady()) return false
+        val tempFile = File(modelsDir, "$EMBEDDER_FILE_NAME.download")
+        var errorOccurred = false
+        downloadFile(EMBEDDER_URL, tempFile, EMBEDDER_FILE_NAME).collect { result ->
+            when {
+                result is DownloadResult.Done -> {
+                    if (verifyHash(tempFile, EMBEDDER_SHA256)) {
+                        val err = moveFile(tempFile, embedderModelFile)
+                        if (err != null) {
+                            Timber.tag(TAG).e("Failed to move embedder temp file: $err")
+                            tempFile.delete()
+                            emit(DownloadResult.Error(err))
+                            errorOccurred = true
+                        }
+                    } else {
+                        Timber.tag(TAG).e("Embedder hash verification failed")
+                        tempFile.delete()
+                        emit(DownloadResult.Error("Embedder のハッシュ検証に失敗しました。再試行してください。"))
+                        errorOccurred = true
+                    }
+                }
+                result is DownloadResult.Error -> { emit(result); errorOccurred = true }
+                else -> emit(result)
+            }
+        }
+        return errorOccurred
+    }
+
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<DownloadResult>.downloadTokenizer(): Boolean {
+        if (isTokenizerReady()) return false
+        val tempFile = File(modelsDir, "$TOKENIZER_FILE_NAME.download")
+        var errorOccurred = false
+        downloadFile(TOKENIZER_URL, tempFile, TOKENIZER_FILE_NAME).collect { result ->
+            when {
+                result is DownloadResult.Done -> {
+                    if (verifyHash(tempFile, TOKENIZER_SHA256)) {
+                        val err = moveFile(tempFile, tokenizerModelFile)
+                        if (err != null) {
+                            Timber.tag(TAG).e("Failed to move tokenizer temp file: $err")
+                            tempFile.delete()
+                            emit(DownloadResult.Error(err))
+                            errorOccurred = true
+                        }
+                    } else {
+                        Timber.tag(TAG).e("Tokenizer hash verification failed")
+                        tempFile.delete()
+                        emit(DownloadResult.Error("Tokenizer のハッシュ検証に失敗しました。再試行してください。"))
+                        errorOccurred = true
+                    }
+                }
+                result is DownloadResult.Error -> { emit(result); errorOccurred = true }
+                else -> emit(result)
+            }
+        }
+        return errorOccurred
+    }
+
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<DownloadResult>.downloadLlm(): Boolean {
+        if (isLlmReady()) return false
+        val tempFile = File(modelsDir, "$LLM_FILE_NAME.download")
+        var errorOccurred = false
+        downloadFile(LLM_URL, tempFile, LLM_FILE_NAME).collect { result ->
+            when {
+                result is DownloadResult.Done -> {
+                    if (verifyHash(tempFile, LLM_SHA256)) {
+                        val err = moveFile(tempFile, llmModelFile)
+                        if (err != null) {
+                            Timber.tag(TAG).e("Failed to move LLM temp file: $err")
+                            tempFile.delete()
+                            emit(DownloadResult.Error(err))
+                            errorOccurred = true
+                        }
+                    } else {
+                        Timber.tag(TAG).e("LLM hash verification failed")
+                        tempFile.delete()
+                        emit(DownloadResult.Error("LLM のハッシュ検証に失敗しました。再試行してください。"))
+                        errorOccurred = true
+                    }
+                }
+                result is DownloadResult.Error -> { emit(result); errorOccurred = true }
+                else -> emit(result)
+            }
+        }
+        return errorOccurred
+    }
 
     private fun moveFile(src: File, dst: File): String? = try {
         java.nio.file.Files.move(
