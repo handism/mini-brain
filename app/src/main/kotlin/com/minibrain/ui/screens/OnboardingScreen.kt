@@ -75,73 +75,95 @@ fun OnboardingScreen(
             when (val s = state) {
                 is OnboardingUiState.Checking -> CircularProgressIndicator()
 
-                is OnboardingUiState.Required -> {
-                    Text(
-                        "初回起動時に約 2.8GB のモデルをダウンロードします。\nWi-Fi 接続を推奨します。",
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(24.dp))
-                    Button(onClick = { vm.startDownload() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("ダウンロード開始")
-                    }
-                }
+                is OnboardingUiState.Required -> RequiredStateView(onStartDownload = { vm.startDownload() })
 
-                is OnboardingUiState.Downloading -> {
-                    Text("モデルをダウンロード中...", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text(s.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(12.dp))
-                    if (s.embedderFraction > 0f || s.llmFraction > 0f) {
-                        if (s.embedderFraction > 0f) {
-                            Text("Embedderモデル", style = MaterialTheme.typography.labelSmall)
-                            LinearProgressIndicator(
-                                progress = { s.embedderFraction },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Spacer(Modifier.height(8.dp))
-                        }
-                        if (s.llmFraction > 0f) {
-                            Text("Gemma 4 E2B LLM (約2.5GB)", style = MaterialTheme.typography.labelSmall)
-                            LinearProgressIndicator(
-                                progress = { s.llmFraction },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    } else {
-                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                    }
-                }
+                is OnboardingUiState.Downloading -> DownloadingStateView(s)
 
-                is OnboardingUiState.Initializing -> {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(12.dp))
-                    Text("モデルを初期化中...", style = MaterialTheme.typography.bodyMedium)
-                }
+                is OnboardingUiState.Initializing -> InitializingStateView()
 
                 is OnboardingUiState.AlreadyReady, is OnboardingUiState.Ready -> {
                     CircularProgressIndicator()
                 }
 
-                is OnboardingUiState.Failure -> {
-                    Text(
-                        "エラーが発生しました:\n${s.message}",
-                        color = MaterialTheme.colorScheme.error,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    if (s.canTryCpu) {
-                        Button(onClick = { vm.retryWithCpu() }, modifier = Modifier.fillMaxWidth()) {
-                            Text("CPUモードで試す (低速ですが安定します)")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    Button(onClick = { vm.startDownload() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("再試行")
-                    }
-                }
+                is OnboardingUiState.Failure -> FailureStateView(
+                    message = s.message,
+                    canTryCpu = s.canTryCpu,
+                    onRetryCpu = { vm.retryWithCpu() },
+                    onRetry = { vm.startDownload() }
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun RequiredStateView(onStartDownload: () -> Unit) {
+    Text(
+        "初回起動時に約 2.8GB のモデルをダウンロードします。\nWi-Fi 接続を推奨します。",
+        style = MaterialTheme.typography.bodySmall,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(24.dp))
+    Button(onClick = onStartDownload, modifier = Modifier.fillMaxWidth()) {
+        Text("ダウンロード開始")
+    }
+}
+
+@Composable
+private fun DownloadingStateView(state: OnboardingUiState.Downloading) {
+    Text("モデルをダウンロード中...", style = MaterialTheme.typography.bodyMedium)
+    Spacer(Modifier.height(8.dp))
+    Text(state.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(12.dp))
+    if (state.embedderFraction > 0f || state.llmFraction > 0f) {
+        if (state.embedderFraction > 0f) {
+            Text("Embedderモデル", style = MaterialTheme.typography.labelSmall)
+            LinearProgressIndicator(
+                progress = { state.embedderFraction },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        if (state.llmFraction > 0f) {
+            Text("Gemma 4 E2B LLM (約2.5GB)", style = MaterialTheme.typography.labelSmall)
+            LinearProgressIndicator(
+                progress = { state.llmFraction },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    } else {
+        CircularProgressIndicator(modifier = Modifier.size(32.dp))
+    }
+}
+
+@Composable
+private fun InitializingStateView() {
+    CircularProgressIndicator()
+    Spacer(Modifier.height(12.dp))
+    Text("モデルを初期化中...", style = MaterialTheme.typography.bodyMedium)
+}
+
+@Composable
+private fun FailureStateView(
+    message: String,
+    canTryCpu: Boolean,
+    onRetryCpu: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Text(
+        "エラーが発生しました:\n${message}",
+        color = MaterialTheme.colorScheme.error,
+        textAlign = TextAlign.Center,
+    )
+    Spacer(Modifier.height(16.dp))
+    if (canTryCpu) {
+        Button(onClick = onRetryCpu, modifier = Modifier.fillMaxWidth()) {
+            Text("CPUモードで試す (低速ですが安定します)")
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+        Text("再試行")
     }
 }
