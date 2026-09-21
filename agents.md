@@ -13,30 +13,14 @@
 ---
 
 ## 1. プロジェクト概要
-- **プロジェクト名**: Mini Brain
 - **目的**: Android 12+ 向けのオンデバイス エージェント型 RAG アプリ。
-- **パッケージ名**: `com.minibrain`
-- **主要言語**: Kotlin
-- **UI フレームワーク**: Jetpack Compose + Material 3
 - **依存性注入 (DI)**: [AppContainer.kt](app/src/main/kotlin/com/minibrain/di/AppContainer.kt) での手動DIコンテナ (`MiniBrainApp.container`) 管理（Hilt や Koin などの DI フレームワークは不使用）。
 
 ---
 
-## 2. ビルド & 開発コマンド
-Antigravity がコードの検証や実行を行うための主要な Gradle コマンドです。
+## 2. 重要な技術的制約
 
-| コマンド | 説明 |
-| --- | --- |
-| `./gradlew assembleDebug` | デバッグビルドの作成 |
-| `./gradlew installDebug` | 接続中の実機/エミュレータへのインストール |
-| `./gradlew test` | JVM ユニットテストの実行 |
-| `./gradlew lint` | Android Lint による静的解析チェック |
-
----
-
-## 3. 重要な技術的制約
-
-### 3.1 LiteRT-LM (LLM 推論エンジン)
+### 2.1 LiteRT-LM (LLM 推論エンジン)
 - **依存関係**: `com.google.ai.edge.litertlm:litertlm-android:latest.release`
 - **注意**: **MediaPipe LLM Inference (`tasks-genai`) は非推奨 (deprecated) です。絶対に使用しないでください。**
 - **モデル形式**: `.litertlm`（旧 `.task` 形式は使用不可）。
@@ -64,7 +48,7 @@ Antigravity がコードの検証や実行を行うための主要な Gradle コ
   ```
 - **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。
 
-### 3.2 ONNX Runtime + multilingual-e5-small (Embedder)
+### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
 - **依存関係**:
   - `com.microsoft.onnxruntime:onnxruntime-android` (推論ランタイム)
   - `ai.djl.huggingface:tokenizers` + `ai.djl.android:tokenizer-native` (XLM-RoBERTa Tokenizer、arm64-v8a 用 `libdjl_tokenizer.so` 同梱)
@@ -76,27 +60,20 @@ Antigravity がコードの検証や実行を行うための主要な Gradle コ
   - 内部処理: トークナイズ後、ONNX による推論値 (`last_hidden_state`) に対して `attention_mask` を用いた重み平均 pooling と L2 正規化を行います。
 - **実行制御**: `EmbedderService` 内の推論は `Mutex` でシリアライズされています。初期化はバックグラウンドスレッドで行い、並列推論は避けてください。
 
-### 3.3 Room データベース
+### 2.3 Room データベース
 - **ベクトル保存**: `FloatArray`（384次元ベクトル）は `ByteArray` に変換して Room に保存します。変換用メソッドとして `EmbedderService.floatArrayToBytes()` / `bytesToFloatArray()` を利用してください。
 - **類似度計算**: スケールが小さいため（個人用途、数千チャンク以下）、コサイン類似度は全件をメモリにロードして CPU 上で計算します。
 - **データベースバージョン**: **6**
   - v6 移行時に e5 384次元の導入に伴い、既存のベクトルインデックスがクリアされています。再インデックスが必要です。
 
-### 3.4 Storage Access Framework (SAF)
+### 2.4 Storage Access Framework (SAF)
 - フォルダの選択には `ActivityResultContracts.OpenDocumentTree()` を使用し、`takePersistableUriPermission` で永続アクセス権を取得してファイルを読み込みます。
 
 ---
 
-## 4. アーキテクチャと検索フロー (AgentPipeline)
+## 3. アーキテクチャと検索フロー (AgentPipeline)
 
-### 4.1 全体構造
-```
-UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ──> (QueryExpander / LlmReranker)
-                                             ──> RagPipeline    ──> (BM25 / ベクトル / RRF)
-                                             ──> Repository     ──> Room
-```
-
-### 4.2 検索・回答生成フロー（Search First）
+### 3.1 検索・回答生成フロー（Search First）
 ユーザーからの質問は、まず [AgentPipeline.kt](app/src/main/kotlin/com/minibrain/ai/agent/AgentPipeline.kt) を通じて処理されます。
 
 1. **クエリ分類**: [QueryClassifier.kt](app/src/main/kotlin/com/minibrain/ai/agent/QueryClassifier.kt) で分類。`GENERAL_KNOWLEDGE` の場合は RAG をスキップして LLM が直接回答。それ以外は RAG 検索へ。
@@ -122,39 +99,7 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 
 ---
 
-## 5. よく変更するファイル
-開発時によく変更するファイルの一覧です。リンクをクリックして対象コードを確認してください。
-
-| 機能 / モジュール | 対象ファイル (ファイルリンク) |
-| --- | --- |
-| Search First フロー全体 | [SearchPipeline.kt](app/src/main/kotlin/com/minibrain/ai/search/SearchPipeline.kt) |
-| クエリ展開プロンプト・ロジック | [QueryExpander.kt](app/src/main/kotlin/com/minibrain/ai/search/QueryExpander.kt) |
-| HyDE (仮想回答生成) | [HyDE.kt](app/src/main/kotlin/com/minibrain/ai/search/HyDE.kt) |
-| LLM 再ランカー (Reranker) | [LlmReranker.kt](app/src/main/kotlin/com/minibrain/ai/search/LlmReranker.kt) |
-| 評価指標 / 評価ランナー | [EvalMetrics.kt](app/src/main/kotlin/com/minibrain/eval/EvalMetrics.kt) / [EvalRunner.kt](app/src/main/kotlin/com/minibrain/eval/EvalRunner.kt) |
-| Coverage Check / 探索戦略 | [CoverageChecker.kt](app/src/main/kotlin/com/minibrain/ai/agent/CoverageChecker.kt) |
-| パイプライン統合・制御フロー | [AgentPipeline.kt](app/src/main/kotlin/com/minibrain/ai/agent/AgentPipeline.kt) |
-| 回答プロンプト構築（知識ベース / 日付指示 / 履歴） | [AnswerPromptBuilder.kt](app/src/main/kotlin/com/minibrain/ai/agent/AnswerPromptBuilder.kt) |
-| ReAct 用 Planner ヒント構築 | [PlannerHintBuilder.kt](app/src/main/kotlin/com/minibrain/ai/agent/PlannerHintBuilder.kt) |
-| ReAct 用 Planner プロンプト | [PlannerPrompt.kt](app/src/main/kotlin/com/minibrain/ai/agent/PlannerPrompt.kt) |
-| クエリ種別分類 (Classifier) | [QueryClassifier.kt](app/src/main/kotlin/com/minibrain/ai/agent/QueryClassifier.kt) |
-| ReAct ツール実行エンジン | [ToolExecutor.kt](app/src/main/kotlin/com/minibrain/ai/agent/tools/ToolExecutor.kt) |
-| Glob パターンマッチング | [GlobMatcher.kt](app/src/main/kotlin/com/minibrain/ai/agent/tools/GlobMatcher.kt) |
-| 引用統合・優先度・制限トークン制御 | [CitationIntegrator.kt](app/src/main/kotlin/com/minibrain/ai/agent/CitationIntegrator.kt) |
-| 日付・期間解決ロジック | [DateResolver.kt](app/src/main/kotlin/com/minibrain/ai/agent/DateResolver.kt) |
-| 検索トレースイベントの定義 | [AgentTraceEvent.kt](app/src/main/kotlin/com/minibrain/ai/agent/AgentTraceEvent.kt) |
-| LLM 推論サービス・要約生成 | [LlmService.kt](app/src/main/kotlin/com/minibrain/ai/llm/LlmService.kt) |
-| チャンク分割ロジック | [MarkdownChunker.kt](app/src/main/kotlin/com/minibrain/data/md/MarkdownChunker.kt) |
-| マークダウンメタデータ抽出 | [MarkdownMetaExtractor.kt](app/src/main/kotlin/com/minibrain/data/md/MarkdownMetaExtractor.kt) |
-| インデックス・リポジトリ処理 | [DocumentRepository.kt](app/src/main/kotlin/com/minibrain/data/repo/DocumentRepository.kt) |
-| チャット履歴データベース処理 | [ChatRepository.kt](app/src/main/kotlin/com/minibrain/data/repo/ChatRepository.kt) |
-| チャット UI 画面 | [ChatScreen.kt](app/src/main/kotlin/com/minibrain/ui/screens/ChatScreen.kt) |
-| チャット ViewModel | [ChatViewModel.kt](app/src/main/kotlin/com/minibrain/ui/vm/ChatViewModel.kt) |
-| DIコンテナ / サービス登録 | [AppContainer.kt](app/src/main/kotlin/com/minibrain/di/AppContainer.kt) |
-
----
-
-## 6. ドキュメント更新ルール
+## 4. ドキュメント更新ルール
 コードに変更を加える際は、以下のドキュメントファイルを **コードの変更と同一のコミット / PR に含めて同時に更新** しなければなりません。「後で直す」は禁止です。
 
 | ドキュメントファイル | 更新が必要となる変更 |
@@ -165,13 +110,13 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 
 ---
 
-## 7. 注意事項・エージェント向け指示
+## 5. 注意事項・エージェント向け指示
 
-### 7.1 並行処理・スレッド制御
+### 5.1 並行処理・スレッド制御
 - **LiteRT-LM は単一スレッドでのみ動作可能**なため、LLM を利用する `QueryExpander` や `LlmReranker` などを非同期で並行実行してはなりません。必ず逐次的に呼び出してください。
 - `EmbedderService` と `LlmService` の初期化は非常に重いため、必ず `Dispatchers.Default` などのバックグラウンドスレッドで行わせるコードにしてください。
 
-### 7.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
+### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
 - **ファイル名逆引き**: `SearchPipeline.metadataSearch` では、ファイルの拡張子を除いた名前に部分一致するクエリを検出して優先抽出します（形態素解析に依存しない日本語ファイル検出のため）。判定は `FileNames.stemMatchesAnyQuery` に集約されており、`PlannerHintBuilder.build` のファイル名候補抽出も同じ規則を使います。しきい値 `MIN_STEM_MATCH_CHARS = 1` は `胃.md` / `AI.md` のような 1 文字 stem を拾うための値です（ADR-026 の記載は 3 でしたが後日 1 に引き下げ）。
 - **期間クエリ**: `dateRange != null` のときは、該当期間に属する文書（`documentDate` で判定）を優先検索し、上位5件を再ランカー結果の先頭に強制ピン留めします。
 - **日付抽出**: `DocumentRepository.extractDateFromPath` は、ファイル名から日付（完全日付 `YYYY-MM-DD` または月のみ `YYYY-MM`）を正しくパースできるようにしてください。月のみの場合は月初の日付（`-01`）として処理します。
@@ -180,11 +125,11 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
   2. 本文内の「初回訪問日:」「日付:」などのラベル行
   3. 本文中の日付表記（`YYYY/MM/DD` など）
 
-### 7.3 ReAct DSL
+### 5.3 ReAct DSL
 - ReAct ループで Planner LLM が出力するツール命令は、JVM 上でのユニットテスト実行の互換性を担保するため、**JSON ではなく独自の DSL 形式（key:value）** を用います。
 - `PlannerHintBuilder.build` は 期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致 の順に解析して hint を構築します。
 
-### 7.4 実装上の詳細な制約（定数・regression 対策）
+### 5.4 実装上の詳細な制約（定数・regression 対策）
 
 変更時に壊れやすい箇所です。値を変える場合は必ず対応するテスト・呼び出し元も更新してください。
 
@@ -212,12 +157,12 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 - `AnswerPromptBuilder.buildAnswerPrompt` は `dateRange != null` のとき、期間（start〜end）と「日付を拾う優先順位 3 段」の照合指示を context block 直後に差し込みます（ADR-025 + ADR-026）。`citations` に日付プレフィックス付きが 1 件もない場合は「`[日付:]` 付きは無いが本文ラベル / 表記を期間と照合せよ」というフェールセーフ文に切り替えます。
 - `dateRange == null` でも `DATE_QUERY_REGEX`（`いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで`）にマッチすれば「日付に関する質問」ブロックを差し込み、同じ 3 段優先順位で本文から日付を拾うよう LLM に指示します（ADR-026）。固有名詞 +「いつ」クエリ（例:「サウナしきじにいつ行ったっけ」）で `documentDate` が無くても本文中の「初回訪問日: 2022/01/01」を回答に乗せられます。
 
-### 7.5 DB マイグレーション運用
+### 5.5 DB マイグレーション運用
 - 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は、次回の差分インデックス時に自動補完されます。強制的に補完したい場合は Settings → 再インデックスを実行します。
 
 ---
 
-## 8. モデルファイルのパス
+## 6. モデルファイルのパス
 
 ```
 context.filesDir/models/gemma-4-E2B-it.litertlm        # LLM（約 2.5 GB）
