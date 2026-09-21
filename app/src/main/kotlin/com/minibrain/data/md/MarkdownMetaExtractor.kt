@@ -94,17 +94,18 @@ object MarkdownMetaExtractor {
         //    日記でないノートに誤って documentDate が付いて Reranker の競合候補を増やしてしまう。
         //    日記ファイルは date を見出し（# 2024年12月15日 等）に置く慣例が強いため見出し限定にする。
         val headings = extractHeadings(content)
+        var fallbackMonthDate: String? = null
         for (heading in headings) {
             HEADING_JP_DATE_REGEX.find(heading)?.destructured?.let { (y, m, d) ->
                 safeDate(y, m, d)?.let { return it }
             }
-        }
-        for (heading in headings) {
-            HEADING_JP_MONTH_REGEX.find(heading)?.destructured?.let { (y, m) ->
-                safeDate(y, m)?.let { return it }
+            if (fallbackMonthDate == null) {
+                HEADING_JP_MONTH_REGEX.find(heading)?.destructured?.let { (y, m) ->
+                    fallbackMonthDate = safeDate(y, m)
+                }
             }
         }
 
-        return null
+        return fallbackMonthDate
     }
 }
