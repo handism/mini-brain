@@ -127,12 +127,13 @@ object MarkdownChunker {
                     buffer.append("\n\n")
                 }
 
-                var remainingPara = para
-                while (remainingPara.length > MAX_CHUNK_CHARS) {
-                    val part = remainingPara.take(MAX_CHUNK_CHARS)
+                var startIndex = 0
+                while (para.length - startIndex > MAX_CHUNK_CHARS) {
+                    val part = para.substring(startIndex, startIndex + MAX_CHUNK_CHARS)
                     chunks.add(Chunk(headingPath, part.trim()))
-                    remainingPara = remainingPara.drop(MAX_CHUNK_CHARS - OVERLAP_CHARS)
+                    startIndex += (MAX_CHUNK_CHARS - OVERLAP_CHARS)
                 }
+                val remainingPara = para.substring(startIndex)
                 buffer.append(remainingPara).append("\n\n")
                 continue
             }
