@@ -26,10 +26,12 @@ class SearchRequestCache(
 ) {
     private val docMutex = Mutex()
     private val chunkMutex = Mutex()
+    private val byDocMutex = Mutex()
 
     @Volatile private var cachedDocs: List<DocumentEntity>? = null
     @Volatile private var cachedChunks: List<ChunkEntity>? = null
     @Volatile private var cachedVectors: Array<FloatArray>? = null
+    @Volatile private var cachedChunksByDoc: Map<Long, List<ChunkEntity>>? = null
 
     suspend fun documents(): List<DocumentEntity> {
         cachedDocs?.let { return it }
@@ -58,15 +60,31 @@ class SearchRequestCache(
         }
     }
 
+    /**
+     * docId ごとの chunk リスト。chunk は DB の取得順（= ドキュメント先頭から）を保つ。
+     * 最初の呼び出しで chunkVectors() をロードするため、必要になるまで DB を触らない。
+     */
+    suspend fun chunksByDoc(): Map<Long, List<ChunkEntity>> {
+        cachedChunksByDoc?.let { return it }
+        // chunkMutex は再入不可のため、ロードは lock の外で行う
+        val chunks = chunkVectors().first
+        return byDocMutex.withLock {
+            cachedChunksByDoc ?: chunks.groupBy { it.docId }.also { cachedChunksByDoc = it }
+        }
+    }
+
+    /** doc の先頭 chunk。snippet を firstParagraph より長く採りたい箇所で使う（ADR-025 / ADR-026）。 */
+    suspend fun firstChunkOf(docId: Long): ChunkEntity? = chunksByDoc()[docId]?.firstOrNull()
+
     /** queryVec に対する cosine topK。L2 正規化済みのためドット積で算出。 */
     suspend fun cosineTopK(queryVec: FloatArray, k: Int): List<Pair<Float, ChunkEntity>> {
         val (chunks, vectors) = chunkVectors()
         if (chunks.isEmpty()) return emptyList()
-        val candidates = object : AbstractList<Pair<FloatArray, Any>>() {
+        // vectors と chunks を Pair のリストに materialize せず、ビューとして topK に渡す
+        val candidates = object : AbstractList<Pair<FloatArray, ChunkEntity>>() {
             override val size: Int get() = chunks.size
-            override fun get(index: Int): Pair<FloatArray, Any> = vectors[index] to chunks[index]
+            override fun get(index: Int): Pair<FloatArray, ChunkEntity> = vectors[index] to chunks[index]
         }
-        @Suppress("UNCHECKED_CAST")
-        return CosineSimilarity.topK(queryVec, candidates, k) as List<Pair<Float, ChunkEntity>>
+        return CosineSimilarity.topK(queryVec, candidates, k)
     }
 }

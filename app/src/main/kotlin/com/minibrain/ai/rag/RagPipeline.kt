@@ -159,9 +159,7 @@ class RagPipeline(
             val candidates = chunks.map { chunk ->
                 Pair(EmbedderService.bytesToFloatArray(chunk.embedding), chunk)
             }
-            @Suppress("UNCHECKED_CAST")
-            CosineSimilarity.topK(queryVec, candidates as List<Pair<FloatArray, Any>>, k)
-                .map { (score, meta) -> Pair(score, meta as ChunkEntity) }
+            CosineSimilarity.topK(queryVec, candidates, k)
         }
 
     private suspend fun resolveDocPaths(
@@ -192,9 +190,7 @@ class RagPipeline(
             val candidates = folders.map { fe ->
                 Pair(EmbedderService.bytesToFloatArray(fe.embedding), fe)
             }
-            @Suppress("UNCHECKED_CAST")
-            CosineSimilarity.topK(queryVec, candidates as List<Pair<FloatArray, Any>>, k)
-                .map { (score, meta) -> Pair(score, meta as FolderEmbeddingEntity) }
+            CosineSimilarity.topK(queryVec, candidates, k)
         }
 
     private suspend fun bm25Search(question: String, treeUri: String?, k: Int): List<ChunkEntity> {
