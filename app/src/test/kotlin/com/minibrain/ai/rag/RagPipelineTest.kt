@@ -11,7 +11,6 @@ import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.FolderEmbeddingEntity
 import io.mockk.coEvery
 import io.mockk.mockk
-import io.mockk.slot
 import java.time.LocalDate
 import kotlin.math.exp
 import kotlinx.coroutines.runBlocking
