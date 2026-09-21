@@ -168,17 +168,14 @@ class ChatViewModel(
             val msgId = app.container.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
             val finalTrace = agentResult.traceEvents + FinalAnswerEvent(finalContent.length)
 
-            val finalList = _messages.value.toMutableList()
-            val idx = finalList.indexOfLast { it.isStreaming }
-            if (idx >= 0) {
-                finalList[idx] = finalList[idx].copy(
+            updateStreamingMessage {
+                it.copy(
                     id = msgId,
                     content = finalContent,
                     citations = filteredCitations,
                     isStreaming = false,
                     traceEvents = finalTrace,
                 )
-                _messages.value = finalList
             }
 
             _isGenerating.value = false
@@ -206,10 +203,7 @@ class ChatViewModel(
     fun cancelGeneration() {
         currentJob?.cancel()
         _isGenerating.value = false
-        val list = _messages.value.toMutableList()
-        val idx = list.indexOfLast { it.isStreaming }
-        if (idx >= 0) list[idx] = list[idx].copy(isStreaming = false)
-        _messages.value = list
+        updateStreamingMessage { it.copy(isStreaming = false) }
     }
 
     private fun isNegativeResponse(text: String): Boolean {
@@ -236,6 +230,7 @@ class ChatViewModel(
                 docId = if (obj.has("docId")) obj.getLong("docId") else null,
                 relativePath = obj.optString("relativePath").ifBlank { null },
                 source = runCatching { SourceType.valueOf(obj.optString("source")) }.getOrElse { SourceType.UNKNOWN },
+                topicMatch = obj.optBoolean("topicMatch", false),
             )
         }
     }.getOrElse { emptyList() }
@@ -248,6 +243,7 @@ class ChatViewModel(
                     .put("snippet", c.snippet)
                     .put("score", c.score)
                     .put("source", c.source.name)
+                if (c.topicMatch) obj.put("topicMatch", true)
                 c.docId?.let { obj.put("docId", it) }
                 c.relativePath?.let { obj.put("relativePath", it) }
                 arr.put(obj)

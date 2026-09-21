@@ -26,6 +26,10 @@ sealed class OnboardingUiState {
 
 class OnboardingViewModel(application: Application) : AndroidViewModel(application) {
 
+    private companion object {
+        private const val TAG = "Onboarding"
+    }
+
     private val app = application as MiniBrainApp
     private val downloader = app.container.modelDownloader
     private val PREF_KEY_INIT_IN_PROGRESS = booleanPreferencesKey("init_in_progress")
@@ -98,20 +102,20 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         // 初期化開始フラグを立てる（クラッシュ検知用）
         app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = true }
         try {
-            Timber.tag("Onboarding").d("Initializing Embedder...")
+            Timber.tag(TAG).d("Initializing Embedder...")
             app.container.embedderService.initialize(downloader.embedderModelFile, downloader.tokenizerModelFile)
 
-            Timber.tag("Onboarding").d("Initializing LLM (forceCpu=$forceCpu)...")
+            Timber.tag(TAG).d("Initializing LLM (forceCpu=$forceCpu)...")
             if (forceCpu) {
                 app.container.llmService.initialize(downloader.llmModelFile, forceCpu = true)
             } else {
                 app.container.llmService.initialize(downloader.llmModelFile)
             }
 
-            Timber.tag("Onboarding").d("All services initialized")
+            Timber.tag(TAG).d("All services initialized")
             _state.value = OnboardingUiState.Ready
         } catch (e: Exception) {
-            Timber.tag("Onboarding").e(e, "Initialization failed")
+            Timber.tag(TAG).e(e, "Initialization failed")
             _state.value = OnboardingUiState.Failure(
                 "初期化に失敗しました: ${e.localizedMessage}\n" +
                 "端末のメモリ不足の可能性があります。",
