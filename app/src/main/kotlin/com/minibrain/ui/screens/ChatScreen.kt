@@ -35,7 +35,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
@@ -59,7 +58,7 @@ fun ChatScreen(
     val errorMessage by vm.errorMessage.collectAsStateWithLifecycle()
     val statusText by vm.statusText.collectAsStateWithLifecycle()
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
-    var inputText by remember { mutableStateOf("") }
+    val inputText = remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
     // 新しいメッセージが来たら一番下にスクロール
@@ -143,8 +142,8 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
+                    value = inputText.value,
+                    onValueChange = { inputText.value = it },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("質問を入力...") },
                     keyboardOptions = KeyboardOptions(
@@ -162,10 +161,10 @@ fun ChatScreen(
                 } else {
                     IconButton(
                         onClick = {
-                            vm.sendMessage(inputText.trim())
-                            inputText = ""
+                            vm.sendMessage(inputText.value.trim())
+                            inputText.value = ""
                         },
-                        enabled = inputText.isNotBlank(),
+                        enabled = inputText.value.isNotBlank(),
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "送信")
                     }
