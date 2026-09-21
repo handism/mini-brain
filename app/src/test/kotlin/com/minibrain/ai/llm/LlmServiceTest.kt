@@ -65,11 +65,14 @@ class LlmServiceTest {
         mockkConstructor(Engine::class)
         // First call to initialize (GPU) throws exception, second (CPU) succeeds
         every { anyConstructed<Engine>().initialize() } throws RuntimeException("GPU Failed") andThen Unit
+        every { anyConstructed<Engine>().close() } returns Unit
 
         try {
             service.initialize(tempFile, forceCpu = false)
             assertTrue(service.isReady())
             assertTrue(logs.any { it.contains("GPU initialization failed, falling back to CPU") })
+            // Verify that close is called on the failed GPU engine before falling back
+            verify(atLeast = 1) { anyConstructed<Engine>().close() }
         } finally {
             tempFile.delete()
         }
@@ -85,6 +88,7 @@ class LlmServiceTest {
         mockkConstructor(Engine::class)
         // Both GPU and CPU initialization fail
         every { anyConstructed<Engine>().initialize() } throws RuntimeException("Hardware Failed")
+        every { anyConstructed<Engine>().close() } returns Unit
 
         try {
             service.initialize(tempFile, forceCpu = false)
@@ -188,6 +192,7 @@ class LlmServiceTest {
         mockkConstructor(Engine::class)
         // First call to initialize (GPU) throws Error (e.g. native library missing), second (CPU) succeeds
         every { anyConstructed<Engine>().initialize() } throws UnsatisfiedLinkError("Native library missing") andThen Unit
+        every { anyConstructed<Engine>().close() } returns Unit
 
         try {
             service.initialize(tempFile, forceCpu = false)
