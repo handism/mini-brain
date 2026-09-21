@@ -69,7 +69,7 @@ interface DocumentDao {
     suspend fun _searchByPath(treeUri: String, keyword: String): List<DocumentEntity>
 
     suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity> {
-        val escapedKeyword = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        val escapedKeyword = keyword.replace(Regex("([\\\\\\\\%_])"), "\\\\$1")
         return _searchByPath(treeUri, escapedKeyword)
     }
 

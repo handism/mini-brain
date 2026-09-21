@@ -48,7 +48,7 @@ interface ChunkDao {
     suspend fun _getByScope(treeUri: String, scope: String): List<ChunkEntity>
 
     suspend fun getByScope(treeUri: String, scope: String): List<ChunkEntity> {
-        val escapedScope = scope.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        val escapedScope = scope.replace(Regex("([\\\\\\\\%_])"), "\\\\$1")
         return _getByScope(treeUri, escapedScope)
     }
 
