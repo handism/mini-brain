@@ -30,13 +30,15 @@ open class LlmService {
             
             // 1. GPU で試行 (forceCpu が false の場合のみ)
             if (!forceCpu) {
+                var gpuEng: Engine? = null
                 try {
                     val config = buildConfig(modelFile, useGpu = true)
-                    val eng = Engine(config)
-                    eng.initialize()
-                    engine = eng
+                    gpuEng = Engine(config)
+                    gpuEng.initialize()
+                    engine = gpuEng
                     return@withLock
                 } catch (e: Throwable) {
+                    runCatching { gpuEng?.close() }
                     lastError = e
                     Timber.tag("LlmService").e(e, "GPU initialization failed, falling back to CPU")
                 }
