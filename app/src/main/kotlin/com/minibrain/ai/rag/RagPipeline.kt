@@ -48,22 +48,22 @@ class RagPipeline(
         coroutineScope {
             val vecJob = async {
                 withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k = 50, cache) }
-                    ?: run { Timber.tag("RagPipeline").w("vectorSearch timed out"); emptyList() }
+                    ?: run { Timber.tag(TAG).w("vectorSearch timed out"); emptyList() }
             }
             val bm25Job = async {
                 withTimeoutOrNull(SEARCH_TIMEOUT_MS) { bm25Search(question, treeUri, k = 50) }
-                    ?: run { Timber.tag("RagPipeline").w("bm25Search timed out"); emptyList() }
+                    ?: run { Timber.tag(TAG).w("bm25Search timed out"); emptyList() }
             }
             val folderJob = async {
                 withTimeoutOrNull(SEARCH_TIMEOUT_MS) { folderSearch(question, treeUri, k = 5) }
-                    ?: run { Timber.tag("RagPipeline").w("folderSearch timed out"); emptyList() }
+                    ?: run { Timber.tag(TAG).w("folderSearch timed out"); emptyList() }
             }
 
             val vecResults = vecJob.await()
             val bm25Results = bm25Job.await()
             val folderResults = folderJob.await()
 
-            Timber.tag("RagPipeline").d("vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
+            Timber.tag(TAG).d("vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
 
             val allDocIds = (vecResults.map { it.second.docId } + bm25Results.map { it.docId }).distinct()
             val docIdToDateStr: Map<Long, String?> = if (cache != null) {
@@ -92,7 +92,7 @@ class RagPipeline(
                     docIdToDate = docIdToDate,
                 )
             ).map { (score, chunk) ->
-                    Timber.tag("RagPipeline").d("rrf=%.4f path=${chunk.headingPath}".format(score))
+                    Timber.tag(TAG).d("rrf=%.4f path=${chunk.headingPath}".format(score))
                     Citation(
                         headingPath = chunk.headingPath,
                         snippet = chunk.text,
@@ -125,7 +125,7 @@ class RagPipeline(
         cache: SearchRequestCache? = null,
     ): List<Citation> {
         val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k, cache) }
-            ?: run { Timber.tag("RagPipeline").w("vectorOnlyTopK timed out"); return emptyList() }
+            ?: run { Timber.tag(TAG).w("vectorOnlyTopK timed out"); return emptyList() }
         val docPathMap = resolveDocPaths(hits.map { it.second.docId }, cache)
         return hits.map { (score, chunk) ->
             Citation(
@@ -202,7 +202,7 @@ class RagPipeline(
                 chunkDao.bm25Search(matchQuery, k)
             }
         }.getOrElse { e ->
-            Timber.tag("RagPipeline").w("BM25 search failed: ${e.message}")
+            Timber.tag(TAG).w("BM25 search failed: ${e.message}")
             emptyList()
         }
     }
@@ -232,6 +232,7 @@ class RagPipeline(
     }
 
     companion object {
+        private const val TAG = "RagPipeline"
         private const val SEARCH_TIMEOUT_MS = 8_000L
         // freshnessBoost tuning constants — adjust to balance recency vs. relevance
         // RRF max score ≈ 0.032 (rank=1 in both BM25 and vector)

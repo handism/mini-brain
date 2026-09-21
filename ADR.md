@@ -1094,7 +1094,7 @@ ADR-022 で RRF rank 融合に切り替え、SearchPipeline の基本骨格は�
 ### トレードオフ
 
 - topicMatch ヒットのスニペット長が 200 → 500 字に増えるため、5 件 ピン時の context 量は最大 2500 字（≈ 625 tokens）増。`CitationIntegrator` の `MAX_CONTEXT_TOKENS = 1200` budget には収まるが、他の citation を圧迫する可能性がある。評価セットの P@10 を継続監視する。
-- ファイル名 substring 一致は精度が荒い（短い stem や偶然の連続が誤マッチする）。`MIN_FILENAME_MATCH_CHARS = 3` で最低限の保険はかかっているが、たとえば `1月.md`（2 文字）は対象外。これは ADR-019 と同じ制約。
+- ファイル名 substring 一致は精度が荒い（短い stem や偶然の連続が誤マッチする）。当初は `MIN_FILENAME_MATCH_CHARS = 3` で保険をかけたが、`胃.md` / `AI.md` のような短い stem が検索から漏れるため **後日 1 に引き下げた**（現在は `FileNames.MIN_STEM_MATCH_CHARS = 1`。判定は `FileNames.stemMatchesAnyQuery` に集約）。短い stem の誤マッチは Reranker 側で吸収する方針。
 - 「いつ」クエリ + topic match で `documentDate` も `[日付:]` プレフィックスも本文ラベルも一切無いファイルが top に来た場合、回答 LLM は「日付らしき表記が無い」と率直に返すことになる。これは仕様。前は ReAct に落ちて運良くファイルを引けば回答できたが、トータルでは安定度が上がる方向と判断。
 
 ## ADR-027: ReAct ツール実行における SearchRequestCache 統合と FTS 同期確認の修正
