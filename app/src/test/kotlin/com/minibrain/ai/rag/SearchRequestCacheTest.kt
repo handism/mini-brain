@@ -159,6 +159,44 @@ class SearchRequestCacheTest {
     }
 
     @Test
+    fun `test firstChunkOf returns first chunk per doc and loads chunks once`() = runBlocking {
+        val docDao = FakeDocumentDao()
+        val chunkDao = FakeChunkDao()
+        val emptyEmbedding = com.minibrain.ai.embed.EmbedderService.floatArrayToBytes(FloatArray(384) { 0f })
+        // DB 取得順 = ドキュメント先頭からの順序。doc=1 は 2 チャンク持つ。
+        chunkDao.dummyChunks = listOf(
+            ChunkEntity(id = 1L, docId = 1L, headingPath = "h1", text = "first", embedding = emptyEmbedding),
+            ChunkEntity(id = 2L, docId = 1L, headingPath = "h2", text = "second", embedding = emptyEmbedding),
+            ChunkEntity(id = 3L, docId = 2L, headingPath = "h3", text = "other doc", embedding = emptyEmbedding),
+        )
+        val cache = SearchRequestCache("tree", chunkDao, docDao)
+
+        assertEquals("first", cache.firstChunkOf(1L)?.text)
+        assertEquals("other doc", cache.firstChunkOf(2L)?.text)
+        assertEquals(null, cache.firstChunkOf(99L))
+
+        // 何度呼んでも DB ロードは 1 回だけ（SearchPipeline / ToolExecutor がここに依存する）
+        assertEquals(1, chunkDao.getAllByTreeCount)
+    }
+
+    @Test
+    fun `test firstChunkOf concurrency`() = runBlocking {
+        val docDao = FakeDocumentDao()
+        val chunkDao = FakeChunkDao()
+        chunkDao.dummyChunks = listOf(
+            ChunkEntity(
+                id = 1L, docId = 1L, headingPath = "h1", text = "first",
+                embedding = com.minibrain.ai.embed.EmbedderService.floatArrayToBytes(FloatArray(384) { 0f })
+            )
+        )
+        val cache = SearchRequestCache("tree", chunkDao, docDao)
+
+        val deferreds = (1..100).map { async { cache.firstChunkOf(1L)?.text } }
+        assertEquals(List(100) { "first" }, deferreds.awaitAll())
+        assertEquals(1, chunkDao.getAllByTreeCount)
+    }
+
+    @Test
     fun `test documents concurrency`() = runBlocking {
         val docDao = FakeDocumentDao()
         val chunkDao = FakeChunkDao()

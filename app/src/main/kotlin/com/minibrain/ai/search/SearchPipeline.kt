@@ -18,10 +18,10 @@ import com.minibrain.ai.rag.SourceType
 import com.minibrain.ai.rag.dedupeKey
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
-import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.search.NGramTokenizer
 import com.minibrain.util.DatePrefix
+import com.minibrain.util.FileNames
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -268,14 +268,8 @@ class SearchPipeline(
             q.split(METADATA_SPLIT_REGEX).filter { it.length >= 2 }
         }.distinct()
 
-        // topicMatch ヒットは先頭 chunk テキストでスニペットを組むため、必要なら 1 回だけロードする。
-        // 普通のトークン一致のみで終わる場合は chunkVectors() を触らずに済ませる。
-        var chunksByDocLazy: Map<Long, List<ChunkEntity>>? = null
-        suspend fun firstChunkOf(docId: Long): ChunkEntity? {
-            val map = chunksByDocLazy ?: ctx.chunkVectors().first.groupBy { it.docId }.also { chunksByDocLazy = it }
-            return map[docId]?.firstOrNull()
-        }
-
+        // topicMatch ヒットは先頭 chunk テキストでスニペットを組む。ctx.firstChunkOf は
+        // 初回呼び出しまで chunks をロードしないので、トークン一致のみで終わる場合は DB を触らない。
         return allDocs.mapNotNull { doc ->
             val fields = listOfNotNull(
                 doc.fileName,
@@ -286,7 +280,7 @@ class SearchPipeline(
             val tokenMatch = tokens.any { token ->
                 fields.any { field -> field.contains(token, ignoreCase = true) }
             }
-            val fileStem = doc.fileName.removeSuffix(".md").removeSuffix(".MD")
+            val fileStem = FileNames.stem(doc.fileName)
             val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
                 queries.any { q -> q.contains(fileStem, ignoreCase = true) }
 
@@ -295,7 +289,7 @@ class SearchPipeline(
             // topicMatch ヒットは「初回訪問日: …」「YYYY/MM/DD」など本文の日付を後段の回答 LLM が
             // 拾えるよう、先頭 chunk テキストから長めの snippet を採る（ADR-026）。
             val snippetBody = if (fileNameInQuery) {
-                firstChunkOf(doc.id)?.text?.take(TOPIC_MATCH_SNIPPET_CHARS) ?: doc.firstParagraph
+                ctx.firstChunkOf(doc.id)?.text?.take(TOPIC_MATCH_SNIPPET_CHARS) ?: doc.firstParagraph
             } else {
                 doc.firstParagraph
             }
@@ -375,10 +369,8 @@ class SearchPipeline(
 
             // 各 doc の先頭 chunk テキストを使って「活動内容」を pin に乗せる。
             // firstParagraph (200 文字) では LLM が「内容が記載されていません」と返す問題への対処（ADR-025）
-            val (chunks, _) = ctx.chunkVectors()
-            val chunksByDoc = chunks.groupBy { it.docId }
             return docs.map { doc ->
-                val firstChunk = chunksByDoc[doc.id]?.firstOrNull()
+                val firstChunk = ctx.firstChunkOf(doc.id)
                 val body = firstChunk?.text?.take(DATE_RANGE_SNIPPET_CHARS)
                     ?: doc.firstParagraph
                 Citation(
