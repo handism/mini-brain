@@ -33,7 +33,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -49,7 +48,7 @@ fun SettingsScreen(
 ) {
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
-    var showClearDialog by remember { mutableStateOf(false) }
+    val showClearDialog = remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -86,7 +85,7 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             ChatHistorySection(
-                onClearChat = { showClearDialog = true }
+                onClearChat = { showClearDialog.value = true }
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
@@ -106,14 +105,14 @@ fun SettingsScreen(
         }
     }
 
-    if (showClearDialog) {
+    if (showClearDialog.value) {
         ClearChatDialog(
             onConfirm = {
                 vm.clearChatHistory()
-                showClearDialog = false
+                showClearDialog.value = false
                 scope.launch { snackbarHostState.showSnackbar("チャット履歴を削除しました") }
             },
-            onDismiss = { showClearDialog = false }
+            onDismiss = { showClearDialog.value = false }
         )
     }
 }
