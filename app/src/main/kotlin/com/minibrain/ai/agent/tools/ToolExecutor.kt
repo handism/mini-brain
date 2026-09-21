@@ -214,7 +214,8 @@ class ToolExecutor(
         val lines = hits.joinToString("\n") { chunk ->
             val doc = docsMapForGrep[chunk.docId]
             val path = doc?.relativePath ?: "d=${chunk.docId}"
-            "- [d=${chunk.docId} p=$path] ${chunk.headingPath}: ${chunk.text.take(GREP_SNIPPET_CHARS)}"
+            val snippet = if (chunk.text.length <= GREP_SNIPPET_CHARS) chunk.text else chunk.text.substring(0, GREP_SNIPPET_CHARS)
+            "- [d=${chunk.docId} p=$path] ${chunk.headingPath}: $snippet"
         }
         val text = if (hits.isEmpty()) {
             "GREP \"${tool.query}\": 0 hits"
@@ -264,7 +265,8 @@ class ToolExecutor(
         }
 
         val lines = citations.joinToString("\n") { c ->
-            "- [d=${c.docId} p=${c.relativePath}] ${c.headingPath} (score=%.2f): ${c.snippet.take(GREP_SNIPPET_CHARS)}".format(c.score)
+            val snippet = if (c.snippet.length <= GREP_SNIPPET_CHARS) c.snippet else c.snippet.substring(0, GREP_SNIPPET_CHARS)
+            "- [d=${c.docId} p=${c.relativePath}] ${c.headingPath} (score=%.2f): $snippet".format(c.score)
         }
         val text = if (citations.isEmpty()) {
             "VECTOR \"${tool.query}\": 0 results"
@@ -277,7 +279,8 @@ class ToolExecutor(
     private suspend fun executeRrfSearch(call: ToolCall, tool: AgentTool.RrfSearch): ToolResult {
         val citations = ragPipeline.retrieveTopChunks(tool.query, treeUri, tool.k, cache = cache)
         val lines = citations.joinToString("\n") { c ->
-            "- [d=${c.docId} p=${c.relativePath}] ${c.headingPath} (score=%.4f): ${c.snippet.take(GREP_SNIPPET_CHARS)}".format(c.score)
+            val snippet = if (c.snippet.length <= GREP_SNIPPET_CHARS) c.snippet else c.snippet.substring(0, GREP_SNIPPET_CHARS)
+            "- [d=${c.docId} p=${c.relativePath}] ${c.headingPath} (score=%.4f): $snippet".format(c.score)
         }
         val text = if (citations.isEmpty()) {
             "RRF \"${tool.query}\": 0 results"
@@ -306,16 +309,18 @@ class ToolExecutor(
         val chunksByDoc = cachedChunksList.asReversed().associateBy({ it.docId }, { it.text })
         for (doc in docs) {
             val snippet = chunksByDoc[doc.id] ?: doc.firstParagraph ?: ""
+            val citeSnippet = if (snippet.length <= GREP_SNIPPET_CHARS) snippet else snippet.substring(0, GREP_SNIPPET_CHARS)
             citations.add(Citation(
                 headingPath = doc.relativePath,
-                snippet = snippet.take(GREP_SNIPPET_CHARS),
+                snippet = citeSnippet,
                 score = 0.7f,
                 docId = doc.id,
                 relativePath = doc.relativePath,
                 source = SourceType.GREP,
             ))
             val dateTag = doc.documentDate?.let { " ($it)" } ?: ""
-            lines.add("- [d=${doc.id}] ${doc.relativePath}$dateTag: ${snippet.take(80)}")
+            val lineSnippet = if (snippet.length <= 80) snippet else snippet.substring(0, 80)
+            lines.add("- [d=${doc.id}] ${doc.relativePath}$dateTag: $lineSnippet")
         }
         val text = "TIMELINE \"${tool.startDate}\" ~ \"${tool.endDate}\": ${docs.size} documents\n${lines.joinToString("\n")}"
         return ToolResult(call, text, citations)
