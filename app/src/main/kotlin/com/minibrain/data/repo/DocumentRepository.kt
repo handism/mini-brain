@@ -308,6 +308,7 @@ class DocumentRepository(
         }.associateBy { it.fileUri }
 
         val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
+        val headingsCache = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
 
         for ((folderPath, files) in byFolder) {
             val fileUris = files.map { it.uri.toString() }
@@ -315,10 +316,12 @@ class DocumentRepository(
 
             val headings = allDocs.asSequence().flatMap { doc ->
                 doc.headings?.let { json ->
-                    runCatching {
-                        val arr = org.json.JSONArray(json)
-                        List(arr.length()) { i -> arr.getString(i) }
-                    }.getOrElse { emptyList() }
+                    headingsCache.getOrPut(json) {
+                        runCatching {
+                            val arr = org.json.JSONArray(json)
+                            List(arr.length()) { i -> arr.getString(i) }
+                        }.getOrElse { emptyList() }
+                    }
                 } ?: emptyList()
             }.take(10).toList()
 
