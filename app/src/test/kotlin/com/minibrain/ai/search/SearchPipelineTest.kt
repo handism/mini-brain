@@ -67,7 +67,7 @@ class SearchPipelineTest {
         coEvery { queryExpander.expand(query) } returns listOf(query)
         coEvery { hyde.generateHypothetical(query) } returns null
         coEvery { cache.documents() } returns emptyList()
-        coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
+        coEvery { cache.firstChunkOf(any()) } returns null
         coEvery { cache.treeUri } returns treeUri
 
         val bm25Citation = citation(1, "A", SourceType.BM25)
@@ -107,7 +107,7 @@ class SearchPipelineTest {
         coEvery { queryExpander.expand(query) } returns listOf(query)
         coEvery { hyde.generateHypothetical(query) } returns hypothetical
         coEvery { cache.documents() } returns emptyList()
-        coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
+        coEvery { cache.firstChunkOf(any()) } returns null
         coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
         coEvery { llmReranker.rerank(query, any(), any()) } returns emptyList()
@@ -129,7 +129,7 @@ class SearchPipelineTest {
         coEvery { cache.documents() } returns listOf(
             DocumentEntity(id = 5, treeUri = treeUri, fileUri = "uri", fileName = "test.md", relativePath = "test.md", lastModified = 0L, contentHash = "", firstParagraph = "test", documentDate = "2023-06-01")
         )
-        coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
+        coEvery { cache.firstChunkOf(any()) } returns null
         coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
 
@@ -156,7 +156,7 @@ class SearchPipelineTest {
         coEvery { cache.documents() } returns listOf(
             DocumentEntity(id = 7, treeUri = treeUri, fileUri = "uri", fileName = "胃.md", relativePath = "胃.md", lastModified = 0L, contentHash = "", firstParagraph = "胃の調子について", documentDate = null)
         )
-        coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
+        coEvery { cache.firstChunkOf(any()) } returns null
         coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
         coEvery { llmReranker.rerank(query, any(), any()) } answers {
@@ -181,7 +181,7 @@ class SearchPipelineTest {
         coEvery { hyde.generateHypothetical(originalQuery) } returns hypothetical
 
         coEvery { cache.documents() } returns emptyList()
-        coEvery { cache.chunkVectors() } returns Pair(emptyList(), emptyArray())
+        coEvery { cache.firstChunkOf(any()) } returns null
         coEvery { chunkDao.bm25SearchByTree(any(), any(), any()) } returns emptyList()
 
         coEvery { llmReranker.rerank(any(), any(), any()) } returns emptyList()
@@ -212,7 +212,8 @@ class SearchPipelineTest {
         val chunk1 = ChunkEntity(id = 1, docId = 7, text = "long chunk text that exceeds first paragraph and contains topic match snippet for doc 1", embedding = ByteArray(0), headingPath = "A")
         val chunk2 = ChunkEntity(id = 2, docId = 8, text = "long chunk text for doc 2", embedding = ByteArray(0), headingPath = "B")
 
-        coEvery { cache.chunkVectors() } returns Pair(listOf(chunk1, chunk2), emptyArray<FloatArray>())
+        coEvery { cache.firstChunkOf(7L) } returns chunk1
+        coEvery { cache.firstChunkOf(8L) } returns chunk2
 
         // Mock other pipeline steps to return empty or pass-through
         coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
@@ -233,8 +234,10 @@ class SearchPipelineTest {
         assertTrue(citation2 != null)
         assertEquals("long chunk text for doc 2", citation2?.snippet)
 
-        // Verify lazy loading: chunkVectors() should be called exactly once
-        // even though multiple documents triggered topicMatch snippet generation
-        coVerify(exactly = 1) { cache.chunkVectors() }
+        // topicMatch に当たった doc の分だけ chunk を引く。chunks 全体のロード/メモ化は
+        // SearchRequestCache 側の責務で、SearchPipeline は chunkVectors() を直接触らない。
+        coVerify(exactly = 1) { cache.firstChunkOf(7L) }
+        coVerify(exactly = 1) { cache.firstChunkOf(8L) }
+        coVerify(exactly = 0) { cache.chunkVectors() }
     }
 }

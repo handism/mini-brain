@@ -16,9 +16,10 @@ import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.search.NGramTokenizer
+import com.minibrain.util.FileNames
+import com.minibrain.util.JsonArrays
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import timber.log.Timber
 
 private const val TAG = "ToolExecutor"
@@ -146,7 +147,7 @@ class ToolExecutor(
         when {
             tool.docId != null -> documentDao.getById(tool.docId)
             tool.path != null -> {
-                val keyword = tool.path.substringAfterLast("/").removeSuffix(".md")
+                val keyword = FileNames.stem(tool.path)
                 documentDao.searchByPath(treeUri, keyword).firstOrNull()
             }
             else -> null
@@ -155,7 +156,7 @@ class ToolExecutor(
 
     private fun buildTruncatedContent(doc: DocumentEntity, chunks: List<ChunkEntity>): String {
         val headings = doc.headings?.let { parseFirstHeadings(it, 5) } ?: ""
-        val tags = doc.tags?.let { parseJsonArray(it) }?.joinToString(", ") ?: ""
+        val tags = JsonArrays.toStringList(doc.tags).joinToString(", ")
 
         val sb = StringBuilder("FILE: ${doc.relativePath}\n")
         if (headings.isNotBlank()) sb.append("headings: [$headings]\n")
@@ -226,33 +227,27 @@ class ToolExecutor(
 
     private suspend fun executeVectorSearch(call: ToolCall, tool: AgentTool.VectorSearch): ToolResult {
         val vec = queryVecCache.getOrPut(tool.query) { embedderService.embed(tool.query, EmbedType.QUERY) }
+        val docsById = cache.documents().associateBy { it.id }
 
         val topChunks = if (tool.scope == null) {
             cache.cosineTopK(vec, tool.k)
         } else {
             val (chunks, vectors) = cache.chunkVectors()
-            val docsMap = cache.documents().associateBy { it.id }
-            val validDocIds = docsMap.values
+            val validDocIds = docsById.values
                 .mapNotNull { if (it.relativePath.startsWith(tool.scope)) it.id else null }
                 .toSet()
-            val filteredCandidates = ArrayList<Pair<FloatArray, com.minibrain.data.db.entities.ChunkEntity>>()
+            val filteredCandidates = ArrayList<Pair<FloatArray, ChunkEntity>>()
             for (i in chunks.indices) {
                 val chunk = chunks[i]
                 if (chunk.docId in validDocIds) {
                     filteredCandidates.add(Pair(vectors[i], chunk))
                 }
             }
-            @Suppress("UNCHECKED_CAST")
-            CosineSimilarity.topK(
-                vec,
-                filteredCandidates as List<Pair<FloatArray, Any>>,
-                tool.k
-            ).map { (score, meta) -> Pair(score, meta as com.minibrain.data.db.entities.ChunkEntity) }
+            CosineSimilarity.topK(vec, filteredCandidates, tool.k)
         }
 
-        val docsMapForVector = cache.documents().associateBy { it.id }
         val citations = topChunks.map { (score, chunk) ->
-            val doc = docsMapForVector[chunk.docId]
+            val doc = docsById[chunk.docId]
             Citation(
                 headingPath = chunk.headingPath,
                 snippet = chunk.text,
@@ -302,10 +297,8 @@ class ToolExecutor(
 
         val citations = mutableListOf<Citation>()
         val lines = mutableListOf<String>()
-        val cachedChunksList = cache.chunkVectors().first
-        val chunksByDoc = cachedChunksList.asReversed().associateBy({ it.docId }, { it.text })
         for (doc in docs) {
-            val snippet = chunksByDoc[doc.id] ?: doc.firstParagraph ?: ""
+            val snippet = cache.firstChunkOf(doc.id)?.text ?: doc.firstParagraph ?: ""
             citations.add(Citation(
                 headingPath = doc.relativePath,
                 snippet = snippet.take(GREP_SNIPPET_CHARS),
@@ -321,15 +314,6 @@ class ToolExecutor(
         return ToolResult(call, text, citations)
     }
 
-    private fun parseFirstHeadings(json: String, count: Int): String = runCatching {
-        val arr = JSONArray(json)
-        (0 until minOf(arr.length(), count)).joinToString(", ") { i -> arr.getString(i) }
-    }.onFailure { Timber.tag(TAG).w(it, "parseFirstHeadings failed: $json") }
-     .getOrElse { "" }
-
-    private fun parseJsonArray(json: String): List<String> = runCatching {
-        val arr = JSONArray(json)
-        List(arr.length()) { i -> arr.getString(i) }
-    }.onFailure { Timber.tag(TAG).w(it, "parseJsonArray failed: $json") }
-     .getOrElse { emptyList() }
+    private fun parseFirstHeadings(json: String, count: Int): String =
+        JsonArrays.toStringList(json).take(count).joinToString(", ")
 }

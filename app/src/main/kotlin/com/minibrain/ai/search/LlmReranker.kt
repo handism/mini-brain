@@ -3,7 +3,9 @@ package com.minibrain.ai.search
 import com.minibrain.ai.agent.DateResolver
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
+import com.minibrain.ai.rag.dedupeKey
 import com.minibrain.util.DatePrefix
+import com.minibrain.util.JsonArrayText
 import timber.log.Timber
 
 class LlmReranker(private val llmService: LlmService) {
@@ -47,8 +49,8 @@ class LlmReranker(private val llmService: LlmService) {
         return if (reranked.size >= topK) {
             reranked
         } else {
-            val used = reranked.map { it.headingPath + it.docId }.toSet()
-            val supplement = candidates.filter { (it.headingPath + it.docId) !in used }
+            val used = reranked.mapTo(HashSet()) { it.dedupeKey }
+            val supplement = candidates.filterNot { it.dedupeKey in used }
             (reranked + supplement).take(topK)
         }
     }
@@ -82,11 +84,7 @@ class LlmReranker(private val llmService: LlmService) {
     }
 
     private fun parseIndices(raw: String): List<Int> {
-        // 出力中から [...] を抽出
-        val start = raw.indexOf('[')
-        val end = raw.lastIndexOf(']')
-        if (start < 0 || end <= start) return emptyList()
-        val jsonStr = raw.substring(start, end + 1)
+        val jsonStr = JsonArrayText.extract(raw) ?: return emptyList()
 
         return runCatching {
             val result = mutableListOf<Int>()

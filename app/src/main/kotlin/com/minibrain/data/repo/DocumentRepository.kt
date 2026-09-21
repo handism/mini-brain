@@ -19,6 +19,7 @@ import com.minibrain.data.md.MdFileReader
 import org.json.JSONArray
 import com.minibrain.data.search.NGramTokenizer
 import com.minibrain.util.DateValidator
+import com.minibrain.util.JsonArrays
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -108,7 +109,6 @@ class DocumentRepository(
 
         try {
             val docsToUpdate = mutableListOf<DocumentEntity>()
-            val docsToInsert = mutableListOf<DocumentEntity>()
             val docsToDelete = mutableListOf<Long>()
 
             // To maintain batching, we group the raw chunks and their metadata
@@ -140,7 +140,7 @@ class DocumentRepository(
             }
 
             // Update unchanged docs that needed metadata refresh
-            refreshMetadata(docsToUpdate)
+            if (docsToUpdate.isNotEmpty()) documentDao.updateAll(docsToUpdate)
 
             // Delete old FTS and Chunks
             deleteOldDocs(docsToDelete, writableDb)
@@ -192,12 +192,6 @@ class DocumentRepository(
             documentDate = extractDateFromPath(mdFile.relativePath)
                 ?: MarkdownMetaExtractor.extractDateFromContent(mdFile.content),
         )
-    }
-
-    private suspend fun refreshMetadata(docsToUpdate: List<DocumentEntity>) {
-        if (docsToUpdate.isNotEmpty()) {
-            documentDao.updateAll(docsToUpdate)
-        }
     }
 
     private suspend fun deleteOldDocs(docsToDelete: List<Long>, writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -313,14 +307,10 @@ class DocumentRepository(
             val fileUris = files.map { it.uri.toString() }
             val allDocs = fileUris.mapNotNull { allDocsMap[it] }
 
-            val headings = allDocs.asSequence().flatMap { doc ->
-                doc.headings?.let { json ->
-                    runCatching {
-                        val arr = org.json.JSONArray(json)
-                        List(arr.length()) { i -> arr.getString(i) }
-                    }.getOrElse { emptyList() }
-                } ?: emptyList()
-            }.take(10).toList()
+            val headings = allDocs.asSequence()
+                .flatMap { doc -> JsonArrays.toStringList(doc.headings) }
+                .take(10)
+                .toList()
 
             val folderText = buildString {
                 append("フォルダ: $folderPath\n")
@@ -417,9 +407,6 @@ class DocumentRepository(
             stmt.clearBindings()
         }
     }
-
-    private fun extractDateFromPath(relativePath: String): String? =
-        Companion.extractDateFromPath(relativePath)
 
     private fun deleteFtsByTree(treeUri: String) {
         db.openHelper.writableDatabase.execSQL(

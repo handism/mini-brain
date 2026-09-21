@@ -9,6 +9,8 @@ import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.util.FileNames
+import com.minibrain.util.PromptUtils
 import com.minibrain.util.TokenEstimator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -285,7 +287,7 @@ class AgentPipeline(
         }
 
         val fileMatches = allDocs.filter { doc ->
-            val name = doc.fileName.removeSuffix(".md").removeSuffix(".MD").lowercase()
+            val name = FileNames.stem(doc.fileName).lowercase()
             name.length >= 1 && question.lowercase().contains(name)
         }.take(5)
         if (fileMatches.isNotEmpty()) {
@@ -293,14 +295,6 @@ class AgentPipeline(
         }
 
         return parts.joinToString(" / ").ifBlank { null }
-    }
-
-    private fun buildHistoryBlock(history: List<Pair<String, String>>): String {
-        return history.takeLast(6)
-            .joinToString("\n") { (role, content) ->
-                "${if (role == "user") "ユーザー" else "アシスタント"}: $content"
-            }
-            .let { if (it.isNotBlank()) "$it\n" else "" }
     }
 
     private fun buildContextBlock(citations: List<Citation>): String {
@@ -382,7 +376,7 @@ $body
         question: String,
         history: List<Pair<String, String>>,
     ): String {
-        val historyBlock = buildHistoryBlock(history)
+        val historyBlock = PromptUtils.renderHistoryBlock(history)
         return "${historyBlock}ユーザー: $question\nアシスタント:"
     }
 
@@ -398,7 +392,7 @@ $body
     ): String {
         val contextBlock = buildContextBlock(context.citations)
         val temporalInstruction = buildTemporalInstruction(context)
-        val historyBlock = buildHistoryBlock(context.history)
+        val historyBlock = PromptUtils.renderHistoryBlock(context.history)
 
         val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
         return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: ${context.question}\nアシスタント:"

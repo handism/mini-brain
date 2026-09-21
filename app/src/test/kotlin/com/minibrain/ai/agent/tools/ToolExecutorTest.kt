@@ -175,8 +175,8 @@ class ToolExecutorTest {
 
         assertEquals(expectedSummary, result.summary)
 
-        assertTrue(logs.any { it.contains("parseFirstHeadings failed") })
-        assertTrue(logs.any { it.contains("parseJsonArray failed") })
+        assertTrue(logs.any { it.contains("parse failed: invalid_json_headings") })
+        assertTrue(logs.any { it.contains("parse failed: invalid_json_tags") })
     }
 
     @Test
@@ -193,10 +193,9 @@ class ToolExecutorTest {
             documentDate = "2026-01-01"
         )
         val firstChunk = ChunkEntity(id = 1L, docId = docId, headingPath = "H1", text = "First Chunk Text", embedding = ByteArray(0))
-        val secondChunk = ChunkEntity(id = 2L, docId = docId, headingPath = "H2", text = "Second Chunk Text", embedding = ByteArray(0))
 
         coEvery { documentDao.getByDateRange(treeUri, "2026-01-01", "2026-01-02") } returns listOf(doc)
-        coEvery { cache.chunkVectors() } returns Pair(listOf(firstChunk, secondChunk), emptyArray())
+        coEvery { cache.firstChunkOf(docId) } returns firstChunk
 
         val call = ToolCall(1, AgentTool.TimelineSearch(startDate = "2026-01-01", endDate = "2026-01-02", limit = 10))
         val result = toolExecutor.execute(call)

@@ -1,6 +1,7 @@
 package com.minibrain.ai.search
 
 import com.minibrain.ai.llm.LlmService
+import com.minibrain.util.JsonArrayText
 import timber.log.Timber
 
 class QueryExpander(private val llmService: LlmService) {
@@ -13,10 +14,7 @@ class QueryExpander(private val llmService: LlmService) {
         // 簡易 JSON 配列パーサ。LLM 出力に前置きやコードフェンスが混ざる前提で、
         // 最初に出現する [ から最後の ] までを切り出し、ダブル/シングルクォート両対応で要素を抽出する。
         internal fun parseJsonArray(raw: String): List<String> {
-            val start = raw.indexOf('[')
-            val end = raw.lastIndexOf(']')
-            if (start < 0 || end <= start) return emptyList()
-            val jsonStr = raw.substring(start, end + 1)
+            val jsonStr = JsonArrayText.extract(raw) ?: return emptyList()
             return runCatching {
                 val result = mutableListOf<String>()
                 QUOTED_ELEMENT_REGEX.findAll(jsonStr).forEach { match ->
