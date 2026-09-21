@@ -307,20 +307,20 @@ class DocumentRepository(
             documentDao.getByFileUris(chunk)
         }.associateBy { it.fileUri }
 
-        val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
+        val folderEmbeddings = coroutineScope {
+            byFolder.map { (folderPath, files) ->
+                async {
+                    val fileUris = files.map { it.uri.toString() }
+                    val allDocs = fileUris.mapNotNull { allDocsMap[it] }
 
-        for ((folderPath, files) in byFolder) {
-            val fileUris = files.map { it.uri.toString() }
-            val allDocs = fileUris.mapNotNull { allDocsMap[it] }
-
-            val headings = allDocs.asSequence().flatMap { doc ->
-                doc.headings?.let { json ->
-                    runCatching {
-                        val arr = org.json.JSONArray(json)
-                        List(arr.length()) { i -> arr.getString(i) }
-                    }.getOrElse { emptyList() }
-                } ?: emptyList()
-            }.take(10).toList()
+                    val headings = allDocs.asSequence().flatMap { doc ->
+                        doc.headings?.let { json ->
+                            runCatching {
+                                val arr = org.json.JSONArray(json)
+                                List(arr.length()) { i -> arr.getString(i) }
+                            }.getOrElse { emptyList() }
+                        } ?: emptyList()
+                    }.take(10).toList()
 
             val folderText = buildString {
                 append("フォルダ: $folderPath\n")
@@ -330,14 +330,14 @@ class DocumentRepository(
 
             runCatching {
                 val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
-                folderEmbeddings.add(
-                    FolderEmbeddingEntity(
-                        path = folderPath,
-                        treeUri = treeUri.toString(),
-                        embedding = EmbedderService.floatArrayToBytes(embedding),
-                    )
+                FolderEmbeddingEntity(
+                    path = folderPath,
+                    treeUri = treeUri.toString(),
+                    embedding = EmbedderService.floatArrayToBytes(embedding),
                 )
-            }
+            }.getOrNull()
+                }
+            }.awaitAll().filterNotNull()
         }
 
         if (folderEmbeddings.isNotEmpty()) {
