@@ -9,9 +9,6 @@ import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
-import com.minibrain.util.FileNames
-import com.minibrain.util.PromptUtils
-import com.minibrain.util.TokenEstimator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -43,7 +40,7 @@ class AgentPipeline(
         val queryType = QueryClassifier.classify(question, dateRange = dateRange)
         if (queryType == QueryType.GENERAL_KNOWLEDGE) {
             Timber.tag(TAG).d("GENERAL_KNOWLEDGE — skip RAG")
-            return@withContext AgentResult(emptyList(), llmService.generateStream(buildDirectAnswerPrompt(question, recentHistory)))
+            return@withContext AgentResult(emptyList(), llmService.generateStream(AnswerPromptBuilder.buildDirectAnswerPrompt(question, recentHistory)))
         }
 
         // 1 リクエスト分の DB ロードと FloatArray デコードを memoize する。
@@ -94,7 +91,7 @@ class AgentPipeline(
 
         onStatus?.invoke("")
         val answerContext = AnswerContext(question, citations, recentHistory, dateRange)
-        val answerFlow = llmService.generateStream(buildAnswerPrompt(answerContext))
+        val answerFlow = llmService.generateStream(AnswerPromptBuilder.buildAnswerPrompt(answerContext))
         AgentResult(citations, answerFlow, traceEvents)
     }
 
@@ -136,7 +133,7 @@ class AgentPipeline(
         private var consecutiveParseErrors = 0
 
         suspend fun execute(): List<Citation> {
-            val baseHint = buildPlannerHint(params.question, params.dateRange, params.cache)
+            val baseHint = PlannerHintBuilder.build(params.question, params.dateRange, params.cache)
             val plannerHint = when {
                 params.explorerHint != null && baseHint != null -> "${params.explorerHint} / ${baseHint}"
                 params.explorerHint != null -> params.explorerHint
@@ -221,181 +218,6 @@ class AgentPipeline(
             addObservation(observations, toolCall, result.summary)
             Timber.tag(TAG).d("tool=${tool} citations=${result.citations.size}")
         }
-    }
-
-    private suspend fun buildPlannerHint(
-        question: String,
-        dateRange: DateRange?,
-        cache: SearchRequestCache,
-    ): String? {
-        val parts = mutableListOf<String>()
-        val allDocs = cache.documents()
-
-        // 期間クエリ: resolveDateRange が成功していたら timeline_search を推奨
-        if (dateRange != null) {
-            parts += "期間クエリ検出: ${dateRange.start} 〜 ${dateRange.end} / timeline_search を推奨"
-        }
-
-        if (dateRange == null && DateResolver.isDiaryQuery(question)) {
-            val dates = DateResolver.resolveToDateStrings(question)
-            if (dates.isNotEmpty()) {
-                parts += "検出された日付: ${dates.joinToString(", ")}"
-
-                val found = mutableListOf<String>()
-                val notFound = mutableListOf<String>()
-                // パスの正規化 (スラッシュとハイフンを除外) をループ外で一度だけ行うことで高速化
-                val normalizedDocs = allDocs.map { doc ->
-                    val path = doc.relativePath
-                    val len = path.length
-                    val arr = CharArray(len)
-                    var p = 0
-                    for (i in 0 until len) {
-                        val c = path[i]
-                        if (c != '/' && c != '-') {
-                            arr[p++] = c
-                        }
-                    }
-                    doc to String(arr, 0, p)
-                }
-                for (date in dates) {
-                    // 区切り文字を除いた8桁数字 (YYYYMMDD) でパスを検索
-                    val digits = date.replace("-", "")
-                    val matches = normalizedDocs.filter { (_, normalizedPath) ->
-                        normalizedPath.contains(digits)
-                    }.take(3)
-                    if (matches.isNotEmpty()) {
-                        found += matches.map { (doc, _) -> "[d=${doc.id}] ${doc.relativePath}" }
-                    } else {
-                        notFound += date
-                    }
-                }
-                if (found.isNotEmpty()) {
-                    parts += "日付に一致するファイル: ${found.joinToString(", ")}"
-                }
-                if (notFound.isNotEmpty()) {
-                    // 見つからない場合は YYYYMMDD / YYYY/MM/DD / YYYY-MM-DD の3形式を列挙
-                    val globs = notFound.flatMap { date ->
-                        listOf(
-                            "\"${date.replace("-", "")}*\"",
-                            "\"${date.replace("-", "/")}*\"",
-                            "\"$date*\"",
-                        )
-                    }
-                    parts += "推奨 glob パターン: ${globs.joinToString(" or ")}"
-                }
-            }
-        }
-
-        val fileMatches = allDocs.filter { doc ->
-            val name = FileNames.stem(doc.fileName).lowercase()
-            name.length >= 1 && question.lowercase().contains(name)
-        }.take(5)
-        if (fileMatches.isNotEmpty()) {
-            parts += "質問にマッチするファイル候補: ${fileMatches.joinToString(", ") { "[d=${it.id}] ${it.fileName}" }}"
-        }
-
-        return parts.joinToString(" / ").ifBlank { null }
-    }
-
-    private fun buildContextBlock(citations: List<Citation>): String {
-        return if (citations.isNotEmpty()) {
-            val budgeted = mutableListOf<Citation>()
-            var remainingTokens = TokenEstimator.MAX_CONTEXT_TOKENS
-            for (c in citations) {
-                val cost = TokenEstimator.estimate(c.headingPath, c.snippet)
-                if (remainingTokens <= 0) break
-                budgeted += c
-                remainingTokens -= cost
-            }
-            val body = budgeted.joinToString("\n\n") { c ->
-                val pathPrefix = c.relativePath?.let { "$it > " } ?: ""
-                "### $pathPrefix${c.headingPath}\n${c.snippet}"
-            }
-            """あなたはユーザーのパーソナルアシスタントです。以下の「知識ベース」を参考にして質問に答えてください。
-知識ベースにある情報を優先し、不足時は一般知識で補足（その際は明記）してください。
-
-知識ベース:
-$body
-
----"""
-        } else {
-            "知識ベースに関連する情報が見つかりませんでした。一般的な知識で回答してください。\n\n---"
-        }
-    }
-
-    private fun buildTemporalInstruction(context: AnswerContext): String {
-        // 日付関連の指示。dateRange があれば期間照合、無くても「いつ」系クエリなら本文中の日付を
-        // 拾うよう誘導する（ADR-026）。snippet から日付を抽出する優先順位は次の通り:
-        //   1. `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みの documentDate）
-        //   2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
-        //   3. 本文中の YYYY/MM/DD / YYYY-MM-DD / YYYY年MM月DD日 表記
-        val isDateQuery = DateResolver.isDateQuery(context.question)
-        val dateRange = context.dateRange
-        return when {
-            dateRange != null -> {
-                val hasDated = context.citations.any { it.snippet.trimStart().startsWith("[日付:") }
-                if (hasDated) {
-                    """
-【期間クエリの解釈】
-質問内の「去年」「先月」「今年の冬」などの相対表現は、システム側で既に **${dateRange.start} 〜 ${dateRange.end}** の期間に解釈済みです。
-年号の解釈で迷ったり「どの年を指すか不明」などと逡巡せず、この期間を所与の前提として回答してください。
-
-【回答の作り方】
-1. 各 snippet から日付を拾う優先順位:
-   - 先頭の `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みのファイル日付）
-   - 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
-   - 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
-2. 拾った日付を上記期間と照合し、該当する snippet を時系列順に整理して具体的に答える
-3. snippet 本文に活動内容が書かれていれば、それを「情報がない」と切り捨てず素直に紹介する
-""".trimIndent()
-                } else {
-                    """
-【期間クエリの解釈】
-質問内の相対表現は ${dateRange.start} 〜 ${dateRange.end} の期間に解釈済みです。
-`[日付:]` プレフィックス付き候補は見つかりませんでしたが、snippet 本文中の「初回訪問日: …」「訪問日: …」ラベル行や、YYYY/MM/DD・YYYY年MM月DD日 表記も日付として有効です。これらを期間と照合してください。
-該当する日付が一切見つからなければ、その旨を率直に伝えたうえで、関連しそうな snippet を補足として提示してください。
-""".trimIndent()
-                }
-            }
-            isDateQuery -> {
-                """
-【日付に関する質問】
-質問は時期・日付を尋ねています。snippet から日付を拾う優先順位:
-1. 先頭の `[日付: YYYY-MM-DD]` プレフィックス（システム抽出済みのファイル日付）
-2. 本文中の「初回訪問日: …」「訪問日: …」「日付: …」のようなラベル行
-3. 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
-
-該当ファイル名がクエリに含まれている場合は、そのファイルの本文中の日付を主な根拠として「いつ」かを具体的に答えてください。日付らしき表記が無ければ、その旨を率直に伝えてください。
-""".trimIndent()
-            }
-            else -> ""
-        }
-    }
-
-    private fun buildDirectAnswerPrompt(
-        question: String,
-        history: List<Pair<String, String>>,
-    ): String {
-        val historyBlock = PromptUtils.renderHistoryBlock(history)
-        return "${historyBlock}ユーザー: $question\nアシスタント:"
-    }
-
-    private data class AnswerContext(
-        val question: String,
-        val citations: List<Citation>,
-        val history: List<Pair<String, String>>,
-        val dateRange: DateRange? = null,
-    )
-
-    private fun buildAnswerPrompt(
-        context: AnswerContext
-    ): String {
-        val contextBlock = buildContextBlock(context.citations)
-        val temporalInstruction = buildTemporalInstruction(context)
-        val historyBlock = PromptUtils.renderHistoryBlock(context.history)
-
-        val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
-        return "$contextBlock\n\n$temporalBlock$historyBlock\nユーザー: ${context.question}\nアシスタント:"
     }
 
     // observation スライディングウィンドウ: 最新2件を full(詳細)、それ以前を compact(要約)に保つ

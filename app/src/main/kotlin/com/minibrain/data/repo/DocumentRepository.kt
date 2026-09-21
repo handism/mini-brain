@@ -46,6 +46,8 @@ class DocumentRepository(
     private val folderEmbeddingDao: FolderEmbeddingDao,
 ) {
     companion object {
+        private const val TAG = "DocumentRepository"
+
         private val FULL_DATE_PATTERNS = listOf(
             Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
             Regex("""(\d{4})/(\d{1,2})/(\d{1,2})"""),
@@ -230,7 +232,7 @@ class DocumentRepository(
                 val rawChunks = try {
                     MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
                 } catch (e: Exception) {
-                    Timber.tag("DocumentRepository").e(e, "chunking failed: ${pending.mdFile.relativePath}")
+                    Timber.tag(TAG).e(e, "chunking failed: ${pending.mdFile.relativePath}")
                     emptyList()
                 }
                 val chunkEntities = rawChunks.mapNotNull { chunk ->
@@ -243,7 +245,7 @@ class DocumentRepository(
                             embedding = EmbedderService.floatArrayToBytes(embedding),
                         )
                     }.onFailure { e ->
-                        Timber.tag("DocumentRepository").e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
+                        Timber.tag(TAG).e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
                     }.getOrNull()
                 }
 

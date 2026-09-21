@@ -16,6 +16,10 @@ import timber.log.Timber
 
 open class LlmService {
 
+    private companion object {
+        private const val TAG = "LlmService"
+    }
+
     private var engine: Engine? = null
     private val mutex = Mutex()
 
@@ -40,7 +44,7 @@ open class LlmService {
                 } catch (e: Throwable) {
                     runCatching { gpuEng?.close() }
                     lastError = e
-                    Timber.tag("LlmService").e(e, "GPU initialization failed, falling back to CPU")
+                    Timber.tag(TAG).e(e, "GPU initialization failed, falling back to CPU")
                 }
             }
 
@@ -51,7 +55,7 @@ open class LlmService {
                 eng.initialize()
                 engine = eng
             } catch (e: Throwable) {
-                Timber.tag("LlmService").e(e, "CPU initialization failed")
+                Timber.tag(TAG).e(e, "CPU initialization failed")
                 val msg = if (forceCpu) "CPUモードでの初期化に失敗しました" else "GPU/CPU 両方で失敗しました"
                 throw Exception("$msg: ${e.localizedMessage}", e)
             }

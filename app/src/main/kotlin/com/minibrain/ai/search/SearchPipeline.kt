@@ -52,7 +52,6 @@ class SearchPipeline(
         // 低スコアは Reranker のノイズ源になるため、ここで除外する（ADR-023）。
         private const val VECTOR_MIN_SCORE = 0.45f
         private const val SNIPPET_CHARS = 200
-        private const val MIN_FILENAME_MATCH_CHARS = 1
         private const val RRF_K = 60
         // RRF 重み（[meta, vector, bm25]）。Metadata 完全一致 > BM25 > Vector の順。
         private val RRF_WEIGHTS = listOf(1.5f, 1.0f, 1.2f)
@@ -280,9 +279,7 @@ class SearchPipeline(
             val tokenMatch = tokens.any { token ->
                 fields.any { field -> field.contains(token, ignoreCase = true) }
             }
-            val fileStem = FileNames.stem(doc.fileName)
-            val fileNameInQuery = fileStem.length >= MIN_FILENAME_MATCH_CHARS &&
-                queries.any { q -> q.contains(fileStem, ignoreCase = true) }
+            val fileNameInQuery = FileNames.stemMatchesAnyQuery(doc.fileName, queries)
 
             if (!tokenMatch && !fileNameInQuery) return@mapNotNull null
 

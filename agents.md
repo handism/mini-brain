@@ -105,7 +105,7 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
    - `HyDE` で仮想回答を生成（タイムアウト 6秒、失敗時はスキップ）。
 3. **並行検索 (Parallel Retrieval)**:
    - **BM25 検索**: 展開クエリ × FTS4 によるテキスト検索。
-   - **メタデータ検索**: `fileName`, `path`, `tags`, `documentDate` を検索。また、ファイル名（拡張子除く3文字以上）がクエリの部分文字列として一致する場合（`topicMatch=true`）、先頭チャンクから 500文字をスニペットとして抽出（ADR-026）。
+   - **メタデータ検索**: `fileName`, `path`, `tags`, `documentDate` を検索。また、ファイル名（拡張子除く `FileNames.MIN_STEM_MATCH_CHARS = 1` 文字以上）がクエリの部分文字列として一致する場合（`topicMatch=true`）、先頭チャンクから 500文字をスニペットとして抽出（ADR-026）。
    - **ベクトル検索**: 元クエリ＋展開クエリ＋HyDE 仮想回答によるベクトル類似度検索（類似度 0.45 未満は除外）。
 4. **候補の融合 (RRF)**:
    - RRF（Reciprocal Rank Fusion）によりマージ（重み: META=1.5 / VECTOR=1.0 / BM25=1.2）し、上位50件を抽出。
@@ -134,6 +134,8 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 | 評価指標 / 評価ランナー | [EvalMetrics.kt](app/src/main/kotlin/com/minibrain/eval/EvalMetrics.kt) / [EvalRunner.kt](app/src/main/kotlin/com/minibrain/eval/EvalRunner.kt) |
 | Coverage Check / 探索戦略 | [CoverageChecker.kt](app/src/main/kotlin/com/minibrain/ai/agent/CoverageChecker.kt) |
 | パイプライン統合・制御フロー | [AgentPipeline.kt](app/src/main/kotlin/com/minibrain/ai/agent/AgentPipeline.kt) |
+| 回答プロンプト構築（知識ベース / 日付指示 / 履歴） | [AnswerPromptBuilder.kt](app/src/main/kotlin/com/minibrain/ai/agent/AnswerPromptBuilder.kt) |
+| ReAct 用 Planner ヒント構築 | [PlannerHintBuilder.kt](app/src/main/kotlin/com/minibrain/ai/agent/PlannerHintBuilder.kt) |
 | ReAct 用 Planner プロンプト | [PlannerPrompt.kt](app/src/main/kotlin/com/minibrain/ai/agent/PlannerPrompt.kt) |
 | クエリ種別分類 (Classifier) | [QueryClassifier.kt](app/src/main/kotlin/com/minibrain/ai/agent/QueryClassifier.kt) |
 | ReAct ツール実行エンジン | [ToolExecutor.kt](app/src/main/kotlin/com/minibrain/ai/agent/tools/ToolExecutor.kt) |
@@ -170,24 +172,24 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 - `EmbedderService` と `LlmService` の初期化は非常に重いため、必ず `Dispatchers.Default` などのバックグラウンドスレッドで行わせるコードにしてください。
 
 ### 7.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
-- **ファイル名逆引き**: `SearchPipeline.metadataSearch` では、ファイルの拡張子を除いた名前に部分一致するクエリを検出して優先抽出します（形態素解析に依存しない日本語ファイル検出のため）。
+- **ファイル名逆引き**: `SearchPipeline.metadataSearch` では、ファイルの拡張子を除いた名前に部分一致するクエリを検出して優先抽出します（形態素解析に依存しない日本語ファイル検出のため）。判定は `FileNames.stemMatchesAnyQuery` に集約されており、`PlannerHintBuilder.build` のファイル名候補抽出も同じ規則を使います。しきい値 `MIN_STEM_MATCH_CHARS = 1` は `胃.md` / `AI.md` のような 1 文字 stem を拾うための値です（ADR-026 の記載は 3 でしたが後日 1 に引き下げ）。
 - **期間クエリ**: `dateRange != null` のときは、該当期間に属する文書（`documentDate` で判定）を優先検索し、上位5件を再ランカー結果の先頭に強制ピン留めします。
 - **日付抽出**: `DocumentRepository.extractDateFromPath` は、ファイル名から日付（完全日付 `YYYY-MM-DD` または月のみ `YYYY-MM`）を正しくパースできるようにしてください。月のみの場合は月初の日付（`-01`）として処理します。
-- **日付の LLM 参照優先度**: 日付に関連するクエリの場合、LLM に対して以下の優先順位で日付情報を解決するように回答プロンプト（`buildAnswerPrompt`）内で明確に指示を差し込みます。
+- **日付の LLM 参照優先度**: 日付に関連するクエリの場合、LLM に対して以下の優先順位で日付情報を解決するように回答プロンプト（`AnswerPromptBuilder.buildAnswerPrompt`）内で明確に指示を差し込みます。
   1. `[日付: YYYY-MM-DD]` のプレフィックス
   2. 本文内の「初回訪問日:」「日付:」などのラベル行
   3. 本文中の日付表記（`YYYY/MM/DD` など）
 
 ### 7.3 ReAct DSL
 - ReAct ループで Planner LLM が出力するツール命令は、JVM 上でのユニットテスト実行の互換性を担保するため、**JSON ではなく独自の DSL 形式（key:value）** を用います。
-- `buildPlannerHint` は 期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致 の順に解析して hint を構築します。
+- `PlannerHintBuilder.build` は 期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致 の順に解析して hint を構築します。
 
 ### 7.4 実装上の詳細な制約（定数・regression 対策）
 
 変更時に壊れやすい箇所です。値を変える場合は必ず対応するテスト・呼び出し元も更新してください。
 
 **キャッシュ・パフォーマンス**
-- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `buildPlannerHint` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
+- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
 
 **チューニング定数**
@@ -207,7 +209,7 @@ UI (Compose) ──> ViewModel ──> AgentPipeline ──> SearchPipeline ─�
 - `CoverageChecker.check` は (1) 日付クエリ + `[日付:]` プレフィックス → 短絡 yes、(2) 日付クエリ + `topicMatch=true` 候補 → 短絡 yes、の 2 段で LLM 呼び出しを省きます。**topic match 短絡が無いと固有名詞ヒットが「no, visit_date」でリセットされて ReAct に落ちる事故が起きます。**
 
 **回答プロンプトへの日付指示**
-- `AgentPipeline.buildAnswerPrompt` は `dateRange != null` のとき、期間（start〜end）と「日付を拾う優先順位 3 段」の照合指示を context block 直後に差し込みます（ADR-025 + ADR-026）。`citations` に日付プレフィックス付きが 1 件もない場合は「`[日付:]` 付きは無いが本文ラベル / 表記を期間と照合せよ」というフェールセーフ文に切り替えます。
+- `AnswerPromptBuilder.buildAnswerPrompt` は `dateRange != null` のとき、期間（start〜end）と「日付を拾う優先順位 3 段」の照合指示を context block 直後に差し込みます（ADR-025 + ADR-026）。`citations` に日付プレフィックス付きが 1 件もない場合は「`[日付:]` 付きは無いが本文ラベル / 表記を期間と照合せよ」というフェールセーフ文に切り替えます。
 - `dateRange == null` でも `DATE_QUERY_REGEX`（`いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで`）にマッチすれば「日付に関する質問」ブロックを差し込み、同じ 3 段優先順位で本文から日付を拾うよう LLM に指示します（ADR-026）。固有名詞 +「いつ」クエリ（例:「サウナしきじにいつ行ったっけ」）で `documentDate` が無くても本文中の「初回訪問日: 2022/01/01」を回答に乗せられます。
 
 ### 7.5 DB マイグレーション運用
