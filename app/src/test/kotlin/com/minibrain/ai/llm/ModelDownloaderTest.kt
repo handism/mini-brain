@@ -296,4 +296,17 @@ class ModelDownloaderTest {
             errorResult!!.message.contains("ダウンロードが完了しましたが、ファイルが準備できていません")
         )
     }
+
+    @Test
+    fun `calculateSha256 exception returns empty string when reading invalid file`() {
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_test_read_err")
+        every { mockContext.filesDir } returns filesDir
+        val downloader = ModelDownloader(mockContext)
+
+        // Passing a directory instead of a regular file causes a FileNotFoundException (which is an IOException) when creating FileInputStream
+        val invalidFile = File(filesDir, "invalid_dir").apply { mkdirs() }
+        val result = downloader.calculateSha256(invalidFile)
+        assertEquals("", result)
+    }
 }
