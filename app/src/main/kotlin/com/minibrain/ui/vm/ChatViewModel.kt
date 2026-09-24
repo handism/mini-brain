@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minibrain.MiniBrainApp
+import com.minibrain.ai.agent.AgentResult
 import com.minibrain.ai.agent.AgentTraceEvent
 import com.minibrain.ai.agent.FinalAnswerEvent
 import com.minibrain.ai.rag.Citation
@@ -14,6 +15,7 @@ import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.dataStore
 import kotlinx.coroutines.Job
 import androidx.lifecycle.SavedStateHandle
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -105,6 +107,7 @@ class ChatViewModel(
 
             setupUserAndStreamingMessages(question)
 
+            // エージェントループ（計画 → 多段ツール実行 → 回答）
             val agentResult = runAgentPipeline(question) ?: return@launch
             val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
 
@@ -115,6 +118,7 @@ class ChatViewModel(
     }
 
     private suspend fun setupUserAndStreamingMessages(question: String) {
+        // ユーザーメッセージを追加（最初の送信時はセッションタイトルを質問で更新）
         if (_messages.value.isEmpty()) {
             val title = question.take(40).let { if (question.length > 40) "$it…" else it }
             app.container.chatRepository.updateSessionTitle(_sessionId.value, title)
@@ -123,6 +127,7 @@ class ChatViewModel(
         _messages.value = _messages.value + userMsg
         app.container.chatRepository.addMessage(_sessionId.value, MessageRole.USER, question)
 
+        // ストリーミングプレースホルダーを先行追加（検索中も CircularProgressIndicator 表示）
         val streamingMsg = ChatMessage(
             role = MessageRole.ASSISTANT,
             content = "",
@@ -131,7 +136,7 @@ class ChatViewModel(
         _messages.value = _messages.value + streamingMsg
     }
 
-    private suspend fun runAgentPipeline(question: String): com.minibrain.ai.agent.AgentResult? {
+    private suspend fun runAgentPipeline(question: String): AgentResult? {
         val treeUri = savedTreeUri.value ?: ""
         val history = app.container.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
             Pair(msg.role.name.lowercase(), msg.content)
@@ -149,8 +154,10 @@ class ChatViewModel(
         }
     }
 
-    private suspend fun collectAnswerStream(answerFlow: kotlinx.coroutines.flow.Flow<String>, citations: List<Citation>): String {
+    private suspend fun collectAnswerStream(answerFlow: Flow<String>, citations: List<Citation>): String {
         _statusText.value = null
+
+        // 引用元をストリーミングメッセージに反映
         updateStreamingMessage { it.copy(citations = citations) }
 
         val sb = StringBuilder()
@@ -172,6 +179,7 @@ class ChatViewModel(
         return sb.toString()
     }
 
+    // ストリーミング完了
     private suspend fun finalizeMessage(finalContent: String, citations: List<Citation>, traceEvents: List<AgentTraceEvent>) {
         val filteredCitations = if (isNegativeResponse(finalContent)) emptyList() else citations
         val citationsJson = serializeCitations(filteredCitations)
