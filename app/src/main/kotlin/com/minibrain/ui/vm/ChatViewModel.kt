@@ -103,82 +103,89 @@ class ChatViewModel(
             _errorMessage.value = null
             _statusText.value = null
 
-            // ユーザーメッセージを追加（最初の送信時はセッションタイトルを質問で更新）
-            if (_messages.value.isEmpty()) {
-                val title = question.take(40).let { if (question.length > 40) "$it…" else it }
-                app.container.chatRepository.updateSessionTitle(_sessionId.value, title)
-            }
-            val userMsg = ChatMessage(role = MessageRole.USER, content = question)
-            _messages.value = _messages.value + userMsg
-            app.container.chatRepository.addMessage(_sessionId.value, MessageRole.USER, question)
+            setupUserAndStreamingMessages(question)
 
-            // ストリーミングプレースホルダーを先行追加（検索中も CircularProgressIndicator 表示）
-            val streamingMsg = ChatMessage(
-                role = MessageRole.ASSISTANT,
-                content = "",
-                isStreaming = true,
-            )
-            _messages.value = _messages.value + streamingMsg
+            val agentResult = runAgentPipeline(question) ?: return@launch
+            val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
 
-            val treeUri = savedTreeUri.value ?: ""
-
-            val history = app.container.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
-                Pair(msg.role.name.lowercase(), msg.content)
-            }
-
-            // エージェントループ（計画 → 多段ツール実行 → 回答）
-            val agentResult = runCatching {
-                app.container.agentPipeline.run(question, treeUri, history) { status ->
-                    _statusText.value = status.ifBlank { null }
-                }
-            }.getOrElse {
-                _errorMessage.value = "検索エラー: ${it.message}"
-                _isGenerating.value = false
-                removeStreamingMessage()
-                return@launch
-            }
-
-            val citations = agentResult.citations
-            _statusText.value = null
-
-            // 引用元をストリーミングメッセージに反映
-            updateStreamingMessage { it.copy(citations = citations) }
-
-            val sb = StringBuilder()
-            runCatching {
-                agentResult.answerFlow.collect { token ->
-                    sb.append(token)
-                    val currentContent = sb.toString()
-                    updateStreamingMessage {
-                        val shouldHide = isNegativeResponse(currentContent)
-                        it.copy(
-                            content = currentContent,
-                            citations = if (shouldHide) emptyList() else citations,
-                        )
-                    }
-                }
-            }.onFailure {
-                _errorMessage.value = "生成エラー: ${it.message}"
-            }
-
-            // ストリーミング完了
-            val finalContent = sb.toString()
-            val filteredCitations = if (isNegativeResponse(finalContent)) emptyList() else citations
-            val citationsJson = serializeCitations(filteredCitations)
-            val msgId = app.container.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
-            val finalTrace = agentResult.traceEvents + FinalAnswerEvent(finalContent.length)
-
-            updateStreamingMessage {
-                it.copy(
-                    id = msgId,
-                    content = finalContent,
-                    citations = filteredCitations,
-                    isStreaming = false,
-                    traceEvents = finalTrace,
-                )
-            }
+            finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents)
 
             _isGenerating.value = false
+        }
+    }
+
+    private suspend fun setupUserAndStreamingMessages(question: String) {
+        if (_messages.value.isEmpty()) {
+            val title = question.take(40).let { if (question.length > 40) "$it…" else it }
+            app.container.chatRepository.updateSessionTitle(_sessionId.value, title)
+        }
+        val userMsg = ChatMessage(role = MessageRole.USER, content = question)
+        _messages.value = _messages.value + userMsg
+        app.container.chatRepository.addMessage(_sessionId.value, MessageRole.USER, question)
+
+        val streamingMsg = ChatMessage(
+            role = MessageRole.ASSISTANT,
+            content = "",
+            isStreaming = true,
+        )
+        _messages.value = _messages.value + streamingMsg
+    }
+
+    private suspend fun runAgentPipeline(question: String): com.minibrain.ai.agent.AgentResult? {
+        val treeUri = savedTreeUri.value ?: ""
+        val history = app.container.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
+            Pair(msg.role.name.lowercase(), msg.content)
+        }
+
+        return runCatching {
+            app.container.agentPipeline.run(question, treeUri, history) { status ->
+                _statusText.value = status.ifBlank { null }
+            }
+        }.getOrElse {
+            _errorMessage.value = "検索エラー: ${it.message}"
+            _isGenerating.value = false
+            removeStreamingMessage()
+            null
+        }
+    }
+
+    private suspend fun collectAnswerStream(answerFlow: kotlinx.coroutines.flow.Flow<String>, citations: List<Citation>): String {
+        _statusText.value = null
+        updateStreamingMessage { it.copy(citations = citations) }
+
+        val sb = StringBuilder()
+        runCatching {
+            answerFlow.collect { token ->
+                sb.append(token)
+                val currentContent = sb.toString()
+                updateStreamingMessage {
+                    val shouldHide = isNegativeResponse(currentContent)
+                    it.copy(
+                        content = currentContent,
+                        citations = if (shouldHide) emptyList() else citations,
+                    )
+                }
+            }
+        }.onFailure {
+            _errorMessage.value = "生成エラー: ${it.message}"
+        }
+        return sb.toString()
+    }
+
+    private suspend fun finalizeMessage(finalContent: String, citations: List<Citation>, traceEvents: List<AgentTraceEvent>) {
+        val filteredCitations = if (isNegativeResponse(finalContent)) emptyList() else citations
+        val citationsJson = serializeCitations(filteredCitations)
+        val msgId = app.container.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
+        val finalTrace = traceEvents + FinalAnswerEvent(finalContent.length)
+
+        updateStreamingMessage {
+            it.copy(
+                id = msgId,
+                content = finalContent,
+                citations = filteredCitations,
+                isStreaming = false,
+                traceEvents = finalTrace,
+            )
         }
     }
 
