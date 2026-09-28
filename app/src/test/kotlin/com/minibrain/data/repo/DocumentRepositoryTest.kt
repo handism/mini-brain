@@ -60,6 +60,8 @@ class DocumentRepositoryTest {
         io.mockk.every { db.openHelper } returns openHelper
         io.mockk.every { openHelper.writableDatabase } returns writableDb
         io.mockk.every { openHelper.readableDatabase } returns readableDb
+        io.mockk.coEvery { documentDao.getAllByTree(any()) } returns emptyList()
+        io.mockk.coEvery { folderEmbeddingDao.replaceAllByTree(any(), any()) } returns Unit
 
         repository = DocumentRepository(
             context = context,
@@ -295,7 +297,7 @@ class DocumentRepositoryTest {
                 documentDate = any()
             ) } returns this
         }
-        io.mockk.coEvery { documentDao.getByFileUris(any()) } returns listOf(docEntity)
+        io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns listOf(docEntity)
         io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns listOf(
             com.minibrain.data.db.daos.DocChunkCount(1L, 5)
         )
@@ -470,12 +472,14 @@ class DocumentRepositoryTest {
         // Mock DAOs
         io.mockk.coEvery { chunkDao.deleteAllByTree(any()) } returns Unit
         io.mockk.coEvery { documentDao.deleteAllByTree(any()) } returns Unit
+        io.mockk.coEvery { folderEmbeddingDao.deleteAllByTree(any()) } returns Unit
 
         repository.clearFolder(treeUri)
 
         io.mockk.coVerify { chunkDao.deleteFtsByTree(treeUri) }
         io.mockk.coVerify { chunkDao.deleteAllByTree(treeUri) }
         io.mockk.coVerify { documentDao.deleteAllByTree(treeUri) }
+        io.mockk.coVerify { folderEmbeddingDao.deleteAllByTree(treeUri) }
 
         // Verify state is Idle
         org.junit.Assert.assertEquals(com.minibrain.data.repo.IndexingState.Idle, repository.indexingState.value)
@@ -541,7 +545,7 @@ class DocumentRepositoryTest {
             io.mockk.every { lastModified } returns 0L
             io.mockk.every { contentHash } returns "hash_old"
         }
-        io.mockk.coEvery { documentDao.getByFileUris(any()) } returns listOf(docEntity)
+        io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns listOf(docEntity)
         io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
 
         io.mockk.coEvery { chunkDao.deleteFtsByDocIds(any()) } throws RuntimeException("Delete FTS failed")
@@ -568,5 +572,111 @@ class DocumentRepositoryTest {
         io.mockk.verify(exactly = 0) { writableDb.setTransactionSuccessful() }
         io.mockk.verify(exactly = 1) { writableDb.endTransaction() }
         io.mockk.verify(exactly = 1) { stmt.close() }
+    }
+
+    @org.junit.Test
+    fun testIndexFolder_removedFile_deletesDocChunksAndFts() = kotlinx.coroutines.test.runTest {
+        val treeUriStr = "content://tree/uri"
+
+        io.mockk.mockkStatic(android.net.Uri::class)
+        val treeUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { treeUri.toString() } returns treeUriStr
+
+        // フォルダには何も残っていない
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns emptyList()
+
+        val removedDoc = io.mockk.mockk<com.minibrain.data.db.entities.DocumentEntity>(relaxed = true) {
+            io.mockk.every { id } returns 42L
+            io.mockk.every { fileUri } returns "content://tree/uri/gone.md"
+        }
+        io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns listOf(removedDoc)
+        io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
+        io.mockk.coEvery { chunkDao.deleteFtsByDocIds(any()) } returns Unit
+        io.mockk.coEvery { chunkDao.deleteByDocIds(any()) } returns Unit
+        io.mockk.coEvery { documentDao.deleteByIds(any()) } returns Unit
+        io.mockk.every { writableDb.compileStatement(any()) } returns io.mockk.mockk(relaxed = true)
+
+        try {
+            repository.indexFolder(treeUri)
+        } finally {
+            io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
+            io.mockk.unmockkStatic(android.net.Uri::class)
+        }
+
+        io.mockk.coVerifyOrder {
+            chunkDao.deleteFtsByDocIds(listOf(42L))
+            chunkDao.deleteByDocIds(listOf(42L))
+            documentDao.deleteByIds(listOf(42L))
+        }
+        io.mockk.verify { writableDb.setTransactionSuccessful() }
+        // フォルダが 1 つも無ければ folder_embeddings も空に入れ替わる
+        io.mockk.coVerify { folderEmbeddingDao.replaceAllByTree(treeUriStr, emptyList()) }
+    }
+
+    @org.junit.Test
+    fun testIndexFolder_usesBatchEmbedding() = kotlinx.coroutines.test.runTest {
+        val treeUriStr = "content://tree/uri"
+
+        io.mockk.mockkStatic(android.net.Uri::class)
+        val treeUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { treeUri.toString() } returns treeUriStr
+        val fileUri = io.mockk.mockk<android.net.Uri>()
+        io.mockk.every { fileUri.toString() } returns "content://tree/uri/file1.md"
+
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        val mdFile = com.minibrain.data.md.MdFile(
+            uri = fileUri,
+            name = "file1.md",
+            relativePath = "file1.md",
+            lastModified = 0L,
+            contentHash = "hash1",
+            content = "# a",
+        )
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.mockkObject(com.minibrain.data.md.MarkdownChunker)
+        io.mockk.every { com.minibrain.data.md.MarkdownChunker.chunk(any(), any()) } returns List(3) {
+            com.minibrain.data.md.Chunk("h$it", "text$it")
+        }
+
+        io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
+        io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
+        io.mockk.coEvery { documentDao.insertAll(any()) } returns listOf(1L)
+        io.mockk.coEvery { embedder.embedAll(any(), any()) } answers { firstArg<List<String>>().map { floatArrayOf(0.1f) } }
+        io.mockk.coEvery { chunkDao.insertAll(any<List<com.minibrain.data.db.entities.ChunkEntity>>()) } answers {
+            List(firstArg<List<Any>>().size) { (it + 1).toLong() }
+        }
+        io.mockk.every { writableDb.compileStatement(any()) } returns io.mockk.mockk(relaxed = true)
+
+        try {
+            repository.indexFolder(treeUri)
+        } finally {
+            io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
+            io.mockk.unmockkObject(com.minibrain.data.md.MarkdownChunker)
+            io.mockk.unmockkStatic(android.net.Uri::class)
+        }
+
+        io.mockk.coVerify(exactly = 1) { embedder.embedAll(listOf("text0", "text1", "text2"), any()) }
+        io.mockk.coVerify(exactly = 0) { embedder.embed(any(), any()) }
+        io.mockk.coVerify { chunkDao.insertAll(match<List<com.minibrain.data.db.entities.ChunkEntity>> { it.size == 3 }) }
+    }
+
+    @org.junit.Test
+    fun testEnsureFtsIndex_mismatch_clearsFtsBeforeRebuild() = kotlinx.coroutines.test.runTest {
+        io.mockk.coEvery { chunkDao.count() } returns 1
+        io.mockk.every { readableDb.query(any<String>(), any<Array<Any?>>()) } returns cursor
+        io.mockk.every { cursor.moveToFirst() } returns true
+        io.mockk.every { cursor.getInt(0) } returns 3 // 孤立 FTS 行がある
+        io.mockk.every { cursor.close() } returns Unit
+        io.mockk.every { chunkDao.getBatchSync(any(), any()) } returns emptyList()
+        io.mockk.every { writableDb.compileStatement(any()) } returns io.mockk.mockk(relaxed = true)
+
+        repository.ensureFtsIndex()
+
+        io.mockk.verifyOrder {
+            writableDb.beginTransaction()
+            writableDb.execSQL("DELETE FROM chunks_fts")
+            writableDb.setTransactionSuccessful()
+        }
     }
 }

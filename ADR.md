@@ -1164,3 +1164,32 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - 既存の ViewModel および ViewModelTest の依存取得先が `app.container` に書き換えられた。
 - すべてのユニットテストおよび Lint チェックが正常に通過することを確認した。
 
+---
+
+## ADR-029: 差分インデックスでの削除ファイル掃除とバッチ埋め込み
+
+**日付:** 2026-09-29  
+**ステータス:** 採用（ADR-024 / ADR-025 を補完）
+
+### 背景
+
+- `DocumentRepository.indexFolder` は「内容が変わったファイル」の chunk / FTS しか消しておらず、フォルダから削除されたファイルの document・chunk・FTS が DB に残り続けていた。検索に古い内容が出続ける原因になっていた。
+- `folder_embeddings` は upsert のみで、削除・改名されたフォルダの行が残っていた。`clearFolder` もこのテーブルを消していなかった。
+- `ensureFtsIndex` は FTS 件数が chunk 件数と一致しないときに INSERT OR REPLACE で再投入するだけだった。孤立した FTS 行（FTS > chunk）が解消されず、起動のたびに全件を再投入していた。
+- チャンクの埋め込みを 1 件ずつ ONNX 推論していたため、初回インデックスが遅かった。
+- `SearchPipeline.dateRangeSearch` の特定日付分岐だけスニペットが `firstParagraph`（200 字）のままで、ADR-025 の改善が適用されていなかった。
+
+### 決定
+
+- `indexFolder` は既存 document を `documentDao.getAllByTree` で取得し、フォルダに存在しない `fileUri` の document を FTS → chunks → documents の順で、バッチ単位のトランザクションで削除する（`DocumentDao.deleteByIds` を追加）。
+- `folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree`（`@Transaction`）で tree 単位に入れ替える。ただし embed が全件失敗した場合（Embedder 未初期化など）は既存の行を残す。`clearFolder` でも削除する。
+- `ensureFtsIndex` は件数が一致しない場合、同じトランザクション内で `DELETE FROM chunks_fts` を実行してから全件を再投入する。
+- `EmbedderService.embedAll` を追加する。系列を最長長に合わせて `<pad>`（id=1）で右詰めし、`attention_mask` 付きの mean pooling で 1 回の推論にまとめる。`embed` は `embedAll` の 1 件版とする。インデックス時は `EMBED_BATCH_SIZE = 8` 件ずつ embed し、バッチが失敗したら 1 件ずつに切り替えて、壊れたチャンクだけを捨てる。
+- `dateRangeSearch` の期間分岐と特定日付分岐は、同じ `dateHitCitation`（先頭 chunk から `DATE_RANGE_SNIPPET_CHARS = 600` 字）を使う。
+- `SearchPipeline` の展開クエリごとの BM25 は、コメントどおり実際に並列実行する。date / meta ジョブは戻り値で受け渡し、外側の `var` への書き込みをなくす。
+
+### 影響
+
+- 既に DB に残っている削除済みファイルは、次回の差分インデックスで自動的に消える。
+- 特定日付クエリの引用スニペットが長くなる（最大 600 字 + 日付プレフィックス）。
+

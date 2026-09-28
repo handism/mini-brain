@@ -42,40 +42,55 @@ class EmbedderService {
         }
     }
 
-    suspend fun embed(text: String, type: EmbedType = EmbedType.PASSAGE): FloatArray = withContext(Dispatchers.Default) {
+    suspend fun embed(text: String, type: EmbedType = EmbedType.PASSAGE): FloatArray =
+        embedAll(listOf(text), type).single()
+
+    /**
+     * 複数テキストを 1 回の ONNX 推論でまとめて埋め込む。
+     * 最長系列に合わせて PAD_ID で右詰めし、attention_mask=0 の位置は mean pooling で無視される。
+     */
+    suspend fun embedAll(texts: List<String>, type: EmbedType = EmbedType.PASSAGE): List<FloatArray> = withContext(Dispatchers.Default) {
+        if (texts.isEmpty()) return@withContext emptyList()
         mutex.withLock {
             val env = requireNotNull(ortEnv) { "EmbedderService not initialized. Call initialize() first." }
             val session = requireNotNull(ortSession) { "EmbedderService not initialized. Call initialize() first." }
             val tok = requireNotNull(tokenizer) { "EmbedderService not initialized. Call initialize() first." }
 
-            val prefixed = when (type) {
-                EmbedType.QUERY -> "query: $text"
-                EmbedType.PASSAGE -> "passage: $text"
+            val prefix = when (type) {
+                EmbedType.QUERY -> "query: "
+                EmbedType.PASSAGE -> "passage: "
             }
+            val encodings = texts.map { tok.encode(prefix + it, MAX_SEQ_LEN) }
+            val batchSize = encodings.size
+            val seqLen = encodings.maxOf { it.ids.size }
 
-            val encoding = tok.encode(prefixed, MAX_SEQ_LEN)
-            val inputIds = encoding.ids
-            val attentionMask = encoding.attentionMask
-            val tokenTypeIds = encoding.tokenTypeIds // Tokenizer から取得
-            val seqLen = inputIds.size
+            val inputIds = LongArray(batchSize * seqLen) { PAD_ID }
+            val attentionMask = LongArray(batchSize * seqLen)
+            val tokenTypeIds = LongArray(batchSize * seqLen)
+            encodings.forEachIndexed { row, enc ->
+                enc.ids.copyInto(inputIds, row * seqLen)
+                enc.attentionMask.copyInto(attentionMask, row * seqLen)
+                enc.tokenTypeIds.copyInto(tokenTypeIds, row * seqLen)
+            }
+            val shape = longArrayOf(batchSize.toLong(), seqLen.toLong())
 
-            val inputIdsBuffer = LongBuffer.allocate(seqLen).apply { put(inputIds); rewind() }
-            val attentionMaskBuffer = LongBuffer.allocate(seqLen).apply { put(attentionMask); rewind() }
-            val tokenTypeIdsBuffer = LongBuffer.allocate(seqLen).apply { put(tokenTypeIds); rewind() } // 追加
-            val shape = longArrayOf(1, seqLen.toLong())
-
-            OnnxTensor.createTensor(env, inputIdsBuffer, shape).use { inputIdsTensor ->
-                OnnxTensor.createTensor(env, attentionMaskBuffer, shape).use { attentionMaskTensor ->
-                    OnnxTensor.createTensor(env, tokenTypeIdsBuffer, shape).use { tokenTypeIdsTensor -> // 追加
+            OnnxTensor.createTensor(env, LongBuffer.wrap(inputIds), shape).use { inputIdsTensor ->
+                OnnxTensor.createTensor(env, LongBuffer.wrap(attentionMask), shape).use { attentionMaskTensor ->
+                    OnnxTensor.createTensor(env, LongBuffer.wrap(tokenTypeIds), shape).use { tokenTypeIdsTensor ->
                         val inputs = mapOf(
                             "input_ids" to inputIdsTensor,
                             "attention_mask" to attentionMaskTensor,
-                            "token_type_ids" to tokenTypeIdsTensor, // モデルに渡す
+                            "token_type_ids" to tokenTypeIdsTensor,
                         )
                         session.run(inputs).use { results ->
                             @Suppress("UNCHECKED_CAST")
                             val hidden = results[0].value as Array<Array<FloatArray>>
-                            meanPoolAndNormalize(hidden[0], attentionMask)
+                            List(batchSize) { row ->
+                                meanPoolAndNormalize(
+                                    hidden[row],
+                                    attentionMask.copyOfRange(row * seqLen, (row + 1) * seqLen),
+                                )
+                            }
                         }
                     }
                 }
@@ -121,6 +136,8 @@ class EmbedderService {
     companion object {
         const val EMBEDDING_DIM = 384
         const val MAX_SEQ_LEN = 512
+        // XLM-RoBERTa の <pad> トークン ID
+        private const val PAD_ID = 1L
         private const val MIN_MODEL_SIZE = 50_000_000L
         private const val MIN_TOKENIZER_SIZE = 1_000_000L
 

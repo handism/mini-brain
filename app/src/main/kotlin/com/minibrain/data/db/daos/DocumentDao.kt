@@ -59,6 +59,9 @@ interface DocumentDao {
     @Query("DELETE FROM documents WHERE treeUri = :treeUri")
     suspend fun deleteAllByTree(treeUri: String)
 
+    @Query("DELETE FROM documents WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
+
     @Query("DELETE FROM documents WHERE fileUri = :fileUri")
     suspend fun deleteByFileUri(fileUri: String)
 
