@@ -66,22 +66,7 @@ class RagPipeline(
             Timber.tag(TAG).d("vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
 
             val allDocIds = (vecResults.map { it.second.docId } + bm25Results.map { it.docId }).distinct()
-            val docIdToDateStr: Map<Long, String?> = if (cache != null) {
-                val byId = cache.documents().associateBy { it.id }
-                allDocIds.associateWith { byId[it]?.documentDate }
-            } else {
-                withContext(Dispatchers.IO) {
-                    documentDao.getDocDatesByIds(allDocIds)
-                }.associate { row ->
-                    row.id to row.documentDate
-                }
-            }
-
-            // Only parse dates for the documents that were actually found in the search results
-            val docIdToDate: Map<Long, LocalDate?> = docIdToDateStr.mapValues { (_, dateStr) ->
-                dateStr?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            }
-
+            val docIdToDate = resolveDocDates(allDocIds, cache)
             val docPathMap = resolveDocPaths(allDocIds, cache)
 
             val chunkCitations = rrf(
@@ -161,6 +146,29 @@ class RagPipeline(
             }
             CosineSimilarity.topK(queryVec, candidates, k)
         }
+
+    private suspend fun resolveDocDates(
+        docIds: List<Long>,
+        cache: SearchRequestCache?,
+    ): Map<Long, LocalDate?> {
+        val distinctIds = docIds.distinct()
+        if (distinctIds.isEmpty()) return emptyMap()
+
+        val docIdToDateStr = if (cache != null) {
+            val byId = cache.documents().associateBy { it.id }
+            distinctIds.associateWith { byId[it]?.documentDate }
+        } else {
+            withContext(Dispatchers.IO) {
+                documentDao.getDocDatesByIds(distinctIds)
+            }.associate { row ->
+                row.id to row.documentDate
+            }
+        }
+
+        return docIdToDateStr.mapValues { (_, dateStr) ->
+            dateStr?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        }
+    }
 
     private suspend fun resolveDocPaths(
         docIds: List<Long>,
