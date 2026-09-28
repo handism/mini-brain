@@ -174,6 +174,20 @@ class DateResolverTest {
         assertNull(range)
     }
 
+    @Test
+    fun `invalid era year throws exception and returns null`() {
+        io.mockk.mockkStatic(java.time.LocalDate::class)
+        try {
+            io.mockk.every { java.time.LocalDate.of(any<Int>(), any<Int>(), any<Int>()) } throws java.time.DateTimeException("Mock exception")
+
+            val range = DateResolver.resolveDateRange("令和6年", today)
+            org.junit.Assert.assertNull(range)
+        } finally {
+            io.mockk.unmockkStatic(java.time.LocalDate::class)
+        }
+    }
+
+
     // ─────────────── ドット/スラッシュ日付 ───────────────
 
     @Test
