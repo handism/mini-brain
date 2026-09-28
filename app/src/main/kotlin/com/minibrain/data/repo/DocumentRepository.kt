@@ -338,7 +338,7 @@ class DocumentRepository(
     }
 
     suspend fun clearFolder(treeUri: String) = withContext(Dispatchers.IO) {
-        deleteFtsByTree(treeUri)
+        chunkDao.deleteFtsByTree(treeUri)
         chunkDao.deleteAllByTree(treeUri)
         documentDao.deleteAllByTree(treeUri)
         _indexingState.value = IndexingState.Idle
@@ -410,14 +410,4 @@ class DocumentRepository(
         }
     }
 
-    private fun deleteFtsByTree(treeUri: String) {
-        db.openHelper.writableDatabase.execSQL(
-            """DELETE FROM chunks_fts WHERE rowid IN (
-                SELECT chunks.id FROM chunks
-                INNER JOIN documents ON chunks.docId = documents.id
-                WHERE documents.treeUri = ?
-            )""",
-            arrayOf(treeUri)
-        )
-    }
 }

@@ -67,6 +67,7 @@ class SearchRequestCacheTest {
             return dummyChunks
         }
 
+        override suspend fun deleteFtsByTree(treeUri: String) {}
         override suspend fun insertAll(chunks: List<ChunkEntity>): List<Long> = emptyList()
         override suspend fun getByDoc(docId: Long): List<ChunkEntity> = emptyList()
         override suspend fun countByDoc(docId: Long): Int = 0
