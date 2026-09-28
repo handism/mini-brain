@@ -71,6 +71,15 @@ interface ChunkDao {
     suspend fun deleteAllByTree(treeUri: String)
 
     @Query("""
+        DELETE FROM chunks_fts WHERE rowid IN (
+            SELECT chunks.id FROM chunks
+            INNER JOIN documents ON chunks.docId = documents.id
+            WHERE documents.treeUri = :treeUri
+        )
+    """)
+    suspend fun deleteFtsByTree(treeUri: String)
+
+    @Query("""
         SELECT chunks.* FROM chunks
         JOIN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH :matchQuery) AS fts ON chunks.id = fts.rowid
         LIMIT :limit
