@@ -39,6 +39,37 @@ internal sealed class MdBlock {
     data object HRule : MdBlock()
 }
 
+private fun isSpecialBlock(line: String): Boolean {
+    val nt = line.trimStart()
+    if (nt.isEmpty()) return true
+    if (nt.startsWith("#")) return true
+    if (nt.startsWith("```")) return true
+
+    val c0 = nt[0]
+    if ((c0 == '-' || c0 == '*' || c0 == '+') && nt.length > 1 && nt[1] == ' ') return true
+
+    if (c0.isDigit()) {
+        var idx = 1
+        while (idx < nt.length && nt[idx].isDigit()) {
+            idx++
+        }
+        if (idx < nt.length - 1 && nt[idx] == '.' && nt[idx+1] == ' ') return true
+    }
+
+    if (nt.length >= 3 && (c0 == '-' || c0 == '*' || c0 == '_')) {
+        var isHrule = true
+        for (i in 1 until nt.length) {
+            val c = nt[i]
+            if (c != '-' && c != '*' && c != '_') {
+                isHrule = false
+                break
+            }
+        }
+        if (isHrule) return true
+    }
+    return false
+}
+
 internal fun parse(text: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     val lines = text.lines()
@@ -48,42 +79,77 @@ internal fun parse(text: String): List<MdBlock> {
         val line = lines[i]
         val trimmed = line.trimStart()
 
-        when {
-            trimmed.startsWith("```") -> {
-                val lang = trimmed.removePrefix("```").trim()
-                val codeLines = mutableListOf<String>()
+        if (trimmed.isEmpty()) {
+            i++
+            continue
+        }
+
+        if (trimmed.startsWith("```")) {
+            val lang = trimmed.removePrefix("```").trim()
+            val codeLines = mutableListOf<String>()
+            i++
+            while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
+                codeLines.add(lines[i])
                 i++
-                while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
-                    codeLines.add(lines[i])
-                    i++
-                }
-                blocks.add(MdBlock.CodeBlock(lang, codeLines.joinToString("\n")))
             }
-            line.startsWith("### ") -> blocks.add(MdBlock.Heading(3, line.removePrefix("### ")))
-            line.startsWith("## ") -> blocks.add(MdBlock.Heading(2, line.removePrefix("## ")))
-            line.startsWith("# ") -> blocks.add(MdBlock.Heading(1, line.removePrefix("# ")))
-            trimmed.matches(hRuleRegex) -> blocks.add(MdBlock.HRule)
-            trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") ->
-                blocks.add(MdBlock.BulletItem(trimmed.substring(2)))
-            trimmed.matches(numberedMatchRegex) -> {
-                val m = numberedItemRegex.find(trimmed)
-                if (m != null) blocks.add(MdBlock.NumberedItem(m.groupValues[1].toInt(), m.groupValues[2]))
-            }
-            line.isBlank() -> { /* ブロック間の空行はスキップ */ }
-            else -> {
-                val para = mutableListOf(line)
-                while (i + 1 < lines.size) {
-                    val next = lines[i + 1]
-                    val nt = next.trimStart()
-                    if (next.isBlank() || nt.startsWith("#") || nt.startsWith("```") ||
-                        nt.startsWith("- ") || nt.startsWith("* ") || nt.startsWith("+ ") ||
-                        nt.matches(numberedMatchRegex) || nt.matches(hRuleRegex)) break
-                    i++
-                    para.add(lines[i])
+            blocks.add(MdBlock.CodeBlock(lang, codeLines.joinToString("\n")))
+            i++
+            continue
+        }
+
+        if (line.startsWith("### ")) { blocks.add(MdBlock.Heading(3, line.removePrefix("### "))); i++; continue }
+        if (line.startsWith("## ")) { blocks.add(MdBlock.Heading(2, line.removePrefix("## "))); i++; continue }
+        if (line.startsWith("# ")) { blocks.add(MdBlock.Heading(1, line.removePrefix("# "))); i++; continue }
+
+        val c0 = trimmed[0]
+
+        var isBullet = false
+        if ((c0 == '-' || c0 == '*' || c0 == '+') && trimmed.length > 1 && trimmed[1] == ' ') {
+            blocks.add(MdBlock.BulletItem(trimmed.substring(2)))
+            isBullet = true
+            i++
+            continue
+        }
+
+        var isHrule = false
+        if (trimmed.length >= 3 && (c0 == '-' || c0 == '*' || c0 == '_')) {
+            isHrule = true
+            for (j in 1 until trimmed.length) {
+                val c = trimmed[j]
+                if (c != '-' && c != '*' && c != '_') {
+                    isHrule = false
+                    break
                 }
-                blocks.add(MdBlock.Paragraph(para.joinToString("\n")))
+            }
+            if (isHrule) {
+                blocks.add(MdBlock.HRule)
+                i++
+                continue
             }
         }
+
+        var isNumbered = false
+        if (c0.isDigit()) {
+            var idx = 1
+            while (idx < trimmed.length && trimmed[idx].isDigit()) {
+                idx++
+            }
+            if (idx < trimmed.length - 1 && trimmed[idx] == '.' && trimmed[idx+1] == ' ') {
+                blocks.add(MdBlock.NumberedItem(trimmed.substring(0, idx).toInt(), trimmed.substring(idx + 2)))
+                isNumbered = true
+                i++
+                continue
+            }
+        }
+
+        val para = mutableListOf(line)
+        while (i + 1 < lines.size) {
+            val next = lines[i + 1]
+            if (isSpecialBlock(next)) break
+            i++
+            para.add(lines[i])
+        }
+        blocks.add(MdBlock.Paragraph(para.joinToString("\n")))
         i++
     }
     return blocks
