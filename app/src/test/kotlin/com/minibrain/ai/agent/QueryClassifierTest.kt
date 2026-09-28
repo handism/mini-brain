@@ -34,6 +34,18 @@ class QueryClassifierTest {
         assertEquals(QueryType.TEMPORAL_SUMMARIZATION, classify("去年何してた？"))
     }
 
+    @Test
+    fun `期間表現はGENERALパターンより優先される`() {
+        // 「とは？」は GENERAL パターンだが「去年」の期間解決が勝つ
+        assertEquals(QueryType.TEMPORAL_SUMMARIZATION, classify("去年とは？"))
+    }
+
+    @Test
+    fun `すべての条件を満たす場合はTEMPORALが最優先される`() {
+        // 期間(去年) + MEMORY(日記) + GENERAL(仕組み)
+        assertEquals(QueryType.TEMPORAL_SUMMARIZATION, classify("去年の日記の仕組み"))
+    }
+
     // --- MEMORY_SEARCH ---
 
     @Test
@@ -69,6 +81,26 @@ class QueryClassifierTest {
     @Test
     fun `の仕組みはGENERAL`() {
         assertEquals(QueryType.GENERAL_KNOWLEDGE, classify("TCPの仕組み"))
+    }
+
+    @Test
+    fun `なぜ疑問はGENERAL`() {
+        assertEquals(QueryType.GENERAL_KNOWLEDGE, classify("空はなぜ青い？"))
+    }
+
+    @Test
+    fun `どういう意味はGENERAL`() {
+        assertEquals(QueryType.GENERAL_KNOWLEDGE, classify("忖度ってどういう意味？"))
+    }
+
+    @Test
+    fun `の意味はGENERAL`() {
+        assertEquals(QueryType.GENERAL_KNOWLEDGE, classify("パラダイムシフトの意味は？"))
+    }
+
+    @Test
+    fun `説明してはGENERAL`() {
+        assertEquals(QueryType.GENERAL_KNOWLEDGE, classify("相対性理論を説明して"))
     }
 
     @Test
