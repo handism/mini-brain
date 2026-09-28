@@ -24,6 +24,7 @@ import com.minibrain.util.DatePrefix
 import com.minibrain.util.FileNames
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import timber.log.Timber
 
@@ -165,20 +166,15 @@ class SearchPipeline(
     ): RetrievalResult {
         // 2. Parallel Retrieval
         onStatus?.invoke("並行検索中...")
-        // dateRangeSearch は Reranker 後段の pin 注入でも再利用するため、別に保持する
-        var dateRangeHits: List<Citation> = emptyList()
-        val (bm25Candidates, metaCandidates, vectorCandidates) = coroutineScope {
-            // 展開クエリごとに BM25 を並行実行
+        return coroutineScope {
+            // 展開クエリごとに BM25 を並行実行（SQLite の読み取りは並列可）。awaitAll は順序を保つ
             val bm25Job = async(Dispatchers.IO) {
-                expanded.flatMap { q -> bm25Search(q, treeUri) }
+                expanded.map { q -> async { bm25Search(q, treeUri) } }.awaitAll().flatten()
             }
-            // 日付範囲検索（DateResolver 経由）+ メタデータ検索を合算
-            // 日付ヒットを rank 先頭に置き、RRF 融合で優先されるようにする
-            val metaJob = async(Dispatchers.IO) {
-                val dateHits = dateRangeSearch(query, treeUri, dateRange, ctx)
-                dateRangeHits = dateHits
-                dateHits + metadataSearch(expanded, ctx)
-            }
+            // 日付範囲検索（DateResolver 経由）とメタデータ検索。
+            // dateRangeHits は Reranker 後段の pin 注入でも再利用するため別々に返す
+            val dateJob = async(Dispatchers.IO) { dateRangeSearch(query, treeUri, dateRange, ctx) }
+            val metaJob = async(Dispatchers.IO) { metadataSearch(expanded, ctx) }
             // ベクトル検索: 展開クエリ全件 + （任意）HyDE 仮想回答を投入し、Recall を底上げする。
             // EmbedderService は Mutex で直列化されるため、ここを async にしても並列実行はされないが、
             // 他ジョブ（BM25 / metadata）とは並列に走る。低スコアの候補は閾値カットで除外する。
@@ -187,15 +183,19 @@ class SearchPipeline(
                     MultiVectorSearchRequest(query, expanded, hypothetical, treeUri, ctx)
                 )
             }
-            Triple(bm25Job.await(), metaJob.await(), vectorJob.await())
+            val bm25Candidates = bm25Job.await()
+            val dateRangeHits = dateJob.await()
+            // 日付ヒットを rank 先頭に置き、RRF 融合で優先されるようにする
+            val metaCandidates = dateRangeHits + metaJob.await()
+            val vectorCandidates = vectorJob.await()
+
+            traceEvents += BM25SearchHitEvent(query, bm25Candidates.size)
+            traceEvents += MetadataSearchHitEvent(metaCandidates.size)
+            traceEvents += VectorSearchHitEvent(query, vectorCandidates.size)
+            Timber.tag(TAG).d("bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
+
+            RetrievalResult(bm25Candidates, metaCandidates, vectorCandidates, dateRangeHits)
         }
-
-        traceEvents += BM25SearchHitEvent(query, bm25Candidates.size)
-        traceEvents += MetadataSearchHitEvent(metaCandidates.size)
-        traceEvents += VectorSearchHitEvent(query, vectorCandidates.size)
-        Timber.tag(TAG).d("bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
-
-        return RetrievalResult(bm25Candidates, metaCandidates, vectorCandidates, dateRangeHits)
     }
 
     private fun performCandidateMerge(
@@ -364,20 +364,7 @@ class SearchPipeline(
             Timber.tag(TAG).d("dateRangeSearch range=${dateRange.start}〜${dateRange.end} hits=${docs.size}")
             if (docs.isEmpty()) return emptyList()
 
-            // 各 doc の先頭 chunk テキストを使って「活動内容」を pin に乗せる。
-            // firstParagraph (200 文字) では LLM が「内容が記載されていません」と返す問題への対処（ADR-025）
-            return docs.map { doc ->
-                val firstChunk = ctx.firstChunkOf(doc.id)
-                val body = firstChunk?.text?.take(DATE_RANGE_SNIPPET_CHARS)
-                    ?: doc.firstParagraph
-                Citation(
-                    headingPath = firstChunk?.headingPath ?: doc.relativePath,
-                    snippet = DatePrefix.build(doc.documentDate, body),
-                    docId = doc.id,
-                    relativePath = doc.relativePath,
-                    source = SourceType.METADATA,
-                )
-            }
+            return docs.map { doc -> dateHitCitation(doc, ctx) }
         }
 
         // 特定日付クエリ（2021年3月15日 など range にならないケース）→ 8桁数字で前方一致
@@ -394,20 +381,26 @@ class SearchPipeline(
                     }
                 }
                 Timber.tag(TAG).d("dateRangeSearch specific dates=${dateStrings} hits=${matched.size}")
-                return matched.map { doc ->
-                    Citation(
-                        headingPath = doc.relativePath,
-                        // CoverageChecker の [日付:] 短絡が効くよう日付プレフィックスを付与
-                        snippet = DatePrefix.build(doc.documentDate, doc.firstParagraph),
-                        docId = doc.id,
-                        relativePath = doc.relativePath,
-                        source = SourceType.METADATA,
-                    )
-                }
+                return matched.map { doc -> dateHitCitation(doc, ctx) }
             }
         }
 
         return emptyList()
+    }
+
+    // 日付ヒットの Citation。各 doc の先頭 chunk テキストを使って「活動内容」を乗せる。
+    // firstParagraph (200 文字) では LLM が「内容が記載されていません」と返す問題への対処（ADR-025）。
+    // CoverageChecker の [日付:] 短絡が効くよう日付プレフィックスを付与する。
+    private suspend fun dateHitCitation(doc: DocumentEntity, ctx: SearchRequestCache): Citation {
+        val firstChunk = ctx.firstChunkOf(doc.id)
+        val body = firstChunk?.text?.take(DATE_RANGE_SNIPPET_CHARS) ?: doc.firstParagraph
+        return Citation(
+            headingPath = firstChunk?.headingPath ?: doc.relativePath,
+            snippet = DatePrefix.build(doc.documentDate, body),
+            docId = doc.id,
+            relativePath = doc.relativePath,
+            source = SourceType.METADATA,
+        )
     }
 
     // documentDate は ISO 文字列(YYYY-MM-DD)で保存されており辞書順 = 時系列順なので

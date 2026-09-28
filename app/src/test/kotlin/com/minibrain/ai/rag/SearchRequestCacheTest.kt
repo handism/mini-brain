@@ -46,6 +46,7 @@ class SearchRequestCacheTest {
         override suspend fun deleteAllByTree(treeUri: String) {}
 
         override suspend fun deleteByFileUri(fileUri: String) {}
+        override suspend fun deleteByIds(ids: List<Long>) {}
         override suspend fun getById(id: Long): DocumentEntity? = null
         override suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity> = emptyList()
         override suspend fun _searchByPath(treeUri: String, keyword: String): List<DocumentEntity> = emptyList()

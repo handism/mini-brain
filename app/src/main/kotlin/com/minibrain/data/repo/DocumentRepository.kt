@@ -12,6 +12,7 @@ import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.db.entities.FolderEmbeddingEntity
+import com.minibrain.data.md.Chunk
 import com.minibrain.data.md.MarkdownChunker
 import com.minibrain.data.md.MarkdownMetaExtractor
 import com.minibrain.data.md.MdFile
@@ -47,6 +48,12 @@ class DocumentRepository(
 ) {
     companion object {
         private const val TAG = "DocumentRepository"
+        private const val FTS_INSERT_SQL =
+            "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
+        // SQLite のバインド変数上限（999）を超えないためのバッチサイズ
+        private const val SQL_BATCH_SIZE = 900
+        // ONNX へ一度に渡すチャンク数。512 token × 8 件程度ならメモリ負荷は小さい
+        private const val EMBED_BATCH_SIZE = 8
 
         private val FULL_DATE_PATTERNS = listOf(
             Regex("""(\d{4})-(\d{1,2})-(\d{1,2})"""),
@@ -99,15 +106,15 @@ class DocumentRepository(
         val total = mdFiles.size
         var totalChunks = 0
 
-        // 既存のドキュメントのチャンク数をキャッシュしてN+1問題を回避する
-        val existingDocs = mdFiles.map { it.uri.toString() }.chunked(900).flatMap { chunk ->
-            documentDao.getByFileUris(chunk)
-        }.associateBy { it.fileUri }
+        // 既存のドキュメントとチャンク数をまとめて取得して N+1 問題を回避する
+        val existingDocs = documentDao.getAllByTree(treeUri.toString()).associateBy { it.fileUri }
+        val currentFileUris = mdFiles.mapTo(HashSet()) { it.uri.toString() }
+        // フォルダから消えたファイルは document ごと削除する（残すと検索に古い内容が出続ける）
+        val removedDocIds = existingDocs.values.filter { it.fileUri !in currentFileUris }.map { it.id }
         val chunkCountsMap = chunkDao.getChunkCountsGroupedByDoc().associateBy({ it.docId }, { it.chunkCount })
 
         val writableDb = db.openHelper.writableDatabase
-        val ftsSql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
-        val ftsStmt = writableDb.compileStatement(ftsSql)
+        val ftsStmt = writableDb.compileStatement(FTS_INSERT_SQL)
 
         try {
             val docsToUpdate = mutableListOf<DocumentEntity>()
@@ -146,6 +153,7 @@ class DocumentRepository(
 
             // Delete old FTS and Chunks
             deleteOldDocs(docsToDelete, writableDb)
+            deleteRemovedDocs(removedDocIds, writableDb)
 
             // Insert new docs
             totalChunks += insertNewDocsAndChunks(pendingDocs, writableDb, ftsStmt)
@@ -198,7 +206,7 @@ class DocumentRepository(
 
     private suspend fun deleteOldDocs(docsToDelete: List<Long>, writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
         if (docsToDelete.isNotEmpty()) {
-            docsToDelete.chunked(900).forEach { batch ->
+            docsToDelete.chunked(SQL_BATCH_SIZE).forEach { batch ->
                 writableDb.beginTransaction()
                 try {
                     chunkDao.deleteFtsByDocIds(batch)
@@ -207,6 +215,22 @@ class DocumentRepository(
                 } finally {
                     writableDb.endTransaction()
                 }
+            }
+        }
+    }
+
+    private suspend fun deleteRemovedDocs(removedDocIds: List<Long>, writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
+        if (removedDocIds.isEmpty()) return
+        Timber.tag(TAG).d("removing ${removedDocIds.size} docs no longer in folder")
+        removedDocIds.chunked(SQL_BATCH_SIZE).forEach { batch ->
+            writableDb.beginTransaction()
+            try {
+                chunkDao.deleteFtsByDocIds(batch)
+                chunkDao.deleteByDocIds(batch)
+                documentDao.deleteByIds(batch)
+                writableDb.setTransactionSuccessful()
+            } finally {
+                writableDb.endTransaction()
             }
         }
     }
@@ -235,24 +259,21 @@ class DocumentRepository(
                     Timber.tag(TAG).e(e, "chunking failed: ${pending.mdFile.relativePath}")
                     emptyList()
                 }
-                val chunkEntities = rawChunks.mapNotNull { chunk ->
-                    runCatching {
-                        val embedding = embedder.embed(chunk.text, EmbedType.PASSAGE)
+                val chunkEntities = rawChunks.chunked(EMBED_BATCH_SIZE).flatMap { batch ->
+                    embedBatch(batch, pending.mdFile.relativePath).map { (chunk, embedding) ->
                         ChunkEntity(
                             docId = docId,
                             headingPath = chunk.headingPath,
                             text = chunk.text,
                             embedding = EmbedderService.floatArrayToBytes(embedding),
                         )
-                    }.onFailure { e ->
-                        Timber.tag(TAG).e(e, "embed failed: ${pending.mdFile.relativePath} / ${chunk.headingPath}")
-                    }.getOrNull()
+                    }
                 }
 
                 chunkBuffer.addAll(chunkEntities)
 
                 // Flush buffer to DB in a single SQLite transaction to avoid high memory pressure (OOM) and auto-commits
-                if (chunkBuffer.size >= 900) {
+                if (chunkBuffer.size >= SQL_BATCH_SIZE) {
                     newTotalChunks += flushChunkBuffer(writableDb, ftsStmt, chunkBuffer, clearBuffer = true)
                 }
             }
@@ -262,7 +283,20 @@ class DocumentRepository(
         return newTotalChunks
     }
 
-    private suspend inline fun flushChunkBuffer(
+    // まとめて embed し、失敗したら 1 件ずつに切り替えて壊れたチャンクだけを捨てる
+    private suspend fun embedBatch(batch: List<Chunk>, relativePath: String): List<Pair<Chunk, FloatArray>> {
+        runCatching { embedder.embedAll(batch.map { it.text }, EmbedType.PASSAGE) }
+            .onSuccess { return batch.zip(it) }
+            .onFailure { e -> Timber.tag(TAG).w(e, "batch embed failed, falling back to single: $relativePath") }
+
+        return batch.mapNotNull { chunk ->
+            runCatching { chunk to embedder.embed(chunk.text, EmbedType.PASSAGE) }
+                .onFailure { e -> Timber.tag(TAG).e(e, "embed failed: $relativePath / ${chunk.headingPath}") }
+                .getOrNull()
+        }
+    }
+
+    private suspend fun flushChunkBuffer(
         writableDb: androidx.sqlite.db.SupportSQLiteDatabase,
         ftsStmt: androidx.sqlite.db.SupportSQLiteStatement,
         chunkBuffer: MutableList<ChunkEntity>,
@@ -299,7 +333,7 @@ class DocumentRepository(
             .groupBy { it.relativePath.substringBeforeLast('/') }
 
         val allFileUrisToFetch = byFolder.values.flatten().map { it.uri.toString() }
-        val allDocsMap = allFileUrisToFetch.chunked(900).flatMap { chunk ->
+        val allDocsMap = allFileUrisToFetch.chunked(SQL_BATCH_SIZE).flatMap { chunk ->
             documentDao.getByFileUris(chunk)
         }.associateBy { it.fileUri }
 
@@ -332,15 +366,20 @@ class DocumentRepository(
             }
         }
 
-        if (folderEmbeddings.isNotEmpty()) {
-            folderEmbeddingDao.upsertAll(folderEmbeddings)
+        // 消えた・改名されたフォルダの埋め込みを残さないよう、tree 単位で入れ替える
+        // ただし embed が全滅した場合（Embedder 未初期化など）は既存の行を消さずに残す
+        if (folderEmbeddings.isEmpty() && byFolder.isNotEmpty()) {
+            Timber.tag(TAG).w("folder embeddings all failed — keep existing rows")
+            return
         }
+        folderEmbeddingDao.replaceAllByTree(treeUri.toString(), folderEmbeddings)
     }
 
     suspend fun clearFolder(treeUri: String) = withContext(Dispatchers.IO) {
         chunkDao.deleteFtsByTree(treeUri)
         chunkDao.deleteAllByTree(treeUri)
         documentDao.deleteAllByTree(treeUri)
+        folderEmbeddingDao.deleteAllByTree(treeUri)
         _indexingState.value = IndexingState.Idle
     }
 
@@ -354,6 +393,8 @@ class DocumentRepository(
 
         writableDb.beginTransaction()
         try {
+            // 孤立した FTS 行（件数が chunk より多いケース）も解消するため、いったん全消去して入れ直す
+            writableDb.execSQL("DELETE FROM chunks_fts")
             processChunkBatch(writableDb)
             writableDb.setTransactionSuccessful()
         } finally {
@@ -366,8 +407,7 @@ class DocumentRepository(
         // Also process in batches to prevent OutOfMemory issues for large datasets
         val limit = 1000
         var lastId = 0L
-        val sql = "INSERT OR REPLACE INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)"
-        val stmt = writableDb.compileStatement(sql)
+        val stmt = writableDb.compileStatement(FTS_INSERT_SQL)
         try {
             while (true) {
                 val chunksBatch = chunkDao.getBatchSync(lastId, limit)
