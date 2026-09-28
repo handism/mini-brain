@@ -79,46 +79,61 @@ object DateResolver {
 
     // today パラメータを公開することでユニットテストで固定日付を注入できる
     fun resolveToDateStrings(question: String, today: LocalDate = LocalDate.now()): List<String> {
-        val isPastYear = question.contains("去年") || question.contains("昨年")
+        return resolveDaysAgo(question, today)
+            ?: resolveDotSlashDate(question)
+            ?: resolveLastWeekDow(question, today)
+            ?: resolveThisWeekDow(question, today)
+            ?: resolveRelativeKeywords(question, today)
+            ?: resolveByNumericPattern(question, today)
+    }
 
-        DAYS_AGO_RE.find(question)?.let { match ->
+    private fun resolveDaysAgo(question: String, today: LocalDate): List<String>? {
+        return DAYS_AGO_RE.find(question)?.let { match ->
             val days = match.groupValues[1].toLongOrNull() ?: 0L
-            return listOf(today.minusDays(days).format(FORMATTER))
+            listOf(today.minusDays(days).format(FORMATTER))
         }
+    }
 
-        // ドット/スラッシュ区切り日付: 2024.03.01 / 2024/03/01
-        DOT_SLASH_DATE_RE.find(question)?.let { match ->
+    private fun resolveDotSlashDate(question: String): List<String>? {
+        return DOT_SLASH_DATE_RE.find(question)?.let { match ->
             val year = match.groupValues[1].toInt()
             val month = match.groupValues[2].toInt()
             val day = match.groupValues[3].toInt()
-            return runCatching {
+            runCatching {
                 listOf(LocalDate.of(year, month, day).format(FORMATTER))
             }.onFailure { Timber.tag(TAG).w(it, "Invalid dot/slash date: $year/$month/$day") }
              .getOrElse { emptyList() }
         }
+    }
 
-        // 先週の曜日: 先週の月曜基点で対象曜日を返す
-        LAST_WEEK_DOW_RE.find(question)?.let { match ->
-            val dow = WEEKDAY_MAP[match.groupValues[1]] ?: return@let
+    private fun resolveLastWeekDow(question: String, today: LocalDate): List<String>? {
+        return LAST_WEEK_DOW_RE.find(question)?.let { match ->
+            val dow = WEEKDAY_MAP[match.groupValues[1]] ?: return@let null
             val lastWeekMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1)
             val target = lastWeekMonday.with(TemporalAdjusters.nextOrSame(dow))
-            return runCatching { listOf(target.format(FORMATTER)) }
+            runCatching { listOf(target.format(FORMATTER)) }
                 .onFailure { Timber.tag(TAG).w(it, "Failed to resolve last week day: $dow") }
                 .getOrElse { emptyList() }
         }
+    }
 
-        // 今週の曜日: 今週月曜基点で対象曜日（未来は返さない）
-        THIS_WEEK_DOW_RE.find(question)?.let { match ->
-            val dow = WEEKDAY_MAP[match.groupValues[1]] ?: return@let
+    private fun resolveThisWeekDow(question: String, today: LocalDate): List<String>? {
+        return THIS_WEEK_DOW_RE.find(question)?.let { match ->
+            val dow = WEEKDAY_MAP[match.groupValues[1]] ?: return@let null
             val thisWeekMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             val target = thisWeekMonday.with(TemporalAdjusters.nextOrSame(dow))
             if (!target.isAfter(today)) {
-                return runCatching { listOf(target.format(FORMATTER)) }
+                runCatching { listOf(target.format(FORMATTER)) }
                     .onFailure { Timber.tag(TAG).w(it, "Failed to resolve this week day: $dow") }
                     .getOrElse { emptyList() }
+            } else {
+                null
             }
         }
+    }
 
+    private fun resolveRelativeKeywords(question: String, today: LocalDate): List<String>? {
+        val isPastYear = question.contains("去年") || question.contains("昨年")
         return when {
             question.contains("一昨日") || question.contains("おととい") ->
                 listOf(today.minusDays(2).format(FORMATTER))
@@ -154,7 +169,7 @@ object DateResolver {
             }
             question.contains("最近") ->
                 List(15) { today.minusDays(it.toLong()).format(FORMATTER) }
-            else -> resolveByNumericPattern(question, today)
+            else -> null
         }
     }
 
