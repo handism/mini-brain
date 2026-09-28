@@ -126,6 +126,21 @@ class CoverageCheckerTest {
         assertTrue(CoverageChecker.parse("").canAnswer)
     }
 
+
+    @Test
+    fun `LLMの前置きの後にyesで始まる行がある場合に正しく解析する`() {
+        val result = CoverageChecker.parse("回答は以下の通りです\nyes")
+        assertTrue(result.canAnswer)
+        assertTrue(result.missingInformation.isEmpty())
+    }
+
+    @Test
+    fun `LLMの前置きの後にnoで始まる行がある場合に正しく解析する`() {
+        val result = CoverageChecker.parse("回答は以下の通りです\nno, visit_date")
+        assertFalse(result.canAnswer)
+        assertEquals(listOf("visit_date"), result.missingInformation)
+    }
+
     // --- check ---
 
     @Test
