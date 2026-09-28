@@ -123,4 +123,71 @@ class CosineSimilarityTest {
         assertEquals(2.0f, result[1].first, 0.0001f)
         assertEquals("doc1", result[1].second)
     }
+
+    @Test
+    fun topK_kEqualToCandidates_returnsAllCandidatesSorted() {
+        val query = floatArrayOf(1.0f, 1.0f)
+        val candidates = listOf(
+            Pair(floatArrayOf(1.0f, 1.0f), "doc1"),
+            Pair(floatArrayOf(2.0f, 2.0f), "doc2")
+        )
+
+        val result = CosineSimilarity.topK(query, candidates, 2)
+
+        assertEquals(2, result.size)
+        assertEquals(4.0f, result[0].first, 0.0001f)
+        assertEquals("doc2", result[0].second)
+        assertEquals(2.0f, result[1].first, 0.0001f)
+        assertEquals("doc1", result[1].second)
+    }
+
+    @Test
+    fun topK_differentSizeVectors_throwsIllegalArgumentException() {
+        val query = floatArrayOf(1.0f, 1.0f)
+        val candidates = listOf(
+            Pair(floatArrayOf(1.0f, 1.0f, 1.0f), "doc1")
+        )
+
+        val exception = assertThrows(IllegalArgumentException::class.java) {
+            CosineSimilarity.topK(query, candidates, 1)
+        }
+        assertEquals("Vectors must be the same size", exception.message)
+    }
+
+    @Test
+    fun topK_withNegativeScores_returnsTopKInDescendingOrder() {
+        val query = floatArrayOf(1.0f, 1.0f)
+        val candidates = listOf(
+            Pair(floatArrayOf(-1.0f, -1.0f), "doc1"), // -2.0
+            Pair(floatArrayOf(-2.0f, -2.0f), "doc2"), // -4.0
+            Pair(floatArrayOf(0.0f, 0.0f), "doc3"),   // 0.0
+            Pair(floatArrayOf(1.0f, 1.0f), "doc4")    // 2.0
+        )
+
+        val result = CosineSimilarity.topK(query, candidates, 3)
+
+        assertEquals(3, result.size)
+        assertEquals(2.0f, result[0].first, 0.0001f)
+        assertEquals("doc4", result[0].second)
+        assertEquals(0.0f, result[1].first, 0.0001f)
+        assertEquals("doc3", result[1].second)
+        assertEquals(-2.0f, result[2].first, 0.0001f)
+        assertEquals("doc1", result[2].second)
+    }
+
+    @Test
+    fun topK_identicalScores_returnsCorrectSize() {
+        val query = floatArrayOf(1.0f)
+        val candidates = listOf(
+            Pair(floatArrayOf(1.0f), "doc1"),
+            Pair(floatArrayOf(1.0f), "doc2"),
+            Pair(floatArrayOf(1.0f), "doc3")
+        )
+
+        val result = CosineSimilarity.topK(query, candidates, 2)
+
+        assertEquals(2, result.size)
+        assertEquals(1.0f, result[0].first, 0.0001f)
+        assertEquals(1.0f, result[1].first, 0.0001f)
+    }
 }
