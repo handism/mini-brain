@@ -5,7 +5,7 @@
 
 > **エージェント設定ファイルの配置方針**: 実体はすべて `.agents/` 配下（またはリポジトリルート）に置き、`.claude/` 側は symlink とします。実体が 1 つなのでツールごとの内容ズレが起きません。
 >
-> - `CLAUDE.md` → `AGENTS.md`（このファイル）への symlink
+> - `CLAUDE.md` → `agents.md`（このファイル）への symlink（大文字小文字を区別する FS でも壊れないよう、ファイル名と完全一致させる）
 > - `.claude/skills/<name>` → `../../.agents/skills/<name>` への symlink
 >
 > スキルを追加する場合は `.agents/skills/<name>/SKILL.md` に実体を作り、`.claude/skills/` から symlink を張ってください。
@@ -136,12 +136,15 @@
 **キャッシュ・パフォーマンス**
 - `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
+- `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。
+- チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
+- `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
 
 **チューニング定数**
 - `mergeCandidatesRrf(weights=...)` の重みは `[meta=1.5, vector=1.0, bm25=1.2]`。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新すること。
 - `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新すること。
 - `SearchPipeline.search` は `dateRange != null` かつ `dateRangeSearch` ヒットありのとき、上位 `DATE_RANGE_PIN_COUNT = 5` 件を Reranker 結果の先頭に強制マージします（ADR-025）。`docId::headingPath` で dedupe し、後段は Reranker 順を維持、最終的に `RERANK_TOP_K = 10` で切ります。`RRF_WEIGHTS` は変更しません（他クエリの順位を壊さないため）。
-- `dateRangeSearch` のスニペットは `firstParagraph`（200 字）ではなく **doc の先頭 chunk テキストから `DATE_RANGE_SNIPPET_CHARS = 600` 字** を採ります（ADR-025）。chunk が空の場合のみ `firstParagraph` フォールバック。スニペットが薄すぎて LLM が「具体的な内容が記載されていません」と返す問題への対処です。
+- `dateRangeSearch` のスニペットは `firstParagraph`（200 字）ではなく **doc の先頭 chunk テキストから `DATE_RANGE_SNIPPET_CHARS = 600` 字** を採ります（ADR-025）。期間分岐・特定日付分岐のどちらも `dateHitCitation` を通します（ADR-029）。chunk が空の場合のみ `firstParagraph` フォールバック。スニペットが薄すぎて LLM が「具体的な内容が記載されていません」と返す問題への対処です。
 - `SearchPipeline.metadataSearch` は `topicMatch` ヒットだけ `TOPIC_MATCH_SNIPPET_CHARS = 500` で先頭 chunk テキストを採ります（ADR-026）。「初回訪問日:」ラベル行や本文 `YYYY/MM/DD` を 200 字の firstParagraph から漏らさないためです。先頭 chunk の取得は `SearchRequestCache.firstChunkOf(docId)` 経由で、chunks のロードは topicMatch がある場合のみ lazy で 1 回（`dateRangeSearch` / `ToolExecutor.timeline_search` も同じ API を使う）。
 
 **日付抽出の詳細**
