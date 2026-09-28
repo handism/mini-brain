@@ -111,52 +111,13 @@ fun AssistantMessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
             modifier = Modifier.widthIn(max = 300.dp),
             horizontalAlignment = Alignment.Start,
         ) {
-            Card(
-                shape = RoundedCornerShape(
-                    topStart = 16.dp,
-                    topEnd = 16.dp,
-                    bottomStart = 4.dp,
-                    bottomEnd = 16.dp,
-                ),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    if (msg.isStreaming && msg.content.isEmpty()) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        MarkdownText(
-                            text = msg.content,
-                            textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
+            AssistantMessageCard(msg = msg)
 
-            // コピーボタン + 引用元（ストリーミング中は非表示）
-            if (!msg.isStreaming && msg.content.isNotEmpty()) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(0.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MessageCopyButton(content = msg.content)
-
-                    if (msg.citations.isNotEmpty()) {
-                        TextButton(onClick = { citationsExpanded = !citationsExpanded }) {
-                            Icon(
-                                if (citationsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Text(
-                                "引用元 (${msg.citations.size})",
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
-                }
-            }
+            AssistantMessageActions(
+                msg = msg,
+                citationsExpanded = citationsExpanded,
+                onCitationsExpandedChange = { citationsExpanded = it }
+            )
 
             if (msg.citations.isNotEmpty() && !msg.isStreaming) {
                 CitationList(citations = msg.citations, expanded = citationsExpanded)
@@ -168,6 +129,63 @@ fun AssistantMessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
                     expanded = traceExpanded,
                     onExpandedChange = { traceExpanded = it }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantMessageCard(msg: ChatMessage) {
+    Card(
+        shape = RoundedCornerShape(
+            topStart = 16.dp,
+            topEnd = 16.dp,
+            bottomStart = 4.dp,
+            bottomEnd = 16.dp,
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            if (msg.isStreaming && msg.content.isEmpty()) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                MarkdownText(
+                    text = msg.content,
+                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantMessageActions(
+    msg: ChatMessage,
+    citationsExpanded: Boolean,
+    onCitationsExpandedChange: (Boolean) -> Unit,
+) {
+    // コピーボタン + 引用元（ストリーミング中は非表示）
+    if (!msg.isStreaming && msg.content.isNotEmpty()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MessageCopyButton(content = msg.content)
+
+            if (msg.citations.isNotEmpty()) {
+                TextButton(onClick = { onCitationsExpandedChange(!citationsExpanded) }) {
+                    Icon(
+                        if (citationsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                        "引用元 (${msg.citations.size})",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
             }
         }
     }
