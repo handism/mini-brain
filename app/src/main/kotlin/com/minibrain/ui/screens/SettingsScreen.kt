@@ -41,7 +41,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.minibrain.ui.vm.SettingsViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
@@ -59,6 +58,45 @@ fun SettingsScreen(
         uri?.let { vm.changeFolder(it) }
     }
 
+    SettingsScreenContent(
+        onBack = onBack,
+        snackbarHostState = snackbarHostState,
+        treeUri = treeUri,
+        showSearchLog = showSearchLog,
+        llmModelFile = vm.llmModelFile,
+        embedderModelFile = vm.embedderModelFile,
+        onReindex = { vm.reindex() },
+        onChangeFolder = { folderLauncher.launch(null) },
+        onClearChat = { showClearDialog = true },
+        onShowSearchLogChange = { vm.setShowSearchLog(it) }
+    )
+
+    if (showClearDialog) {
+        ClearChatDialog(
+            onConfirm = {
+                vm.clearChatHistory()
+                showClearDialog = false
+                scope.launch { snackbarHostState.showSnackbar("チャット履歴を削除しました") }
+            },
+            onDismiss = { showClearDialog = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsScreenContent(
+    onBack: () -> Unit,
+    snackbarHostState: SnackbarHostState,
+    treeUri: String?,
+    showSearchLog: Boolean,
+    llmModelFile: java.io.File,
+    embedderModelFile: java.io.File,
+    onReindex: () -> Unit,
+    onChangeFolder: () -> Unit,
+    onClearChat: () -> Unit,
+    onShowSearchLogChange: (Boolean) -> Unit,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -80,41 +118,30 @@ fun SettingsScreen(
         ) {
             KnowledgeBaseSection(
                 treeUri = treeUri,
-                onReindex = { vm.reindex() },
-                onChangeFolder = { folderLauncher.launch(null) }
+                onReindex = onReindex,
+                onChangeFolder = onChangeFolder
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             ChatHistorySection(
-                onClearChat = { showClearDialog = true }
+                onClearChat = onClearChat
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             DeveloperSection(
                 showSearchLog = showSearchLog,
-                onShowSearchLogChange = { vm.setShowSearchLog(it) }
+                onShowSearchLogChange = onShowSearchLogChange
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             ModelInfoSection(
-                llmModelFile = vm.llmModelFile,
-                embedderModelFile = vm.embedderModelFile
+                llmModelFile = llmModelFile,
+                embedderModelFile = embedderModelFile
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             PrivacySection()
         }
-    }
-
-    if (showClearDialog) {
-        ClearChatDialog(
-            onConfirm = {
-                vm.clearChatHistory()
-                showClearDialog = false
-                scope.launch { snackbarHostState.showSnackbar("チャット履歴を削除しました") }
-            },
-            onDismiss = { showClearDialog = false }
-        )
     }
 }
 
