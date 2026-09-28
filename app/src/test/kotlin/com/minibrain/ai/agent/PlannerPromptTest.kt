@@ -244,4 +244,11 @@ class PlannerPromptTest {
         assertTrue(prompt.contains("rrf_search(\"q\", k=10)"))
         assertTrue(prompt.contains("timeline_search(\"2023-01-01\"~\"2023-12-31\", limit=10)"))
     }
+
+    @Test
+    fun parseDecision_returnsParseErrorForMalformedString() {
+        val raw = "This is a malformed string without valid key value pairs"
+        val decision = PlannerPrompt.parseDecision(raw)
+        assertTrue(decision is PlannerDecision.ParseError)
+    }
 }
