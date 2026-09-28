@@ -40,13 +40,7 @@ object DateResolver {
     fun isDateQuery(question: String): Boolean = DATE_QUERY_RE.containsMatchIn(question)
 
     // 元号: エントリを追加するだけで resolveEraYear / isDiaryQuery の両方に反映される
-    private data class EraEntry(val pattern: Regex, val gregorianOffset: Int)
-    private val ERA_LIST = listOf(
-        EraEntry(Regex("""(?:令和|R)(\d{1,2})年""", RegexOption.IGNORE_CASE), 2018),
-        EraEntry(Regex("""(?:平成|H)(\d{1,2})年""", RegexOption.IGNORE_CASE), 1988),
-        EraEntry(Regex("""(?:昭和|S)(\d{1,2})年""", RegexOption.IGNORE_CASE), 1925),
-        EraEntry(Regex("""(?:大正|T)(\d{1,2})年""", RegexOption.IGNORE_CASE), 1911),
-    )
+    private val ERA_RE = Regex("""(?:(令和|R)|(平成|H)|(昭和|S)|(大正|T))(\d{1,2})年""", RegexOption.IGNORE_CASE)
 
     private val WEEKDAY_MAP = mapOf(
         "月" to DayOfWeek.MONDAY,
@@ -75,7 +69,7 @@ object DateResolver {
             || THIS_WEEK_DOW_RE.containsMatchIn(question)
             || QUARTER_RE.containsMatchIn(question)
             || DOT_SLASH_DATE_RE.containsMatchIn(question)
-            || ERA_LIST.any { it.pattern.containsMatchIn(question) }
+            || ERA_RE.containsMatchIn(question)
 
     // today パラメータを公開することでユニットテストで固定日付を注入できる
     fun resolveToDateStrings(question: String, today: LocalDate = LocalDate.now()): List<String> {
@@ -330,10 +324,17 @@ object DateResolver {
     }
 
     private fun resolveEraYear(question: String): Int? {
-        for ((pattern, offset) in ERA_LIST) {
-            pattern.find(question)?.let { return offset + it.groupValues[1].toInt() }
+        return ERA_RE.find(question)?.let { match ->
+            val groups = match.groupValues
+            val offset = when {
+                groups[1].isNotEmpty() -> 2018
+                groups[2].isNotEmpty() -> 1988
+                groups[3].isNotEmpty() -> 1925
+                groups[4].isNotEmpty() -> 1911
+                else -> return null
+            }
+            offset + groups[5].toInt()
         }
-        return null
     }
 
     private fun quarterRange(q: Int, year: Int, today: LocalDate): DateRange? = runCatching {
