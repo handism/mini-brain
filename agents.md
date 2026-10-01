@@ -134,7 +134,7 @@
 変更時に壊れやすい箇所です。値を変える場合は必ず対応するテスト・呼び出し元も更新してください。
 
 **キャッシュ・パフォーマンス**
-- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
+- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。クエリの埋め込みも `SearchRequestCache.queryEmbedding` で memoize し、同じ文を二度 embed しません（ADR-030）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
 - `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
@@ -145,7 +145,7 @@
 - `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新すること。
 - `SearchPipeline.search` は `dateRange != null` かつ `dateRangeSearch` ヒットありのとき、上位 `DATE_RANGE_PIN_COUNT = 5` 件を Reranker 結果の先頭に強制マージします（ADR-025）。`docId::headingPath` で dedupe し、後段は Reranker 順を維持、最終的に `RERANK_TOP_K = 10` で切ります。`RRF_WEIGHTS` は変更しません（他クエリの順位を壊さないため）。
 - `dateRangeSearch` のスニペットは `firstParagraph`（200 字）ではなく **doc の先頭 chunk テキストから `DATE_RANGE_SNIPPET_CHARS = 600` 字** を採ります（ADR-025）。期間分岐・特定日付分岐のどちらも `dateHitCitation` を通します（ADR-029）。chunk が空の場合のみ `firstParagraph` フォールバック。スニペットが薄すぎて LLM が「具体的な内容が記載されていません」と返す問題への対処です。
-- `SearchPipeline.metadataSearch` は `topicMatch` ヒットだけ `TOPIC_MATCH_SNIPPET_CHARS = 500` で先頭 chunk テキストを採ります（ADR-026）。「初回訪問日:」ラベル行や本文 `YYYY/MM/DD` を 200 字の firstParagraph から漏らさないためです。先頭 chunk の取得は `SearchRequestCache.firstChunkOf(docId)` 経由で、chunks のロードは topicMatch がある場合のみ lazy で 1 回（`dateRangeSearch` / `ToolExecutor.timeline_search` も同じ API を使う）。
+- `SearchPipeline.metadataSearch` は `topicMatch` ヒットだけ `TOPIC_MATCH_SNIPPET_CHARS = 500` で先頭 chunk テキストを採ります（ADR-026）。「初回訪問日:」ラベル行や本文 `YYYY/MM/DD` を 200 字の firstParagraph から漏らさないためです。先頭 chunk の取得は `SearchRequestCache.firstChunkOf(docId)` 経由（`ChunkDao.getAllByTree` の `ORDER BY chunks.id` が「先頭」を保証するので外さないこと、ADR-030）で、chunks のロードは topicMatch がある場合のみ lazy で 1 回（`dateRangeSearch` / `ToolExecutor.timeline_search` も同じ API を使う）。
 
 **日付抽出の詳細**
 - `DocumentRepository.Companion.extractDateFromPath` は 完全日付（`YYYY[-/_.]MM[-/_.]DD` / `YYYY年MM月DD日` / 8桁 `YYYYMMDD`）と 月のみ（`YYYY-MM` / `YYYY年MM月` / 6桁 `YYYYMM`）の両方を抽出します。月のみは月初 1 日（`YYYY-MM-01`）として登録。**完全日付 → 月のみの順を厳守**し、`LocalDate.of` の validity + 年が `1990..今年` の範囲チェックで誤マッチを弾きます。`@VisibleForTesting` で JVM テストから直接呼べます（ADR-025）。

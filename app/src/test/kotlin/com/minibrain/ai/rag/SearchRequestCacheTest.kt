@@ -213,4 +213,18 @@ class SearchRequestCacheTest {
 
         assertEquals(1, docDao.getAllByTreeCount)
     }
+
+    @Test
+    fun `queryEmbedding embeds each text only once`() = runBlocking {
+        val cache = SearchRequestCache("tree", FakeChunkDao(), FakeDocumentDao())
+        val embedded = mutableListOf<String>()
+        val embed: suspend (String) -> FloatArray = { embedded += it; floatArrayOf(it.length.toFloat()) }
+
+        val first = cache.queryEmbedding("カレー", embed)
+        val second = cache.queryEmbedding("カレー", embed)
+        cache.queryEmbedding("スパイス堂", embed)
+
+        assertEquals(listOf("カレー", "スパイス堂"), embedded)
+        assertEquals(first.toList(), second.toList())
+    }
 }

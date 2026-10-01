@@ -40,7 +40,6 @@ class ToolExecutor(
     private val llmService: LlmService,
     private val cache: SearchRequestCache,
 ) {
-    private val queryVecCache = mutableMapOf<String, FloatArray>()
 
     private suspend fun allDocs(): List<DocumentEntity> = cache.documents()
 
@@ -226,7 +225,7 @@ class ToolExecutor(
     }
 
     private suspend fun executeVectorSearch(call: ToolCall, tool: AgentTool.VectorSearch): ToolResult {
-        val vec = queryVecCache.getOrPut(tool.query) { embedderService.embed(tool.query, EmbedType.QUERY) }
+        val vec = cache.queryEmbedding(tool.query) { embedderService.embed(it, EmbedType.QUERY) }
         val docsById = cache.documents().associateBy { it.id }
 
         val topChunks = if (tool.scope == null) {

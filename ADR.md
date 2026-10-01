@@ -1193,3 +1193,26 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - 既に DB に残っている削除済みファイルは、次回の差分インデックスで自動的に消える。
 - 特定日付クエリの引用スニペットが長くなる（最大 600 字 + 日付プレフィックス）。
 
+
+---
+
+## ADR-030: chunk 取得順の明示とクエリ埋め込みのリクエスト内 memoize
+
+**日付:** 2026-10-02  
+**ステータス:** 採用（ADR-024 / ADR-026 を補完）
+
+### 背景
+
+- `SearchRequestCache.firstChunkOf` は「`chunkDao.getAllByTree` の返却順 = ドキュメント先頭から」を前提にしていた。しかしクエリに `ORDER BY` が無く、順序は SQLite の実行計画任せだった。順序が崩れると、ADR-025 / ADR-026 の「先頭 chunk から長めにスニペットを採る」対策が別の chunk を拾ってしまう。
+- `RagPipeline.retrieveTopChunks` は、vector 検索と folder 検索で同じクエリを 2 回 embed していた。SearchPipeline で embed 済みの元クエリも、ReAct の `rrf_search` / `vector_search` で再び embed されていた。`ToolExecutor` は独自の `queryVecCache` を持っていたが、ほかの経路とは共有されていなかった。
+
+### 決定
+
+- `ChunkDao.getAllByTree` / `getByScope` / `getByDoc` に `ORDER BY id` を付けて、取得順を保証する。
+- `SearchRequestCache.queryEmbedding(text, embed)` を追加し、リクエスト内でクエリ文字列 → 埋め込みを memoize する。`RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` と `ToolExecutor.vector_search` はこれを経由する（`ToolExecutor.queryVecCache` は廃止）。
+- `retrieveTopChunks` はクエリを 1 回だけ embed し、vector / folder の両検索で共有する（cache が無い呼び出しでも同様）。
+
+### 影響
+
+- ReAct ループ中の重複 embed が減り、Embedder の Mutex 待ちが短くなる。
+- 検索結果の内容は変わらない（順序の保証と計算の重複排除のみ）。

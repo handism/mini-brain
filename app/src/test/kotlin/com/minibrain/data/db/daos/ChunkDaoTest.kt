@@ -124,6 +124,20 @@ class ChunkDaoTest {
     }
 
     @Test
+    fun getAllByTreeReturnsChunksInIdOrder() = runBlocking {
+        // firstChunkOf が「doc の先頭 chunk」を返す前提になっているため、id 順を保証する
+        val ids = chunkDao.insertAll(listOf(
+            ChunkEntity(docId = docId2, headingPath = "", text = "b1", embedding = byteArrayOf()),
+            ChunkEntity(docId = docId1, headingPath = "", text = "a1", embedding = byteArrayOf()),
+            ChunkEntity(docId = docId2, headingPath = "", text = "b2", embedding = byteArrayOf()),
+            ChunkEntity(docId = docId1, headingPath = "", text = "a2", embedding = byteArrayOf()),
+        ))
+
+        val chunks = chunkDao.getAllByTree("content://tree/1")
+        assertEquals(ids, chunks.map { it.id })
+    }
+
+    @Test
     fun getAllByTreeAndObserveCount() = runBlocking {
         chunkDao.insertAll(listOf(
             ChunkEntity(docId = docId1, headingPath = "", text = "1", embedding = byteArrayOf()),
