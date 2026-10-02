@@ -10,6 +10,7 @@ import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.FolderEmbeddingEntity
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import java.time.LocalDate
 import kotlin.math.exp
@@ -177,6 +178,23 @@ class RagPipelineTest {
         assertEquals(1, folderCitations.size)
         assertEquals("folder/path", folderCitations.first().relativePath)
         assertEquals("フォルダ: folder/path", folderCitations.first().headingPath)
+    }
+
+    @Test
+    fun `retrieveTopChunks embeds the query once for vector and folder search`() = runBlocking {
+        val query = "test"
+        val treeUri = "test-tree"
+
+        coEvery { embedderService.embed(query, EmbedType.QUERY) } returns FloatArray(384) { 0.1f }
+        coEvery { chunkDao.getAllByTree(treeUri) } returns emptyList()
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
+        coEvery { folderEmbeddingDao.getAllByTree(treeUri) } returns emptyList()
+        coEvery { documentDao.getDocPathsByIds(emptyList()) } returns emptyList()
+        coEvery { documentDao.getDocDatesByIds(emptyList()) } returns emptyList()
+
+        pipeline.retrieveTopChunks(query, treeUri)
+
+        coVerify(exactly = 1) { embedderService.embed(query, EmbedType.QUERY) }
     }
 
     @Test

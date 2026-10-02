@@ -27,6 +27,8 @@ class SearchRequestCache(
     private val docMutex = Mutex()
     private val chunkMutex = Mutex()
     private val byDocMutex = Mutex()
+    private val queryVecMutex = Mutex()
+    private val queryVecs = HashMap<String, FloatArray>()
 
     @Volatile private var cachedDocs: List<DocumentEntity>? = null
     @Volatile private var cachedChunks: List<ChunkEntity>? = null
@@ -75,6 +77,13 @@ class SearchRequestCache(
 
     /** doc の先頭 chunk。snippet を firstParagraph より長く採りたい箇所で使う（ADR-025 / ADR-026）。 */
     suspend fun firstChunkOf(docId: Long): ChunkEntity? = chunksByDoc()[docId]?.firstOrNull()
+
+    /**
+     * クエリ文字列の埋め込みを memoize する。SearchPipeline の元クエリを ReAct の
+     * retrieveTopChunks / vector_search で再度 embed しないため。embed は Embedder 側で直列化済み。
+     */
+    suspend fun queryEmbedding(text: String, embed: suspend (String) -> FloatArray): FloatArray =
+        queryVecMutex.withLock { queryVecs.getOrPut(text) { embed(text) } }
 
     /** queryVec に対する cosine topK。L2 正規化済みのためドット積で算出。 */
     suspend fun cosineTopK(queryVec: FloatArray, k: Int): List<Pair<Float, ChunkEntity>> {

@@ -18,7 +18,7 @@ interface ChunkDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(chunks: List<ChunkEntity>): List<Long>
 
-    @Query("SELECT * FROM chunks WHERE docId = :docId")
+    @Query("SELECT * FROM chunks WHERE docId = :docId ORDER BY id")
     suspend fun getByDoc(docId: Long): List<ChunkEntity>
 
     @Query("SELECT COUNT(*) FROM chunks WHERE docId = :docId")
@@ -37,6 +37,7 @@ interface ChunkDao {
         SELECT chunks.* FROM chunks 
         INNER JOIN documents ON chunks.docId = documents.id 
         WHERE documents.treeUri = :treeUri
+        ORDER BY chunks.id
     """)
     suspend fun getAllByTree(treeUri: String): List<ChunkEntity>
 
@@ -44,6 +45,7 @@ interface ChunkDao {
         SELECT chunks.* FROM chunks 
         INNER JOIN documents ON chunks.docId = documents.id 
         WHERE documents.treeUri = :treeUri AND documents.relativePath LIKE :scope || '%' ESCAPE '\'
+        ORDER BY chunks.id
     """)
     suspend fun _getByScope(treeUri: String, scope: String): List<ChunkEntity>
 

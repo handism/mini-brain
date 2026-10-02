@@ -11,6 +11,7 @@ import com.minibrain.data.search.NGramTokenizer
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlin.math.exp
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -46,8 +47,14 @@ class RagPipeline(
         cache: SearchRequestCache? = null,
     ): List<Citation> =
         coroutineScope {
+            // vector / folder の両検索で同じクエリベクトルを使うため、embed は 1 回だけ行う
+            val queryVecJob = async(start = CoroutineStart.LAZY) {
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { embedQuery(question, cache) }
+                    ?: run { Timber.tag(TAG).w("query embed timed out"); null }
+            }
             val vecJob = async {
-                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k = 50, cache) }
+                val queryVec = queryVecJob.await() ?: return@async emptyList()
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(queryVec, treeUri, k = 50, cache) }
                     ?: run { Timber.tag(TAG).w("vectorSearch timed out"); emptyList() }
             }
             val bm25Job = async {
@@ -55,7 +62,8 @@ class RagPipeline(
                     ?: run { Timber.tag(TAG).w("bm25Search timed out"); emptyList() }
             }
             val folderJob = async {
-                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { folderSearch(question, treeUri, k = 5) }
+                val queryVec = queryVecJob.await() ?: return@async emptyList()
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { folderSearch(queryVec, treeUri, k = 5) }
                     ?: run { Timber.tag(TAG).w("folderSearch timed out"); emptyList() }
             }
 
@@ -109,7 +117,7 @@ class RagPipeline(
         k: Int = 20,
         cache: SearchRequestCache? = null,
     ): List<Citation> {
-        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(question, treeUri, k, cache) }
+        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(embedQuery(question, cache), treeUri, k, cache) }
             ?: run { Timber.tag(TAG).w("vectorOnlyTopK timed out"); return emptyList() }
         val docPathMap = resolveDocPaths(hits.map { it.second.docId }, cache)
         return hits.map { (score, chunk) ->
@@ -124,14 +132,19 @@ class RagPipeline(
         }
     }
 
+    // cache があれば同一リクエスト内の同じクエリは embed し直さない
+    private suspend fun embedQuery(question: String, cache: SearchRequestCache?): FloatArray {
+        val embed: suspend (String) -> FloatArray = { embedderService.embed(it, EmbedType.QUERY) }
+        return cache?.queryEmbedding(question, embed) ?: embed(question)
+    }
+
     private suspend fun vectorSearch(
-        question: String,
+        queryVec: FloatArray,
         treeUri: String?,
         k: Int,
         cache: SearchRequestCache? = null,
     ): List<Pair<Float, ChunkEntity>> =
         withContext(Dispatchers.Default) {
-            val queryVec = embedderService.embed(question, EmbedType.QUERY)
             // 同一 treeUri のキャッシュがあればロード+デコード済みベクトルを再利用する
             if (cache != null && treeUri != null && cache.treeUri == treeUri) {
                 return@withContext cache.cosineTopK(queryVec, k)
@@ -187,9 +200,8 @@ class RagPipeline(
         }
     }
 
-    private suspend fun folderSearch(question: String, treeUri: String?, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =
+    private suspend fun folderSearch(queryVec: FloatArray, treeUri: String?, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =
         withContext(Dispatchers.Default) {
-            val queryVec = embedderService.embed(question, EmbedType.QUERY)
             val folders = withContext(Dispatchers.IO) {
                 if (treeUri != null) folderEmbeddingDao.getAllByTree(treeUri)
                 else emptyList()
