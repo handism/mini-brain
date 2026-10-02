@@ -136,6 +136,7 @@
 **キャッシュ・パフォーマンス**
 - `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。クエリの埋め込みも `SearchRequestCache.queryEmbedding` で memoize し、同じ文を二度 embed しません（ADR-030）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
+- `indexFolder` / `clearFolder` は `DocumentRepository.indexMutex` で直列化されます（Home / Settings からの同時実行で挿入・削除が競合しないため）。`indexFolder` は失敗時に例外を投げず `IndexingState.Error` を出します（キャンセルのみ再送出）。
 - `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
 - `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
