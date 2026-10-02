@@ -203,4 +203,21 @@ class ToolExecutorTest {
         assertEquals(1, result.citations.size)
         assertEquals("First Chunk Text", result.citations[0].snippet)
     }
+
+    @Test
+    fun executeGrep_searchesOnlyCurrentTree() = runTest {
+        val doc = DocumentEntity(
+            id = 5L, treeUri = treeUri, fileUri = "uri", fileName = "a.md",
+            relativePath = "notes/a.md", lastModified = 0L, contentHash = "hash",
+        )
+        val chunk = ChunkEntity(id = 1L, docId = 5L, headingPath = "H", text = "サウナの記録", embedding = ByteArray(0))
+        coEvery { chunkDao.bm25SearchByTree(any(), treeUri, any()) } returns listOf(chunk)
+        coEvery { cache.documents() } returns listOf(doc)
+
+        val result = toolExecutor.execute(ToolCall(1, AgentTool.Grep(query = "サウナ", scope = null)))
+
+        assertEquals(1, result.citations.size)
+        assertEquals("notes/a.md", result.citations[0].relativePath)
+        io.mockk.coVerify(exactly = 0) { chunkDao.bm25Search(any(), any()) }
+    }
 }
