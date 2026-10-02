@@ -3,6 +3,8 @@ package com.minibrain.data.repo
 import android.content.Context
 import android.net.Uri
 import androidx.annotation.VisibleForTesting
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteStatement
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.AppDatabase
@@ -17,7 +19,6 @@ import com.minibrain.data.md.MarkdownChunker
 import com.minibrain.data.md.MarkdownMetaExtractor
 import com.minibrain.data.md.MdFile
 import com.minibrain.data.md.MdFileReader
-import org.json.JSONArray
 import com.minibrain.data.search.NGramTokenizer
 import com.minibrain.util.DateValidator
 import com.minibrain.util.JsonArrays
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import timber.log.Timber
 
 sealed class IndexingState {
@@ -120,7 +122,7 @@ class DocumentRepository(
             val docsToUpdate = mutableListOf<DocumentEntity>()
             val docsToDelete = mutableListOf<Long>()
 
-            // To maintain batching, we group the raw chunks and their metadata
+            // 埋め込み・挿入をまとめて行うため、再インデックス対象を先に集める
             val pendingDocs = mutableListOf<PendingDoc>()
 
             mdFiles.forEachIndexed { index, mdFile ->
@@ -148,14 +150,17 @@ class DocumentRepository(
                 pendingDocs.add(PendingDoc(newDoc, mdFile))
             }
 
-            // Update unchanged docs that needed metadata refresh
+            // 内容は変わらずメタデータだけ補完が必要な doc を更新する
             if (docsToUpdate.isNotEmpty()) documentDao.updateAll(docsToUpdate)
 
-            // Delete old FTS and Chunks
-            deleteOldDocs(docsToDelete, writableDb)
-            deleteRemovedDocs(removedDocIds, writableDb)
+            // 変更された doc の古い chunk / FTS と、フォルダから消えた doc を削除する
+            deleteDocs(docsToDelete, writableDb, removeDocuments = false)
+            if (removedDocIds.isNotEmpty()) {
+                Timber.tag(TAG).d("removing ${removedDocIds.size} docs no longer in folder")
+            }
+            deleteDocs(removedDocIds, writableDb, removeDocuments = true)
 
-            // Insert new docs
+            // 新規・変更 doc を挿入する
             totalChunks += insertNewDocsAndChunks(pendingDocs, writableDb, ftsStmt)
 
         } finally {
@@ -167,8 +172,6 @@ class DocumentRepository(
 
         _indexingState.value = IndexingState.Done(total, totalChunks)
     }
-
-
 
     private fun createUpdatedDocumentEntity(existing: DocumentEntity, mdFile: MdFile): DocumentEntity? {
         if (existing.headings == null || existing.documentDate == null) {
@@ -204,30 +207,16 @@ class DocumentRepository(
         )
     }
 
-    private suspend fun deleteOldDocs(docsToDelete: List<Long>, writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
-        if (docsToDelete.isNotEmpty()) {
-            docsToDelete.chunked(SQL_BATCH_SIZE).forEach { batch ->
-                writableDb.beginTransaction()
-                try {
-                    chunkDao.deleteFtsByDocIds(batch)
-                    chunkDao.deleteByDocIds(batch)
-                    writableDb.setTransactionSuccessful()
-                } finally {
-                    writableDb.endTransaction()
-                }
-            }
-        }
-    }
-
-    private suspend fun deleteRemovedDocs(removedDocIds: List<Long>, writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
-        if (removedDocIds.isEmpty()) return
-        Timber.tag(TAG).d("removing ${removedDocIds.size} docs no longer in folder")
-        removedDocIds.chunked(SQL_BATCH_SIZE).forEach { batch ->
+    // removeDocuments=false: 内容が変わった doc。document 行は id を使い回して再挿入するので chunk / FTS だけ消す
+    // removeDocuments=true : フォルダから消えた doc。document 行ごと削除する
+    private suspend fun deleteDocs(docIds: List<Long>, writableDb: SupportSQLiteDatabase, removeDocuments: Boolean) {
+        if (docIds.isEmpty()) return
+        docIds.chunked(SQL_BATCH_SIZE).forEach { batch ->
             writableDb.beginTransaction()
             try {
                 chunkDao.deleteFtsByDocIds(batch)
                 chunkDao.deleteByDocIds(batch)
-                documentDao.deleteByIds(batch)
+                if (removeDocuments) documentDao.deleteByIds(batch)
                 writableDb.setTransactionSuccessful()
             } finally {
                 writableDb.endTransaction()
@@ -237,8 +226,8 @@ class DocumentRepository(
 
     private suspend fun insertNewDocsAndChunks(
         pendingDocs: List<PendingDoc>,
-        writableDb: androidx.sqlite.db.SupportSQLiteDatabase,
-        ftsStmt: androidx.sqlite.db.SupportSQLiteStatement
+        writableDb: SupportSQLiteDatabase,
+        ftsStmt: SupportSQLiteStatement
     ): Int {
         var newTotalChunks = 0
         val docsToInsertList = pendingDocs.map { it.docEntity }
@@ -247,9 +236,9 @@ class DocumentRepository(
 
             val chunkBuffer = mutableListOf<ChunkEntity>()
 
-            // Embed and collect chunks using the generated IDs
+            // 採番された docId を使って chunk を埋め込み・収集する
             pendingDocs.forEachIndexed { i, pending ->
-                // Emit progress state during the heavy embedding phase
+                // 重い埋め込みフェーズの進捗を通知する
                 _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
 
                 val docId = insertedDocIds[i]
@@ -272,7 +261,7 @@ class DocumentRepository(
 
                 chunkBuffer.addAll(chunkEntities)
 
-                // Flush buffer to DB in a single SQLite transaction to avoid high memory pressure (OOM) and auto-commits
+                // メモリ圧迫（OOM）と auto-commit を避けるため、一定件数ごとに単一トランザクションで書き出す
                 if (chunkBuffer.size >= SQL_BATCH_SIZE) {
                     newTotalChunks += flushChunkBuffer(writableDb, ftsStmt, chunkBuffer, clearBuffer = true)
                 }
@@ -297,8 +286,8 @@ class DocumentRepository(
     }
 
     private suspend fun flushChunkBuffer(
-        writableDb: androidx.sqlite.db.SupportSQLiteDatabase,
-        ftsStmt: androidx.sqlite.db.SupportSQLiteStatement,
+        writableDb: SupportSQLiteDatabase,
+        ftsStmt: SupportSQLiteStatement,
         chunkBuffer: MutableList<ChunkEntity>,
         clearBuffer: Boolean
     ): Int {
@@ -402,9 +391,8 @@ class DocumentRepository(
         }
     }
 
-    private fun processChunkBatch(writableDb: androidx.sqlite.db.SupportSQLiteDatabase) {
-        // Using compileStatement provides better performance than multiple execSQL
-        // Also process in batches to prevent OutOfMemory issues for large datasets
+    private fun processChunkBatch(writableDb: SupportSQLiteDatabase) {
+        // execSQL の繰り返しより compileStatement の再利用が速い。大量データでの OOM を避けるためバッチで処理する
         val limit = 1000
         var lastId = 0L
         val stmt = writableDb.compileStatement(FTS_INSERT_SQL)
@@ -440,7 +428,7 @@ class DocumentRepository(
         }
     }
 
-    private fun insertFts(stmt: androidx.sqlite.db.SupportSQLiteStatement, ids: List<Long>, bigrams: List<Pair<String, String>>) {
+    private fun insertFts(stmt: SupportSQLiteStatement, ids: List<Long>, bigrams: List<Pair<String, String>>) {
         ids.zip(bigrams).forEach { (id, bg) ->
             stmt.bindLong(1, id)
             stmt.bindString(2, bg.first)
