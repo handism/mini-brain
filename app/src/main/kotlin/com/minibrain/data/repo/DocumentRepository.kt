@@ -29,8 +29,11 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import kotlin.coroutines.cancellation.CancellationException
 import timber.log.Timber
 
 sealed class IndexingState {
@@ -98,10 +101,28 @@ class DocumentRepository(
     private val _indexingState = MutableStateFlow<IndexingState>(IndexingState.Idle)
     val indexingState: StateFlow<IndexingState> = _indexingState
 
+    // Home / Settings から同時に再インデックスされても挿入・削除が競合しないよう直列化する
+    private val indexMutex = Mutex()
+
     fun observeDocCount(treeUri: String): Flow<Int> = documentDao.observeCountByTree(treeUri)
     fun observeChunkCount(treeUri: String): Flow<Int> = chunkDao.observeCountByTree(treeUri)
 
-    suspend fun indexFolder(treeUri: Uri) = withContext(Dispatchers.IO) {
+    // 失敗は例外ではなく IndexingState.Error で通知する（呼び出し元の viewModelScope でクラッシュさせない）
+    suspend fun indexFolder(treeUri: Uri) = indexMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                indexFolderLocked(treeUri)
+            } catch (e: CancellationException) {
+                _indexingState.value = IndexingState.Idle
+                throw e
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "indexFolder failed")
+                _indexingState.value = IndexingState.Error(e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    private suspend fun indexFolderLocked(treeUri: Uri) {
         _indexingState.value = IndexingState.Progress(0, 0, "スキャン中...")
 
         val mdFiles = MdFileReader.listMdFiles(context, treeUri)
@@ -364,12 +385,14 @@ class DocumentRepository(
         folderEmbeddingDao.replaceAllByTree(treeUri.toString(), folderEmbeddings)
     }
 
-    suspend fun clearFolder(treeUri: String) = withContext(Dispatchers.IO) {
-        chunkDao.deleteFtsByTree(treeUri)
-        chunkDao.deleteAllByTree(treeUri)
-        documentDao.deleteAllByTree(treeUri)
-        folderEmbeddingDao.deleteAllByTree(treeUri)
-        _indexingState.value = IndexingState.Idle
+    suspend fun clearFolder(treeUri: String) = indexMutex.withLock {
+        withContext(Dispatchers.IO) {
+            chunkDao.deleteFtsByTree(treeUri)
+            chunkDao.deleteAllByTree(treeUri)
+            documentDao.deleteAllByTree(treeUri)
+            folderEmbeddingDao.deleteAllByTree(treeUri)
+            _indexingState.value = IndexingState.Idle
+        }
     }
 
     /** 起動時に FTS インデックスが不完全であれば全チャンクを再投入する。 */

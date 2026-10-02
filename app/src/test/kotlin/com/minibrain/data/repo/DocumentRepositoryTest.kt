@@ -239,9 +239,7 @@ class DocumentRepositoryTest {
 
         try {
             repository.indexFolder(treeUri)
-            org.junit.Assert.fail("Expected exception")
-        } catch (e: Exception) {
-            org.junit.Assert.assertEquals("Insert docs failed", e.message)
+            org.junit.Assert.assertEquals(IndexingState.Error("Insert docs failed"), repository.indexingState.value)
         } finally {
             io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
             io.mockk.unmockkStatic(android.net.Uri::class)
@@ -310,9 +308,7 @@ class DocumentRepositoryTest {
 
         try {
             repository.indexFolder(treeUri)
-            org.junit.Assert.fail("Expected exception")
-        } catch (e: Exception) {
-            org.junit.Assert.assertEquals("Refresh metadata failed", e.message)
+            org.junit.Assert.assertEquals(IndexingState.Error("Refresh metadata failed"), repository.indexingState.value)
         } finally {
             io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
             io.mockk.unmockkObject(com.minibrain.data.md.MarkdownMetaExtractor)
@@ -428,12 +424,8 @@ class DocumentRepositoryTest {
         io.mockk.every { writableDb.compileStatement(any()) } returns stmt
         io.mockk.every { stmt.executeInsert() } throws RuntimeException("DB batch insertion failed")
 
-        try {
-            repository.indexFolder(treeUri)
-            org.junit.Assert.fail("Expected exception")
-        } catch (e: Exception) {
-            org.junit.Assert.assertEquals("DB batch insertion failed", e.message)
-        }
+        repository.indexFolder(treeUri)
+        org.junit.Assert.assertEquals(IndexingState.Error("DB batch insertion failed"), repository.indexingState.value)
 
         io.mockk.verify { writableDb.beginTransaction() }
         io.mockk.verify(exactly = 0) { writableDb.setTransactionSuccessful() }
@@ -560,9 +552,7 @@ class DocumentRepositoryTest {
 
         try {
             repository.indexFolder(treeUri)
-            org.junit.Assert.fail("Expected exception")
-        } catch (e: Exception) {
-            org.junit.Assert.assertEquals("Delete FTS failed", e.message)
+            org.junit.Assert.assertEquals(IndexingState.Error("Delete FTS failed"), repository.indexingState.value)
         } finally {
             io.mockk.unmockkObject(com.minibrain.data.md.MdFileReader)
             io.mockk.unmockkStatic(android.net.Uri::class)

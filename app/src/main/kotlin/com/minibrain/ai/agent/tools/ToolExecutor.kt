@@ -110,7 +110,7 @@ class ToolExecutor(
         val doc = findDocument(tool) ?: return ToolResult(call, "FILE NOT FOUND", emptyList())
 
         val chunks = withContext(Dispatchers.IO) {
-            chunkDao.getByDoc(doc.id).sortedBy { it.headingPath }
+            chunkDao.getByDoc(doc.id)
         }
 
         val fullText = buildTruncatedContent(doc, chunks)
@@ -184,7 +184,7 @@ class ToolExecutor(
 
         val rawChunks = withContext(Dispatchers.IO) {
             runCatching {
-                chunkDao.bm25Search(matchQuery, 50)
+                chunkDao.bm25SearchByTree(matchQuery, treeUri, 50)
             }.onFailure { Timber.tag(TAG).w(it, "bm25Search failed for query: $matchQuery") }
              .getOrElse { emptyList() }
         }
