@@ -1248,3 +1248,33 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - ReAct の 3 ステップ目以降、Planner プロンプトに直前のツール結果が全文で入るようになる（prompt はやや長くなる。上限は従来どおり `formatObservations` の 5000 字）。
 - `timeline_search` のヒットが CoverageChecker の `[日付:]` 短絡の対象になる。
 - 検索の順位付け（RRF 重み・閾値）は変わらない。
+
+---
+
+## ADR-032: LLM 呼び出しの直列化・クエリ埋め込みのバッチ化・Reranker の省略
+
+**日付:** 2026-10-04  
+**ステータス:** 採用（ADR-026 / ADR-030 を補完）
+
+### 背景
+
+- `LlmService.initialize` は既存の `Engine` を close した後に `engine` を null にしていなかった。再初期化が GPU / CPU の両方で失敗すると、close 済みの `Engine` が残って `isReady()` が `true` を返していた。
+- `LlmService` の `Mutex` は `initialize` だけを守っており、LiteRT-LM の単一スレッド制約は呼び出し側の規律に頼っていた。生成中の再初期化や close も防げていなかった。
+- `litertlm-android` が `latest.release` 指定で、ビルドごとに解決されるバージョンが変わりえた。
+- `SearchPipeline.multiVectorSearch` は元クエリ・展開クエリ・HyDE を 1 件ずつ embed していた（最大 10 回の ONNX 推論）。
+- 日付クエリ + `topicMatch` 候補があるとき、`CoverageChecker` は LLM を呼ばずに短絡するが、その前段の `LlmReranker` は LLM を呼んでいた。
+
+### 決定
+
+- `LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化する。`engine` は `@Volatile` にし、再初期化の冒頭で close と同時に null にする。`close` は suspend にする。
+- `litertlm` のバージョンを `libs.versions.toml` で固定する（0.17.1）。
+- `SearchRequestCache.prefetchQueryEmbeddings` / `RagPipeline.prefetchQueryEmbeddings` を追加する。`multiVectorSearch` は検索前に未計算のクエリだけを `embedAll` 1 回で埋め込む。失敗したら握って、従来どおり `queryEmbedding` が 1 件ずつ embed する。
+- `SearchPipeline.shouldSkipRerank`: 日付クエリ（`DateResolver.isDateQuery`）かつ融合候補に `topicMatch` があれば `LlmReranker` を呼ばない。topicMatch 候補を先頭に、残りは RRF 順のまま `RERANK_TOP_K` で切る。期間ピン留め（ADR-025）はその後に従来どおり適用する。条件は `CoverageChecker.isTopicMatchShortCircuit` と揃えている。
+- CI に `assembleRelease` を追加し、R8 の keep 漏れを検出する。`versionCode` / `versionName` は Gradle プロパティで上書きできるようにする。
+
+### 影響
+
+- `generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックする（現状そのような呼び出しは無い）。
+- 固有名詞 +「いつ」クエリで LLM 呼び出しが 1 回減る（Reranker と CoverageCheck が両方とも省略される）。上位 10 件の残りは Reranker ではなく RRF 順になる。
+- その他のクエリの検索結果は変わらない（埋め込みのバッチ化は padding を attention_mask で除外するため、ベクトルは 1 件ずつの場合と数値誤差の範囲で一致する）。
+

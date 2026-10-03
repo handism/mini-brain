@@ -147,6 +147,34 @@ class LlmServiceTest {
     }
 
     @Test
+    fun `failed re-initialize does not leave closed engine as ready`() = runBlocking {
+        val service = LlmService()
+
+        val tempFile = File.createTempFile("model", ".bin")
+        RandomAccessFile(tempFile, "rw").use { it.setLength(100_000_000) } // 100MB
+
+        mockkConstructor(Engine::class)
+        every { anyConstructed<Engine>().initialize() } returns Unit andThenThrows RuntimeException("CPU Failed")
+        every { anyConstructed<Engine>().close() } returns Unit
+
+        try {
+            service.initialize(tempFile, forceCpu = true)
+            assertTrue(service.isReady())
+
+            try {
+                service.initialize(tempFile, forceCpu = true)
+                fail("Expected Exception")
+            } catch (e: Exception) {
+                assertTrue(e.message!!.contains("CPUモードでの初期化に失敗しました"))
+            }
+
+            assertFalse(service.isReady())
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
     fun `summarize returns fallback text if not initialized`() = runBlocking {
         val service = LlmService()
         val longText = "A".repeat(1000)

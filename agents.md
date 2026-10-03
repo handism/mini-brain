@@ -21,7 +21,7 @@
 ## 2. 重要な技術的制約
 
 ### 2.1 LiteRT-LM (LLM 推論エンジン)
-- **依存関係**: `com.google.ai.edge.litertlm:litertlm-android:latest.release`
+- **依存関係**: `com.google.ai.edge.litertlm:litertlm-android`（バージョンは `gradle/libs.versions.toml` の `litertlm` で固定。`latest.release` は使わない、ADR-032）
 - **注意**: **MediaPipe LLM Inference (`tasks-genai`) は非推奨 (deprecated) です。絶対に使用しないでください。**
 - **モデル形式**: `.litertlm`（旧 `.task` 形式は使用不可）。
 - **初期化と実行**:
@@ -46,7 +46,7 @@
   <uses-native-library android:name="libvndksupport.so" android:required="false"/>
   <uses-native-library android:name="libOpenCL.so" android:required="false"/>
   ```
-- **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。
+- **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。
 
 ### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
 - **依存関係**:
@@ -89,6 +89,7 @@
 5. **再ランカー (LlmReranker)**:
    - LLM が候補をスコアリングし上位10件を選択。日付クエリや `topicMatch=true` の候補を優先。
    - 期間クエリ（`dateRange != null`）でマッチする結果がある場合、上位5件を再ランカー結果の先頭に強制マージ（ピン留め）して10件でカット。
+   - 日付クエリ + `topicMatch=true` 候補ありのときは LLM を呼ばず、topicMatch 候補を先頭・残りを RRF 順にして10件でカット（`SearchPipeline.shouldSkipRerank`、ADR-032）。
 6. **回答可能性判定 (CoverageCheck)**:
    - 判定が `true` の場合、回答を生成。
    - `false` の場合、ReAct ループ（DSL形式のツール呼び出し）へ移行。
@@ -138,7 +139,7 @@
 変更時に壊れやすい箇所です。値を変える場合は必ず対応するテスト・呼び出し元も更新してください。
 
 **キャッシュ・パフォーマンス**
-- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。クエリの埋め込みも `SearchRequestCache.queryEmbedding` で memoize し、同じ文を二度 embed しません（ADR-030）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
+- `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。クエリの埋め込みも `SearchRequestCache.queryEmbedding` で memoize し、同じ文を二度 embed しません（ADR-030）。`multiVectorSearch` は先に `RagPipeline.prefetchQueryEmbeddings` で全クエリを `embedAll` 1 回で埋め込みます（失敗時は従来の 1 件ずつに戻る、ADR-032）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
 - `RagPipeline` は doc / chunk を常に `SearchRequestCache` 経由で参照します。cache を渡さない単独呼び出し（EvalRunner・テスト）では呼び出し内だけのキャッシュを作ります。期間フィルタは `SearchRequestCache.documentsInDateRange` に集約し、`SearchPipeline.dateRangeSearch` と `ToolExecutor.timeline_search` が共有します。BM25 の MATCH 式の生成と失敗時の空返しは `ChunkDao.bm25SearchOrEmpty` に集約しています（ADR-031）。
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
 - `indexFolder` / `clearFolder` は `DocumentRepository.indexMutex` で直列化されます（Home / Settings からの同時実行で挿入・削除が競合しないため）。`indexFolder` は失敗時に例外を投げず `IndexingState.Error` を出します（キャンセルのみ再送出）。

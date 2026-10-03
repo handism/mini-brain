@@ -13,8 +13,9 @@ android {
         applicationId = "com.minibrain"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // リリース時は -PversionCode=... -PversionName=... で上書きする（未指定ならローカル開発用の値）
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("versionName") as String?) ?: "1.0"
     }
 
     buildTypes {

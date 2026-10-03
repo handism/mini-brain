@@ -21,7 +21,8 @@ open class LlmService {
         private const val TAG = "LlmService"
     }
 
-    private var engine: Engine? = null
+    // LiteRT-LM は単一スレッド設計のため、初期化・生成・close を同じ Mutex で直列化する
+    @Volatile private var engine: Engine? = null
     private val mutex = Mutex()
 
     open suspend fun initialize(modelFile: File, forceCpu: Boolean = false) = withContext(Dispatchers.Default) {
@@ -29,8 +30,10 @@ open class LlmService {
             if (!modelFile.exists() || modelFile.length() < 100_000_000L) {
                 throw IllegalArgumentException("モデルファイルが不完全または存在しません (現在のサイズ: ${modelFile.length()} bytes)")
             }
+            // 再初期化が失敗しても close 済みの Engine を isReady() と誤認しないよう、先に外す
             engine?.close()
-            
+            engine = null
+
             var lastError: Throwable? = null
             
             // 1. GPU で試行 (forceCpu が false の場合のみ)
@@ -64,13 +67,15 @@ open class LlmService {
     }
 
     open fun generateStream(prompt: String): Flow<String> = flow {
-        val eng = requireNotNull(engine) { "LlmService not initialized. Call initialize() first." }
-        eng.createConversation().use { conversation ->
-            conversation.sendMessageAsync(prompt).collect { message ->
-                val text = message.contents.contents
-                    .filterIsInstance<Content.Text>()
-                    .joinToString("") { it.text }
-                emit(text)
+        mutex.withLock {
+            val eng = requireNotNull(engine) { "LlmService not initialized. Call initialize() first." }
+            eng.createConversation().use { conversation ->
+                conversation.sendMessageAsync(prompt).collect { message ->
+                    val text = message.contents.contents
+                        .filterIsInstance<Content.Text>()
+                        .joinToString("") { it.text }
+                    emit(text)
+                }
             }
         }
     }.flowOn(Dispatchers.Default)
@@ -87,9 +92,11 @@ open class LlmService {
 
     open fun isReady(): Boolean = engine != null
 
-    fun close() {
-        engine?.close()
-        engine = null
+    suspend fun close() {
+        mutex.withLock {
+            engine?.close()
+            engine = null
+        }
     }
 
     private fun buildConfig(modelFile: File, useGpu: Boolean = true): EngineConfig {
