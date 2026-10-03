@@ -1,6 +1,7 @@
 package com.minibrain.ai.search
 
 import com.minibrain.ai.llm.LlmService
+import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 
@@ -26,7 +27,7 @@ class HyDE(private val llmService: LlmService) {
         val prompt = buildPrompt(query)
         val sb = StringBuilder()
         val ok = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
-            runCatching {
+            runCatchingCancellable {
                 llmService.generateStream(prompt).collect { token -> sb.append(token) }
                 true
             }.onFailure { Timber.tag(TAG).w(it, "HyDE generation failed") }.getOrDefault(false)

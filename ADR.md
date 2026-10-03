@@ -227,10 +227,10 @@ ADR-007 の固定 intent フローには以下の課題があった:
 | `glob(pattern)` | パターンでファイル列挙（`**` 再帰対応） | DB 全件 + `GlobMatcher.globToRegex` フィルタ |
 | `list_dir(folder)` | フォルダ直下のサブフォルダ・ファイル一覧 | prefix フィルタ |
 | `read_file(docId\|path)` | ファイル全文取得（chunks 連結） | `ChunkDao.getByDoc` → headingPath 順、8000 字上限。3000 字超は LLM 要約して単一 citation |
-| `grep(query, scope?)` | キーワード全文検索 | FTS4 BM25、scope は事後フィルタ |
+| `grep(query, scope?)` | キーワード全文検索 | FTS4 BM25、scope はフォルダ単位の事後フィルタ（ADR-031） |
 | `vector_search(query, scope?, k)` | 意味類似検索 | `EmbedderService.embed` + `CosineSimilarity.topK` |
 | `rrf_search(query, k)` | BM25 + ベクトル RRF 融合 | 既存 `RagPipeline.retrieveTopChunks` に委譲 |
-| `timeline_search(start, end, k)` | 期間指定で documentDate フィルタ | `DocumentDao.getByDateRange` → 先頭 chunk をスニペットに |
+| `timeline_search(start, end, k)` | 期間指定で documentDate フィルタ | `SearchRequestCache.documentsInDateRange` → 先頭 chunk に `[日付:]` を付けてスニペットに（ADR-031） |
 
 ### Citation 優先度
 
@@ -385,7 +385,7 @@ REASON: 情報が揃った
 
 ### 決定
 
-`timeline_search(start, end, limit)` ツールを追加する。`DocumentDao.getByDateRange(treeUri, startDate, endDate)` で `documentDate` カラムを ISO-8601 文字列として範囲検索し、ヒットした文書の先頭チャンクをスニペットとして `Citation` に投入する。
+`timeline_search(start, end, limit)` ツールを追加する。`DocumentDao.getByDateRange(treeUri, startDate, endDate)`（ADR-031 で `SearchRequestCache.documentsInDateRange` に置き換え）で `documentDate` カラムを ISO-8601 文字列として範囲検索し、ヒットした文書の先頭チャンクをスニペットとして `Citation` に投入する。
 
 - `documentDate` は `DocumentRepository` のインデックス時にファイルパスから抽出（`YYYY-MM-DD` / `YYYYMMDD` / `YYYY/MM/DD` 形式を正規化）して保存する
 - `buildPlannerHint` が `resolveDateRange` で DateRange を取得できた場合、`timeline_search` を推奨する hint を挿入する
@@ -1216,3 +1216,35 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 
 - ReAct ループ中の重複 embed が減り、Embedder の Mutex 待ちが短くなる。
 - 検索結果の内容は変わらない（順序の保証と計算の重複排除のみ）。
+
+---
+
+## ADR-031: キャンセル伝播・ReAct 観測ウィンドウ・ツールの tree / scope 境界の修正
+
+**日付:** 2026-10-04  
+**ステータス:** 採用（ADR-024 / ADR-027 を補完）
+
+### 背景
+
+- `AgentPipeline.addObservation` は「最新 2 件を full、それ以前を compact」とする意図だったが、3 件目以降は**新しい observation を compact で追加**していた。そのため Planner が直前のツール結果の詳細を読めていなかった。
+- suspend 文脈の `runCatching` が `CancellationException` も `Result.failure` にしていた。チャットの停止ボタンで「生成エラー / 検索エラー」が表示され、`HyDE` のタイムアウトも失敗として握りつぶされていた。また `ChatViewModel.sendMessage` は途中で例外が出ると `isGenerating` が `true` のまま戻らなかった。
+- `read_file(docId=…)` は `DocumentDao.getById` で、現在の tree 以外の文書も読めてしまっていた（path 指定は tree に限定済み）。
+- `grep` / `vector_search` の scope が `startsWith(scope)` だったため、`diary` を指定すると `diary2/…` も一致していた。
+- `timeline_search` は Citation の source を `GREP` にしていて、日付プレフィックスも付いていなかった。SearchPipeline の期間検索とは別に、DB を直接範囲検索していた。
+- `RagPipeline` は `cache == null` / `treeUri == null` 用の DB 直叩きの分岐を持っていた。BM25 の MATCH 式の生成とエラー処理も SearchPipeline と重複していた。
+
+### 決定
+
+- `addObservation` は新しい observation を常に full で追加し、3 件前に押し出されたものだけを compact にする。
+- `com.minibrain.util.runCatchingCancellable` を追加する。suspend 文脈ではこれを使い、キャンセル（タイムアウトを含む）は再送出する。
+- `ChatViewModel.sendMessage` は `try/finally` で `isGenerating` を戻す。ジョブは LAZY 起動にして `currentJob` を代入してから開始し、キャンセル後に始まった次の送信の状態は触らない。本文が空のまま停止した場合は、空の吹き出しを残さない。
+- Citation の JSON 変換は `CitationJson` に移す。否定応答の判定（引用を隠す）は回答冒頭 `NEGATIVE_CHECK_CHARS = 80` 字だけを見る。
+- `read_file` の docId 指定は `treeUri` が一致する文書だけを返す。scope は `relativePath == scope` または `startsWith("$scope/")` で判定する。
+- `timeline_search` は `SearchRequestCache.documentsInDateRange` を使い、`[日付:]` プレフィックス付き・`SourceType.METADATA` の Citation を返す。SearchPipeline の期間検索も同じ API を使う（`DocumentDao.getByDateRange` は廃止）。
+- `RagPipeline` の `treeUri` は必須にする。doc / chunk の参照は常に `SearchRequestCache` 経由とし、cache が無い呼び出しでは呼び出し内だけのキャッシュを作る（`getDocDatesByIds` / `getDocPathsByIds` は廃止）。BM25 は `ChunkDao.bm25SearchOrEmpty` に集約する。
+
+### 影響
+
+- ReAct の 3 ステップ目以降、Planner プロンプトに直前のツール結果が全文で入るようになる（prompt はやや長くなる。上限は従来どおり `formatObservations` の 5000 字）。
+- `timeline_search` のヒットが CoverageChecker の `[日付:]` 短絡の対象になる。
+- 検索の順位付け（RRF 重み・閾値）は変わらない。

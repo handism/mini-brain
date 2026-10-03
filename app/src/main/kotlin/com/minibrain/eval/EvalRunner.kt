@@ -2,6 +2,7 @@ package com.minibrain.eval
 
 import android.content.Context
 import com.minibrain.ai.search.SearchPipeline
+import com.minibrain.util.runCatchingCancellable
 import com.squareup.moshi.JsonReader
 import okio.buffer
 import okio.source
@@ -91,7 +92,7 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
         val collected = mutableListOf<Pair<EvalCase, List<com.minibrain.ai.rag.Citation>>>()
         cases.forEachIndexed { idx, case ->
             onProgress(idx, cases.size)
-            val result = runCatching {
+            val result = runCatchingCancellable {
                 searchPipeline.search(case.query, treeUri).citations
             }.onFailure { Timber.tag(TAG).w(it, "eval case '${case.id}' failed") }
                 .getOrDefault(emptyList())

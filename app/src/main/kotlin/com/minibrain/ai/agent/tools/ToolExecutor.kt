@@ -16,8 +16,10 @@ import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.search.NGramTokenizer
+import com.minibrain.util.DatePrefix
 import com.minibrain.util.FileNames
 import com.minibrain.util.JsonArrays
+import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -116,7 +118,7 @@ class ToolExecutor(
         val fullText = buildTruncatedContent(doc, chunks)
         val citations = if (fullText.length > SUMMARIZE_THRESHOLD_CHARS) {
             // 巨大ファイルは要約してから単一の citation として投入
-            val summary = runCatching { llmService.summarize(fullText) }
+            val summary = runCatchingCancellable { llmService.summarize(fullText) }
                 .onFailure { Timber.tag(TAG).w(it, "summarize failed for ${doc.relativePath}, truncating") }
                 .getOrElse { fullText.take(SUMMARIZE_THRESHOLD_CHARS) }
             listOf(Citation(
@@ -144,7 +146,8 @@ class ToolExecutor(
 
     private suspend fun findDocument(tool: AgentTool.ReadFile): DocumentEntity? = withContext(Dispatchers.IO) {
         when {
-            tool.docId != null -> documentDao.getById(tool.docId)
+            // 他フォルダの doc を読まないよう、docId 指定でも現在の tree に属するものだけ返す
+            tool.docId != null -> documentDao.getById(tool.docId)?.takeIf { it.treeUri == treeUri }
             tool.path != null -> {
                 val keyword = FileNames.stem(tool.path)
                 documentDao.searchByPath(treeUri, keyword).firstOrNull()
@@ -183,7 +186,7 @@ class ToolExecutor(
             ?: return ToolResult(call, "GREP: query too short", emptyList())
 
         val rawChunks = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 chunkDao.bm25SearchByTree(matchQuery, treeUri, 50)
             }.onFailure { Timber.tag(TAG).w(it, "bm25Search failed for query: $matchQuery") }
              .getOrElse { emptyList() }
@@ -194,7 +197,7 @@ class ToolExecutor(
         val filtered = if (tool.scope != null) {
             rawChunks.filter { chunk ->
                 val doc = docsMapForGrep[chunk.docId]
-                doc?.relativePath?.startsWith(tool.scope) == true
+                doc != null && isInScope(doc.relativePath, tool.scope)
             }
         } else rawChunks
 
@@ -233,7 +236,7 @@ class ToolExecutor(
         } else {
             val (chunks, vectors) = cache.chunkVectors()
             val validDocIds = docsById.values
-                .mapNotNull { if (it.relativePath.startsWith(tool.scope)) it.id else null }
+                .mapNotNull { if (isInScope(it.relativePath, tool.scope)) it.id else null }
                 .toSet()
             val filteredCandidates = ArrayList<Pair<FloatArray, ChunkEntity>>()
             for (i in chunks.indices) {
@@ -282,9 +285,7 @@ class ToolExecutor(
     }
 
     private suspend fun executeTimelineSearch(call: ToolCall, tool: AgentTool.TimelineSearch): ToolResult {
-        val docs = withContext(Dispatchers.IO) {
-            documentDao.getByDateRange(treeUri, tool.startDate, tool.endDate)
-        }.take(tool.limit)
+        val docs = cache.documentsInDateRange(tool.startDate, tool.endDate).take(tool.limit)
 
         if (docs.isEmpty()) {
             return ToolResult(
@@ -298,19 +299,27 @@ class ToolExecutor(
         val lines = mutableListOf<String>()
         for (doc in docs) {
             val snippet = cache.firstChunkOf(doc.id)?.text ?: doc.firstParagraph ?: ""
+            // SearchPipeline の日付ヒットと同じく [日付:] を付け、CoverageChecker / 回答プロンプトが日付を拾えるようにする
             citations.add(Citation(
                 headingPath = doc.relativePath,
-                snippet = snippet.take(GREP_SNIPPET_CHARS),
+                snippet = DatePrefix.build(doc.documentDate, snippet.take(GREP_SNIPPET_CHARS)),
                 score = 0.7f,
                 docId = doc.id,
                 relativePath = doc.relativePath,
-                source = SourceType.GREP,
+                source = SourceType.METADATA,
             ))
             val dateTag = doc.documentDate?.let { " ($it)" } ?: ""
             lines.add("- [d=${doc.id}] ${doc.relativePath}$dateTag: ${snippet.take(80)}")
         }
         val text = "TIMELINE \"${tool.startDate}\" ~ \"${tool.endDate}\": ${docs.size} documents\n${lines.joinToString("\n")}"
         return ToolResult(call, text, citations)
+    }
+
+    // scope は基本フォルダ指定。"diary" が "diary2/…" に一致しないよう区切りの / まで含めて比較する
+    private fun isInScope(relativePath: String, scope: String): Boolean {
+        val folder = scope.trim('/')
+        // Planner がファイルパスそのものを scope に渡すこともあるので完全一致も許す
+        return folder.isEmpty() || relativePath == folder || relativePath.startsWith("$folder/")
     }
 
     private fun parseFirstHeadings(json: String, count: Int): String =

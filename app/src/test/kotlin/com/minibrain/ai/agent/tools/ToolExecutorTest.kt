@@ -6,6 +6,7 @@ import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.RagPipeline
 import com.minibrain.ai.rag.SearchRequestCache
+import com.minibrain.ai.rag.SourceType
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.entities.ChunkEntity
@@ -194,14 +195,15 @@ class ToolExecutorTest {
         )
         val firstChunk = ChunkEntity(id = 1L, docId = docId, headingPath = "H1", text = "First Chunk Text", embedding = ByteArray(0))
 
-        coEvery { documentDao.getByDateRange(treeUri, "2026-01-01", "2026-01-02") } returns listOf(doc)
+        coEvery { cache.documentsInDateRange("2026-01-01", "2026-01-02") } returns listOf(doc)
         coEvery { cache.firstChunkOf(docId) } returns firstChunk
 
         val call = ToolCall(1, AgentTool.TimelineSearch(startDate = "2026-01-01", endDate = "2026-01-02", limit = 10))
         val result = toolExecutor.execute(call)
 
         assertEquals(1, result.citations.size)
-        assertEquals("First Chunk Text", result.citations[0].snippet)
+        assertEquals("[日付: 2026-01-01] First Chunk Text", result.citations[0].snippet)
+        assertEquals(SourceType.METADATA, result.citations[0].source)
     }
 
     @Test
@@ -219,5 +221,41 @@ class ToolExecutorTest {
         assertEquals(1, result.citations.size)
         assertEquals("notes/a.md", result.citations[0].relativePath)
         io.mockk.coVerify(exactly = 0) { chunkDao.bm25Search(any(), any()) }
+    }
+
+    @Test
+    fun executeReadFile_withDocIdFromAnotherTree_returnsFileNotFound() = runTest {
+        val doc = DocumentEntity(
+            id = 7L, treeUri = "content://other/tree", fileUri = "uri", fileName = "secret.md",
+            relativePath = "secret.md", lastModified = 0L, contentHash = "hash",
+        )
+        coEvery { documentDao.getById(7L) } returns doc
+
+        val result = toolExecutor.execute(ToolCall(1, AgentTool.ReadFile(docId = 7L, path = null)))
+
+        assertEquals("FILE NOT FOUND", result.summary)
+        io.mockk.coVerify(exactly = 0) { chunkDao.getByDoc(any()) }
+    }
+
+    @Test
+    fun executeGrep_scopeMatchesWholeFolderName() = runTest {
+        val inScope = DocumentEntity(
+            id = 1L, treeUri = treeUri, fileUri = "u1", fileName = "a.md",
+            relativePath = "diary/a.md", lastModified = 0L, contentHash = "h",
+        )
+        val similarName = DocumentEntity(
+            id = 2L, treeUri = treeUri, fileUri = "u2", fileName = "b.md",
+            relativePath = "diary2/b.md", lastModified = 0L, contentHash = "h",
+        )
+        val chunks = listOf(
+            ChunkEntity(id = 1L, docId = 1L, headingPath = "H", text = "サウナ", embedding = ByteArray(0)),
+            ChunkEntity(id = 2L, docId = 2L, headingPath = "H", text = "サウナ", embedding = ByteArray(0)),
+        )
+        coEvery { chunkDao.bm25SearchByTree(any(), treeUri, any()) } returns chunks
+        coEvery { cache.documents() } returns listOf(inScope, similarName)
+
+        val result = toolExecutor.execute(ToolCall(1, AgentTool.Grep(query = "サウナ", scope = "diary/")))
+
+        assertEquals(listOf("diary/a.md"), result.citations.map { it.relativePath })
     }
 }

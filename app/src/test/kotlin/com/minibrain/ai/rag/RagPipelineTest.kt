@@ -3,11 +3,10 @@ package com.minibrain.ai.rag
 import com.minibrain.ai.embed.EmbedType
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.data.db.daos.ChunkDao
-import com.minibrain.data.db.daos.DocDateRow
-import com.minibrain.data.db.daos.DocPathRow
 import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChunkEntity
+import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.db.entities.FolderEmbeddingEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -51,6 +50,11 @@ class RagPipelineTest {
     fun teardown() {
         Timber.uproot(timberTree)
     }
+
+    private fun doc(id: Long, treeUri: String, path: String, date: String? = null) = DocumentEntity(
+        id = id, treeUri = treeUri, fileUri = "uri$id", fileName = path.substringAfterLast('/'),
+        relativePath = path, lastModified = 0L, contentHash = "h", documentDate = date,
+    )
 
     @Test
     fun `freshnessBoost returns 0 if date is null`() {
@@ -105,9 +109,7 @@ class RagPipelineTest {
         )
         coEvery { chunkDao.getAllByTree(treeUri) } returns listOf(mockChunk)
 
-        coEvery { documentDao.getDocPathsByIds(listOf(100L)) } returns listOf(
-            DocPathRow(100L, "test/path.md")
-        )
+        coEvery { documentDao.getAllByTree(treeUri) } returns listOf(doc(100L, treeUri, "test/path.md"))
 
         val results = pipeline.vectorOnlyTopK(query, treeUri, k = 10)
 
@@ -156,13 +158,9 @@ class RagPipelineTest {
         coEvery { folderEmbeddingDao.getAllByTree(treeUri) } returns listOf(folderEmbedding)
 
         val todayStr = LocalDate.now().toString()
-        coEvery { documentDao.getDocDatesByIds(any()) } returns listOf(
-            DocDateRow(10L, todayStr),
-            DocDateRow(20L, todayStr)
-        )
-        coEvery { documentDao.getDocPathsByIds(any()) } returns listOf(
-            DocPathRow(10L, "vec.md"),
-            DocPathRow(20L, "bm25.md")
+        coEvery { documentDao.getAllByTree(treeUri) } returns listOf(
+            doc(10L, treeUri, "vec.md", todayStr),
+            doc(20L, treeUri, "bm25.md", todayStr),
         )
 
         val results = pipeline.retrieveTopChunks(query, treeUri, topK = 10)
@@ -189,8 +187,7 @@ class RagPipelineTest {
         coEvery { chunkDao.getAllByTree(treeUri) } returns emptyList()
         coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { folderEmbeddingDao.getAllByTree(treeUri) } returns emptyList()
-        coEvery { documentDao.getDocPathsByIds(emptyList()) } returns emptyList()
-        coEvery { documentDao.getDocDatesByIds(emptyList()) } returns emptyList()
+        coEvery { documentDao.getAllByTree(treeUri) } returns emptyList()
 
         pipeline.retrieveTopChunks(query, treeUri)
 
@@ -206,8 +203,7 @@ class RagPipelineTest {
         coEvery { chunkDao.getAllByTree(treeUri) } returns emptyList()
         coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
         coEvery { folderEmbeddingDao.getAllByTree(treeUri) } returns emptyList()
-        coEvery { documentDao.getDocPathsByIds(emptyList()) } returns emptyList()
-        coEvery { documentDao.getDocDatesByIds(emptyList()) } returns emptyList()
+        coEvery { documentDao.getAllByTree(treeUri) } returns emptyList()
 
         val results = pipeline.retrieveTopChunks(query, treeUri)
         assertTrue(results.isEmpty())

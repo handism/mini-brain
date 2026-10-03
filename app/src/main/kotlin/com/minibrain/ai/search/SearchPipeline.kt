@@ -19,9 +19,10 @@ import com.minibrain.ai.rag.dedupeKey
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.entities.DocumentEntity
-import com.minibrain.data.search.NGramTokenizer
+import com.minibrain.data.search.bm25SearchOrEmpty
 import com.minibrain.util.DatePrefix
 import com.minibrain.util.FileNames
+import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -244,13 +245,7 @@ class SearchPipeline(
     }
 
     private suspend fun bm25Search(query: String, treeUri: String): List<Citation> {
-        val matchQuery = NGramTokenizer.toFtsMatchQuery(query) ?: return emptyList()
-        val chunks = runCatching {
-            chunkDao.bm25SearchByTree(matchQuery, treeUri, BM25_PER_QUERY_LIMIT)
-        }.getOrElse { e ->
-            Timber.tag(TAG).w("BM25 search failed for '$query': ${e.message}")
-            emptyList()
-        }
+        val chunks = chunkDao.bm25SearchOrEmpty(query, treeUri, BM25_PER_QUERY_LIMIT)
         return chunks.map { chunk ->
             Citation(
                 headingPath = chunk.headingPath,
@@ -308,7 +303,7 @@ class SearchPipeline(
         k: Int = VECTOR_LIMIT,
         ctx: SearchRequestCache,
     ): List<Citation> =
-        runCatching {
+        runCatchingCancellable {
             ragPipeline.vectorOnlyTopK(query, treeUri, k = k, cache = ctx)
                 .filter { it.score >= VECTOR_MIN_SCORE }
         }.getOrElse { e ->
@@ -357,10 +352,9 @@ class SearchPipeline(
         dateRange: DateRange?,
         ctx: SearchRequestCache,
     ): List<Citation> {
-        // 期間クエリ（去年の夏・5年前の3月 など）→ getByDateRange で一括取得
-        // documents() がキャッシュ済みなら DB を叩かずに同等のフィルタを実行する
+        // 期間クエリ（去年の夏・5年前の3月 など）→ ロード済み documents を documentDate で範囲フィルタ
         if (dateRange != null) {
-            val docs = filterDocsByDateRange(ctx, dateRange)
+            val docs = ctx.documentsInDateRange(dateRange.start.toString(), dateRange.end.toString())
             Timber.tag(TAG).d("dateRangeSearch range=${dateRange.start}〜${dateRange.end} hits=${docs.size}")
             if (docs.isEmpty()) return emptyList()
 
@@ -401,22 +395,6 @@ class SearchPipeline(
             relativePath = doc.relativePath,
             source = SourceType.METADATA,
         )
-    }
-
-    // documentDate は ISO 文字列(YYYY-MM-DD)で保存されており辞書順 = 時系列順なので
-    // 文字列比較で安全に範囲フィルタできる。元の SQL `WHERE documentDate >= ? AND ... <= ?` 相当。
-    private suspend fun filterDocsByDateRange(
-        ctx: SearchRequestCache,
-        range: DateRange,
-    ): List<DocumentEntity> {
-        val start = range.start.toString()
-        val end = range.end.toString()
-        return ctx.documents()
-            .filter { doc ->
-                val d = doc.documentDate ?: return@filter false
-                d >= start && d <= end
-            }
-            .sortedBy { it.documentDate }
     }
 }
 

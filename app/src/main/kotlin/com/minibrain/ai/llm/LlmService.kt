@@ -13,6 +13,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import timber.log.Timber
+import com.minibrain.util.runCatchingCancellable
 
 open class LlmService {
 
@@ -78,7 +79,7 @@ open class LlmService {
         if (!isReady()) return text.take(500)
         val prompt = "以下のテキストを500文字以内で簡潔に要約してください。重要な情報を落とさないようにしてください。\n\n$text\n\n要約:"
         val sb = StringBuilder()
-        runCatching {
+        runCatchingCancellable {
             generateStream(prompt).collect { sb.append(it) }
         }
         return sb.toString().ifBlank { text.take(500) }

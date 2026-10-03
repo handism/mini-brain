@@ -289,5 +289,15 @@ class ChatViewModelTest {
         assertFalse(viewModel.isGenerating.value)
         val finalMsgs = viewModel.messages.value
         assertFalse(finalMsgs.last().isStreaming)
+        // キャンセルはエラーではないので、エラーメッセージは出さない
+        assertNull(viewModel.errorMessage.value)
+    }
+
+    @Test
+    fun `isNegativeResponse only checks the opening of the answer`() {
+        assertTrue(isNegativeResponse("申し訳ありませんが、資料からは分かりませんでした。"))
+        val longAnswer = "サウナしきじには 2022/01/01 に初めて訪れています。" + "あ".repeat(NEGATIVE_CHECK_CHARS) +
+            "なお再訪の日付は分かりません。"
+        assertFalse(isNegativeResponse(longAnswer))
     }
 }

@@ -9,16 +9,6 @@ import androidx.room.Update
 import com.minibrain.data.db.entities.DocumentEntity
 import kotlinx.coroutines.flow.Flow
 
-data class DocDateRow(
-    @ColumnInfo(name = "id") val id: Long,
-    @ColumnInfo(name = "documentDate") val documentDate: String?,
-)
-
-data class DocPathRow(
-    @ColumnInfo(name = "id") val id: Long,
-    @ColumnInfo(name = "relativePath") val relativePath: String?,
-)
-
 data class DocumentMinimal(
     val id: Long,
     val fileName: String,
@@ -78,15 +68,6 @@ interface DocumentDao {
 
     @Query("SELECT * FROM documents WHERE treeUri = :treeUri ORDER BY lastModified DESC LIMIT :limit")
     suspend fun getRecentFiles(treeUri: String, limit: Int): List<DocumentEntity>
-
-    @Query("SELECT id, documentDate FROM documents WHERE id IN (:ids)")
-    suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow>
-
-    @Query("SELECT id, relativePath FROM documents WHERE id IN (:ids)")
-    suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow>
-
-    @Query("SELECT * FROM documents WHERE treeUri = :treeUri AND documentDate >= :start AND documentDate <= :end ORDER BY documentDate ASC")
-    suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity>
 
     @Query("SELECT id, fileName, relativePath, first_para, documentDate FROM documents WHERE treeUri = :treeUri")
     suspend fun getMinimalByTree(treeUri: String): List<DocumentMinimal>

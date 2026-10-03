@@ -6,6 +6,7 @@ import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.dedupeKey
 import com.minibrain.util.DatePrefix
 import com.minibrain.util.JsonArrayText
+import com.minibrain.util.runCatchingCancellable
 import timber.log.Timber
 
 class LlmReranker(private val llmService: LlmService) {
@@ -29,7 +30,7 @@ class LlmReranker(private val llmService: LlmService) {
         val limited = candidates.take(CANDIDATE_LIMIT)
         val prompt = buildPrompt(query, limited, topK)
         val sb = StringBuilder()
-        runCatching {
+        runCatchingCancellable {
             llmService.generateStream(prompt).collect { token -> sb.append(token) }
         }.onFailure {
             Timber.tag(TAG).w(it, "LLM rerank failed")
