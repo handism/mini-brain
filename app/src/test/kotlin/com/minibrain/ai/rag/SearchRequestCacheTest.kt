@@ -224,6 +224,22 @@ class SearchRequestCacheTest {
     }
 
     @Test
+    fun `prefetchQueryEmbeddings batches only missing texts and feeds queryEmbedding`() = runBlocking {
+        val cache = SearchRequestCache("tree", FakeChunkDao(), FakeDocumentDao())
+        cache.queryEmbedding("サウナ") { floatArrayOf(1f) }
+        val batches = mutableListOf<List<String>>()
+
+        cache.prefetchQueryEmbeddings(listOf("サウナ", "しきじ", "しきじ", "熱波")) { texts ->
+            batches += texts
+            texts.map { floatArrayOf(it.length.toFloat()) }
+        }
+        val hit = cache.queryEmbedding("熱波") { error("should be memoized") }
+
+        assertEquals(listOf(listOf("しきじ", "熱波")), batches)
+        assertEquals(listOf(2f), hit.toList())
+    }
+
+    @Test
     fun `documentsInDateRange filters inclusive range and sorts by date`() = runBlocking {
         fun doc(id: Long, date: String?) = DocumentEntity(
             id = id, treeUri = "tree", fileUri = "u$id", fileName = "f$id.md", relativePath = "f$id.md",

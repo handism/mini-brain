@@ -13,7 +13,7 @@
 - **Metadata Search** — ファイル名・フォルダパス・タグ・documentDate を直接検索。本文にない情報（日付フォルダ・会社名）も Recall に貢献。ファイル名(拡張子除く)が質問に部分文字列として含まれる場合の逆引きも実施し、日本語助詞でトークン化されないクエリでも固有名詞ファイルを確実に拾う。snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込み、日付クエリでの回答可能性判定を高速化
 - **Multi-Vector Search** — 元クエリ + 展開クエリ + HyDE 仮想回答で順次ベクトル検索し、コサイン類似度 0.45 未満はノイズとして除外。字面が一致しない言い換えや概念質問を取り逃さない
 - **重み付き RRF** — Metadata=1.5 / BM25=1.2 / Vector=1.0 の重みで rank 融合。完全一致のメタデータを優先しつつ、低類似度のベクトルノイズを上位に来づらくする
-- **LLM Reranker** — 50 件の候補を LLM が関連度順に再採点し、上位 10 件を回答コンテキストに投入。`path / heading / date / source / snippet` の構造化形式で投入し、日付クエリでは date フィールドを持つ候補を優先
+- **LLM Reranker** — 50 件の候補を LLM が関連度順に再採点し、上位 10 件を回答コンテキストに投入。`path / heading / date / source / snippet` の構造化形式で投入し、日付クエリでは date フィールドを持つ候補を優先。日付クエリでファイル名一致の候補がある場合は LLM 採点を省略して高速化
 - **Coverage Check** — Search First 後に LLM が「回答に必要な証拠が揃っているか」を評価。不足情報（`visit_date` 等）を特定し、Explorer Strategy（EXPAND_TIME / EXPAND_TOPIC）を決定して ReAct に指示を渡す。日付クエリ かつ 日付プレフィックス付き候補がある場合は LLM 呼び出しを短絡
 - **ReAct エージェント（Fallback）** — Search First + Coverage Check で証拠が揃わなかった場合のフォールバック。Explorer Strategy の hint を参照し、glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search を自由に組み合わせて多段探索。EXPAND_TIME は read_file での全文読解を優先
 - **Query Classifier** — 一般知識の質問は RAG をスキップして直接 LLM が回答。検索コストを削減

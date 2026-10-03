@@ -8,6 +8,7 @@ import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.search.bm25SearchOrEmpty
 import com.minibrain.data.db.entities.FolderEmbeddingEntity
+import com.minibrain.util.runCatchingCancellable
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlin.math.exp
@@ -139,6 +140,16 @@ class RagPipeline(
     // この呼び出し内だけのキャッシュを作る。doc / chunk の参照はすべてキャッシュ経由に統一する
     private fun cacheFor(treeUri: String, cache: SearchRequestCache?): SearchRequestCache =
         cache?.takeIf { it.treeUri == treeUri } ?: SearchRequestCache(treeUri, chunkDao, documentDao)
+
+    /**
+     * 複数クエリの埋め込みを 1 回の推論で先に計算して cache に入れる。
+     * 失敗しても vectorOnlyTopK 側が 1 件ずつ embed し直すので、ここではログだけ残す。
+     */
+    suspend fun prefetchQueryEmbeddings(queries: List<String>, cache: SearchRequestCache) {
+        runCatchingCancellable {
+            cache.prefetchQueryEmbeddings(queries) { embedderService.embedAll(it, EmbedType.QUERY) }
+        }.onFailure { Timber.tag(TAG).w(it, "query embedding prefetch failed") }
+    }
 
     // 同一リクエスト内の同じクエリは embed し直さない
     private suspend fun embedQuery(question: String, ctx: SearchRequestCache): FloatArray =
