@@ -98,6 +98,17 @@ class SearchRequestCache(
     suspend fun queryEmbedding(text: String, embed: suspend (String) -> FloatArray): FloatArray =
         queryVecMutex.withLock { queryVecs.getOrPut(text) { embed(text) } }
 
+    /**
+     * 未計算のクエリだけを embedAll でまとめて埋め込み、memoize に入れる。
+     * 以降の queryEmbedding は DB / ONNX を触らずに返る（multiVectorSearch の N 回推論を 1 回にする）。
+     */
+    suspend fun prefetchQueryEmbeddings(texts: List<String>, embedAll: suspend (List<String>) -> List<FloatArray>) =
+        queryVecMutex.withLock {
+            val missing = texts.distinct().filterNot { it in queryVecs }
+            if (missing.isEmpty()) return@withLock
+            embedAll(missing).forEachIndexed { i, vec -> queryVecs[missing[i]] = vec }
+        }
+
     /** queryVec に対する cosine topK。L2 正規化済みのためドット積で算出。 */
     suspend fun cosineTopK(queryVec: FloatArray, k: Int): List<Pair<Float, ChunkEntity>> {
         val (chunks, vectors) = chunkVectors()
