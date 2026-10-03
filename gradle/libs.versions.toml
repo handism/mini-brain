@@ -9,6 +9,8 @@ room = "2.7.1"
 datastore = "1.1.2"
 documentfile = "1.1.0"
 onnxruntime-android = "1.26.0"
+# latest.release だとビルドごとに解決結果が変わるため固定する。上げるときは -Xskip-metadata-version-check の要否も確認
+litertlm = "0.17.1"
 moshi = "1.15.2"
 coroutines = "1.9.0"
 okhttp = "4.12.0"
@@ -42,7 +44,7 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 androidx-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splash" }
-google-litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version = "latest.release" }
+google-litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertlm" }
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime-android" }
 moshi = { group = "com.squareup.moshi", name = "moshi", version.ref = "moshi" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

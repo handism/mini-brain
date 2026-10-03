@@ -69,6 +69,9 @@ class SearchPipeline(
         private val METADATA_SPLIT_REGEX = Regex("""[\s　、。・]+""")
         private val WHITESPACE_NORMALIZE_REGEX = Regex("""\s+""")
 
+        internal fun shouldSkipRerank(query: String, merged: List<Citation>): Boolean =
+            DateResolver.isDateQuery(query) && merged.any { it.topicMatch }
+
         internal fun buildUniqueNormalizedQueries(
             originalQuery: String?,
             expanded: List<String>,
@@ -227,8 +230,17 @@ class SearchPipeline(
         traceEvents: MutableList<AgentTraceEvent>
     ): List<Citation> {
         // 4. LLM Rerank (LLM 呼び出し — 逐次)
-        onStatus?.invoke("候補を絞り込み中...")
-        val reranked = llmReranker.rerank(query, merged, RERANK_TOP_K)
+        // 日付クエリ + topicMatch 候補ありなら対象ファイルは確定しているので LLM を呼ばない（ADR-032）。
+        // CoverageChecker の topic match 短絡と同じ条件。topicMatch を先頭に、残りは RRF 順を保つ。
+        val reranked = if (shouldSkipRerank(query, merged)) {
+            val (topic, rest) = merged.partition { it.topicMatch }
+            (topic + rest).take(RERANK_TOP_K).also {
+                Timber.tag(TAG).d("rerank skipped: date query with topic match (topic=${topic.size})")
+            }
+        } else {
+            onStatus?.invoke("候補を絞り込み中...")
+            llmReranker.rerank(query, merged, RERANK_TOP_K)
+        }
         traceEvents += RerankEvent(before = merged.size, after = reranked.size)
         Timber.tag(TAG).d("reranked=${reranked.size}")
 
@@ -331,6 +343,9 @@ class SearchPipeline(
             expanded = request.expanded,
             hypothetical = request.hypothetical
         )
+
+        // 全クエリの埋め込みを 1 回の推論でまとめて計算する（以降の vectorSearch は memoize を引く）
+        ragPipeline.prefetchQueryEmbeddings(ordered.toList(), request.ctx)
 
         val seen = HashSet<String>()
         val out = mutableListOf<Citation>()

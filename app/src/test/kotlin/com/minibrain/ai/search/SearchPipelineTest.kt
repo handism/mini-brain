@@ -47,6 +47,7 @@ class SearchPipelineTest {
         cache = mockk()
         // 期間フィルタは実装を使い、各テストでスタブした documents() に対して絞り込ませる
         coEvery { cache.documentsInDateRange(any(), any()) } answers { callOriginal() }
+        coEvery { ragPipeline.prefetchQueryEmbeddings(any(), any()) } returns Unit
 
         searchPipeline = SearchPipeline(
             queryExpander = queryExpander,
@@ -241,5 +242,44 @@ class SearchPipelineTest {
         coVerify(exactly = 1) { cache.firstChunkOf(7L) }
         coVerify(exactly = 1) { cache.firstChunkOf(8L) }
         coVerify(exactly = 0) { cache.chunkVectors() }
+    }
+
+    @Test
+    fun `search skips LLM reranker for date query with topic match`() = runTest {
+        val query = "スパイス堂にいつ行ったっけ"
+        val treeUri = "tree/uri"
+
+        coEvery { queryExpander.expand(query) } returns listOf(query)
+        coEvery { hyde.generateHypothetical(query) } returns null
+        coEvery { cache.documents() } returns listOf(
+            DocumentEntity(id = 8, treeUri = treeUri, fileUri = "uri", fileName = "スパイス堂.md", relativePath = "food/スパイス堂.md", lastModified = 0L, contentHash = "", firstParagraph = "初回訪問日: 2024/11/03", documentDate = null)
+        )
+        coEvery { cache.firstChunkOf(any()) } returns null
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
+        coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns
+            (1L..12L).map { citation(100 + it, "v$it", SourceType.VECTOR, score = 0.9f) }
+
+        val result = searchPipeline.search(query, treeUri, cache = cache)
+
+        coVerify(exactly = 0) { llmReranker.rerank(any(), any(), any()) }
+        assertEquals(8L, result.citations[0].docId)
+        assertTrue(result.citations[0].topicMatch)
+        assertEquals(10, result.citations.size)
+    }
+
+    @Test
+    fun `search prefetches all vector query embeddings in one call`() = runTest {
+        val query = "original"
+        coEvery { queryExpander.expand(query) } returns listOf("a", "b")
+        coEvery { hyde.generateHypothetical(query) } returns "hyde"
+        coEvery { cache.documents() } returns emptyList()
+        coEvery { cache.firstChunkOf(any()) } returns null
+        coEvery { chunkDao.bm25SearchByTree(any(), any(), any()) } returns emptyList()
+        coEvery { ragPipeline.vectorOnlyTopK(any(), any(), any(), any()) } returns emptyList()
+        coEvery { llmReranker.rerank(any(), any(), any()) } returns emptyList()
+
+        searchPipeline.search(query, "tree/uri", cache = cache)
+
+        coVerify(exactly = 1) { ragPipeline.prefetchQueryEmbeddings(listOf("original", "a", "b", "hyde"), cache) }
     }
 }

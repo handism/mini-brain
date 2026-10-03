@@ -24,6 +24,10 @@ jobs:
       - name: Lint
         run: ./gradlew lint
 
+      # R8 / ProGuard の keep 漏れ（ONNX Runtime・LiteRT-LM の JNI など）を検出するため release もビルドする
+      - name: Release build
+        run: ./gradlew assembleRelease
+
       - name: Upload reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
