@@ -22,6 +22,7 @@ import com.minibrain.data.md.MdFileReader
 import com.minibrain.data.search.NGramTokenizer
 import com.minibrain.util.DateValidator
 import com.minibrain.util.JsonArrays
+import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -295,12 +296,12 @@ class DocumentRepository(
 
     // まとめて embed し、失敗したら 1 件ずつに切り替えて壊れたチャンクだけを捨てる
     private suspend fun embedBatch(batch: List<Chunk>, relativePath: String): List<Pair<Chunk, FloatArray>> {
-        runCatching { embedder.embedAll(batch.map { it.text }, EmbedType.PASSAGE) }
+        runCatchingCancellable { embedder.embedAll(batch.map { it.text }, EmbedType.PASSAGE) }
             .onSuccess { return batch.zip(it) }
             .onFailure { e -> Timber.tag(TAG).w(e, "batch embed failed, falling back to single: $relativePath") }
 
         return batch.mapNotNull { chunk ->
-            runCatching { chunk to embedder.embed(chunk.text, EmbedType.PASSAGE) }
+            runCatchingCancellable { chunk to embedder.embed(chunk.text, EmbedType.PASSAGE) }
                 .onFailure { e -> Timber.tag(TAG).e(e, "embed failed: $relativePath / ${chunk.headingPath}") }
                 .getOrNull()
         }
@@ -364,7 +365,7 @@ class DocumentRepository(
                 if (headings.isNotEmpty()) append("見出し: ${headings.joinToString(", ")}")
             }
 
-            runCatching {
+            runCatchingCancellable {
                 val embedding = embedder.embed(folderText, EmbedType.PASSAGE)
                 folderEmbeddings.add(
                     FolderEmbeddingEntity(

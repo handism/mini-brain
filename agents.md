@@ -115,6 +115,8 @@
 ### 5.1 並行処理・スレッド制御
 - **LiteRT-LM は単一スレッドでのみ動作可能**なため、LLM を利用する `QueryExpander` や `LlmReranker` などを非同期で並行実行してはなりません。必ず逐次的に呼び出してください。
 - `EmbedderService` と `LlmService` の初期化は非常に重いため、必ず `Dispatchers.Default` などのバックグラウンドスレッドで行わせるコードにしてください。
+- suspend 文脈で例外を握るときは標準の `runCatching` ではなく `com.minibrain.util.runCatchingCancellable` を使ってください。`runCatching` は `CancellationException`（`withTimeout` のタイムアウトを含む）まで失敗扱いにするため、停止ボタンで「生成エラー」が出たり、タイムアウトが握りつぶされたりします（ADR-031）。
+- `ChatViewModel.sendMessage` は `try/finally` で `isGenerating` を戻します。ジョブは LAZY 起動で `currentJob` を代入してから開始します（`viewModelScope` は `Main.immediate` のため）。
 
 ### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
 - **ファイル名逆引き**: `SearchPipeline.metadataSearch` では、ファイルの拡張子を除いた名前に部分一致するクエリを検出して優先抽出します（形態素解析に依存しない日本語ファイル検出のため）。判定は `FileNames.stemMatchesAnyQuery` に集約されており、`PlannerHintBuilder.build` のファイル名候補抽出も同じ規則を使います。しきい値 `MIN_STEM_MATCH_CHARS = 1` は `歯.md` / `AI.md` のような 1 文字 stem を拾うための値です（ADR-026 の記載は 3 でしたが後日 1 に引き下げ）。
@@ -126,6 +128,8 @@
   3. 本文中の日付表記（`YYYY/MM/DD` など）
 
 ### 5.3 ReAct DSL
+- ReAct の observation は「最新 2 件を full、それ以前を compact」で Planner に渡します（`addObservation`）。新しい observation は常に full で追加してください（ADR-031）。
+- ReAct ツールは現在の `treeUri` の外を読まないこと。`read_file` の docId 指定も `treeUri` 一致を確認します。`grep` / `vector_search` の scope はフォルダ単位で判定します（`diary` は `diary2/` に一致しない、ADR-031）。
 - ReAct ループで Planner LLM が出力するツール命令は、JVM 上でのユニットテスト実行の互換性を担保するため、**JSON ではなく独自の DSL 形式（key:value）** を用います。
 - `PlannerHintBuilder.build` は 期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致 の順に解析して hint を構築します。
 
@@ -135,6 +139,7 @@
 
 **キャッシュ・パフォーマンス**
 - `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。クエリの埋め込みも `SearchRequestCache.queryEmbedding` で memoize し、同じ文を二度 embed しません（ADR-030）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
+- `RagPipeline` は doc / chunk を常に `SearchRequestCache` 経由で参照します。cache を渡さない単独呼び出し（EvalRunner・テスト）では呼び出し内だけのキャッシュを作ります。期間フィルタは `SearchRequestCache.documentsInDateRange` に集約し、`SearchPipeline.dateRangeSearch` と `ToolExecutor.timeline_search` が共有します。BM25 の MATCH 式の生成と失敗時の空返しは `ChunkDao.bm25SearchOrEmpty` に集約しています（ADR-031）。
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
 - `indexFolder` / `clearFolder` は `DocumentRepository.indexMutex` で直列化されます（Home / Settings からの同時実行で挿入・削除が競合しないため）。`indexFolder` は失敗時に例外を投げず `IndexingState.Error` を出します（キャンセルのみ再送出）。
 - `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。

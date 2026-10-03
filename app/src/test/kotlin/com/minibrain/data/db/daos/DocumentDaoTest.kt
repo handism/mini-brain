@@ -30,9 +30,6 @@ class DocumentDaoTest {
                 return emptyList()
             }
             override suspend fun getRecentFiles(treeUri: String, limit: Int): List<DocumentEntity> = emptyList()
-            override suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow> = emptyList()
-            override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = emptyList()
-            override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = emptyList()
             override suspend fun getMinimalByTree(treeUri: String): List<DocumentMinimal> = emptyList()
         }
 

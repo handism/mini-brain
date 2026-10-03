@@ -44,6 +44,19 @@ class SearchRequestCache(
         }
     }
 
+    /**
+     * documentDate が [start, end]（両端含む、ISO `YYYY-MM-DD`）に入る doc を日付昇順で返す。
+     * ISO 文字列は辞書順 = 時系列順なので文字列比較で済む。ロード済みの documents() を絞り込むだけで
+     * DB を叩き直さない（SearchPipeline の期間検索と ToolExecutor の timeline_search で共有）。
+     */
+    suspend fun documentsInDateRange(start: String, end: String): List<DocumentEntity> =
+        documents()
+            .filter { doc ->
+                val d = doc.documentDate ?: return@filter false
+                d >= start && d <= end
+            }
+            .sortedBy { it.documentDate }
+
     suspend fun chunkVectors(): Pair<List<ChunkEntity>, Array<FloatArray>> {
         val c = cachedChunks
         val v = cachedVectors

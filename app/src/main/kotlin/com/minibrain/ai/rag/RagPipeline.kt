@@ -6,8 +6,8 @@ import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.daos.FolderEmbeddingDao
 import com.minibrain.data.db.entities.ChunkEntity
+import com.minibrain.data.search.bm25SearchOrEmpty
 import com.minibrain.data.db.entities.FolderEmbeddingEntity
-import com.minibrain.data.search.NGramTokenizer
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlin.math.exp
@@ -42,23 +42,24 @@ class RagPipeline(
 ) {
     suspend fun retrieveTopChunks(
         question: String,
-        treeUri: String? = null,
+        treeUri: String,
         topK: Int = 20,
         cache: SearchRequestCache? = null,
     ): List<Citation> =
         coroutineScope {
+            val ctx = cacheFor(treeUri, cache)
             // vector / folder の両検索で同じクエリベクトルを使うため、embed は 1 回だけ行う
             val queryVecJob = async(start = CoroutineStart.LAZY) {
-                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { embedQuery(question, cache) }
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { embedQuery(question, ctx) }
                     ?: run { Timber.tag(TAG).w("query embed timed out"); null }
             }
             val vecJob = async {
                 val queryVec = queryVecJob.await() ?: return@async emptyList()
-                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(queryVec, treeUri, k = 50, cache) }
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { cosineTopK(ctx, queryVec, 50) }
                     ?: run { Timber.tag(TAG).w("vectorSearch timed out"); emptyList() }
             }
             val bm25Job = async {
-                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { bm25Search(question, treeUri, k = 50) }
+                withTimeoutOrNull(SEARCH_TIMEOUT_MS) { chunkDao.bm25SearchOrEmpty(question, treeUri, 50) }
                     ?: run { Timber.tag(TAG).w("bm25Search timed out"); emptyList() }
             }
             val folderJob = async {
@@ -73,9 +74,10 @@ class RagPipeline(
 
             Timber.tag(TAG).d("vec=${vecResults.size} bm25=${bm25Results.size} folder=${folderResults.size}")
 
-            val allDocIds = (vecResults.map { it.second.docId } + bm25Results.map { it.docId }).distinct()
-            val docIdToDate = resolveDocDates(allDocIds, cache)
-            val docPathMap = resolveDocPaths(allDocIds, cache)
+            val docsById = ctx.documents().associateBy { it.id }
+            val docIdToDate = { docId: Long ->
+                docsById[docId]?.documentDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            }
 
             val chunkCitations = rrf(
                 RrfParams(
@@ -91,7 +93,7 @@ class RagPipeline(
                         snippet = chunk.text,
                         score = score,
                         docId = chunk.docId,
-                        relativePath = docPathMap[chunk.docId],
+                        relativePath = docsById[chunk.docId]?.relativePath,
                         source = SourceType.RRF,
                     )
                 }
@@ -117,95 +119,38 @@ class RagPipeline(
         k: Int = 20,
         cache: SearchRequestCache? = null,
     ): List<Citation> {
-        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { vectorSearch(embedQuery(question, cache), treeUri, k, cache) }
+        val ctx = cacheFor(treeUri, cache)
+        val hits = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { cosineTopK(ctx, embedQuery(question, ctx), k) }
             ?: run { Timber.tag(TAG).w("vectorOnlyTopK timed out"); return emptyList() }
-        val docPathMap = resolveDocPaths(hits.map { it.second.docId }, cache)
+        val docsById = ctx.documents().associateBy { it.id }
         return hits.map { (score, chunk) ->
             Citation(
                 headingPath = chunk.headingPath,
                 snippet = chunk.text,
                 score = score,
                 docId = chunk.docId,
-                relativePath = docPathMap[chunk.docId],
+                relativePath = docsById[chunk.docId]?.relativePath,
                 source = SourceType.VECTOR,
             )
         }
     }
 
-    // cache があれば同一リクエスト内の同じクエリは embed し直さない
-    private suspend fun embedQuery(question: String, cache: SearchRequestCache?): FloatArray {
-        val embed: suspend (String) -> FloatArray = { embedderService.embed(it, EmbedType.QUERY) }
-        return cache?.queryEmbedding(question, embed) ?: embed(question)
-    }
+    // AgentPipeline 経由なら共有キャッシュを使い、単独呼び出し（EvalRunner・テスト）では
+    // この呼び出し内だけのキャッシュを作る。doc / chunk の参照はすべてキャッシュ経由に統一する
+    private fun cacheFor(treeUri: String, cache: SearchRequestCache?): SearchRequestCache =
+        cache?.takeIf { it.treeUri == treeUri } ?: SearchRequestCache(treeUri, chunkDao, documentDao)
 
-    private suspend fun vectorSearch(
-        queryVec: FloatArray,
-        treeUri: String?,
-        k: Int,
-        cache: SearchRequestCache? = null,
-    ): List<Pair<Float, ChunkEntity>> =
+    // 同一リクエスト内の同じクエリは embed し直さない
+    private suspend fun embedQuery(question: String, ctx: SearchRequestCache): FloatArray =
+        ctx.queryEmbedding(question) { embedderService.embed(it, EmbedType.QUERY) }
+
+    // 全件ドット積は CPU 負荷が高いので Default で回す
+    private suspend fun cosineTopK(ctx: SearchRequestCache, queryVec: FloatArray, k: Int): List<Pair<Float, ChunkEntity>> =
+        withContext(Dispatchers.Default) { ctx.cosineTopK(queryVec, k) }
+
+    private suspend fun folderSearch(queryVec: FloatArray, treeUri: String, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =
         withContext(Dispatchers.Default) {
-            // 同一 treeUri のキャッシュがあればロード+デコード済みベクトルを再利用する
-            if (cache != null && treeUri != null && cache.treeUri == treeUri) {
-                return@withContext cache.cosineTopK(queryVec, k)
-            }
-            val chunks = if (treeUri != null) {
-                chunkDao.getAllByTree(treeUri)
-            } else {
-                chunkDao.getAll()
-            }
-            val candidates = chunks.map { chunk ->
-                Pair(EmbedderService.bytesToFloatArray(chunk.embedding), chunk)
-            }
-            CosineSimilarity.topK(queryVec, candidates, k)
-        }
-
-    private suspend fun resolveDocDates(
-        docIds: List<Long>,
-        cache: SearchRequestCache?,
-    ): Map<Long, LocalDate?> {
-        val distinctIds = docIds.distinct()
-        if (distinctIds.isEmpty()) return emptyMap()
-
-        val docIdToDateStr = if (cache != null) {
-            val byId = cache.documents().associateBy { it.id }
-            distinctIds.associateWith { byId[it]?.documentDate }
-        } else {
-            withContext(Dispatchers.IO) {
-                documentDao.getDocDatesByIds(distinctIds)
-            }.associate { row ->
-                row.id to row.documentDate
-            }
-        }
-
-        return docIdToDateStr.mapValues { (_, dateStr) ->
-            dateStr?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-        }
-    }
-
-    private suspend fun resolveDocPaths(
-        docIds: List<Long>,
-        cache: SearchRequestCache?,
-    ): Map<Long, String?> {
-        if (cache != null) {
-            val byId = cache.documents().associateBy { it.id }
-            return docIds.distinct().associateWith { byId[it]?.relativePath }
-        }
-        val distinctIds = docIds.distinct()
-        if (distinctIds.isEmpty()) return emptyMap()
-        return withContext(Dispatchers.IO) {
-            documentDao.getDocPathsByIds(distinctIds)
-        }.associate { row ->
-            row.id to row.relativePath
-        }
-    }
-
-    private suspend fun folderSearch(queryVec: FloatArray, treeUri: String?, k: Int): List<Pair<Float, FolderEmbeddingEntity>> =
-        withContext(Dispatchers.Default) {
-            val folders = withContext(Dispatchers.IO) {
-                if (treeUri != null) folderEmbeddingDao.getAllByTree(treeUri)
-                else emptyList()
-            }
+            val folders = withContext(Dispatchers.IO) { folderEmbeddingDao.getAllByTree(treeUri) }
             if (folders.isEmpty()) return@withContext emptyList()
             val candidates = folders.map { fe ->
                 Pair(EmbedderService.bytesToFloatArray(fe.embedding), fe)
@@ -213,26 +158,12 @@ class RagPipeline(
             CosineSimilarity.topK(queryVec, candidates, k)
         }
 
-    private suspend fun bm25Search(question: String, treeUri: String?, k: Int): List<ChunkEntity> {
-        val matchQuery = NGramTokenizer.toFtsMatchQuery(question) ?: return emptyList()
-        return runCatching {
-            if (treeUri != null) {
-                chunkDao.bm25SearchByTree(matchQuery, treeUri, k)
-            } else {
-                chunkDao.bm25Search(matchQuery, k)
-            }
-        }.getOrElse { e ->
-            Timber.tag(TAG).w("BM25 search failed: ${e.message}")
-            emptyList()
-        }
-    }
-
     private data class RrfParams(
         val bm25Results: List<ChunkEntity>,
         val vecResults: List<ChunkEntity>,
         val topK: Int,
         val k: Int = 60,
-        val docIdToDate: Map<Long, LocalDate?> = emptyMap(),
+        val docIdToDate: (Long) -> LocalDate? = { null },
     )
 
     private fun rrf(params: RrfParams): List<Pair<Float, ChunkEntity>> {
@@ -244,7 +175,7 @@ class RagPipeline(
         val today = LocalDate.now()
         return fused
             .map { entry ->
-                val boost = freshnessBoost(params.docIdToDate[entry.item.docId], today)
+                val boost = freshnessBoost(params.docIdToDate(entry.item.docId), today)
                 Pair(entry.score + boost, entry.item)
             }
             .sortedByDescending { it.first }
@@ -257,7 +188,8 @@ class RagPipeline(
         // freshnessBoost tuning constants — adjust to balance recency vs. relevance
         // RRF max score ≈ 0.032 (rank=1 in both BM25 and vector)
         internal const val FRESHNESS_BOOST_MAX  = 0.010f  // 最大加点 (RRF max の約 30%)
-        internal const val FRESHNESS_DECAY_DAYS = 90f     // 半減期 90 日 (30d:~0.0072, 1y:~0.0017, 3y:~0.0001)
+        // exp(-days/90) の時定数。半減期は 90×ln2 ≈ 62 日 (30d:~0.0072, 1y:~0.00017, 3y:≈0)
+        internal const val FRESHNESS_DECAY_DAYS = 90f
 
         fun freshnessBoost(docDate: LocalDate?, today: LocalDate): Float {
             if (docDate == null) return 0f

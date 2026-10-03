@@ -2,8 +2,6 @@ package com.minibrain.ai.rag
 
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocChunkCount
-import com.minibrain.data.db.daos.DocDateRow
-import com.minibrain.data.db.daos.DocPathRow
 import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.entities.ChunkEntity
 import com.minibrain.data.db.entities.DocumentEntity
@@ -51,9 +49,6 @@ class SearchRequestCacheTest {
         override suspend fun searchByPath(treeUri: String, keyword: String): List<DocumentEntity> = emptyList()
         override suspend fun _searchByPath(treeUri: String, keyword: String): List<DocumentEntity> = emptyList()
         override suspend fun getRecentFiles(treeUri: String, limit: Int): List<DocumentEntity> = emptyList()
-        override suspend fun getDocDatesByIds(ids: List<Long>): List<DocDateRow> = emptyList()
-        override suspend fun getDocPathsByIds(ids: List<Long>): List<DocPathRow> = emptyList()
-        override suspend fun getByDateRange(treeUri: String, start: String, end: String): List<DocumentEntity> = emptyList()
         override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = emptyList()
         override suspend fun getMinimalByTree(treeUri: String): List<com.minibrain.data.db.daos.DocumentMinimal> = emptyList()
     }
@@ -226,5 +221,22 @@ class SearchRequestCacheTest {
 
         assertEquals(listOf("カレー", "スパイス堂"), embedded)
         assertEquals(first.toList(), second.toList())
+    }
+
+    @Test
+    fun `documentsInDateRange filters inclusive range and sorts by date`() = runBlocking {
+        fun doc(id: Long, date: String?) = DocumentEntity(
+            id = id, treeUri = "tree", fileUri = "u$id", fileName = "f$id.md", relativePath = "f$id.md",
+            documentDate = date, lastModified = 0L, contentHash = "h",
+        )
+        val docDao = io.mockk.mockk<DocumentDao>()
+        io.mockk.coEvery { docDao.getAllByTree("tree") } returns listOf(
+            doc(1, "2026-01-31"), doc(2, "2026-01-01"), doc(3, "2025-12-31"), doc(4, null), doc(5, "2026-02-01"),
+        )
+        val cache = SearchRequestCache("tree", FakeChunkDao(), docDao)
+
+        val hits = cache.documentsInDateRange("2026-01-01", "2026-01-31")
+
+        assertEquals(listOf(2L, 1L), hits.map { it.id })
     }
 }

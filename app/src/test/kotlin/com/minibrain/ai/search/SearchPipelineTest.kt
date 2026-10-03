@@ -45,6 +45,8 @@ class SearchPipelineTest {
         documentDao = mockk()
         hyde = mockk()
         cache = mockk()
+        // 期間フィルタは実装を使い、各テストでスタブした documents() に対して絞り込ませる
+        coEvery { cache.documentsInDateRange(any(), any()) } answers { callOriginal() }
 
         searchPipeline = SearchPipeline(
             queryExpander = queryExpander,

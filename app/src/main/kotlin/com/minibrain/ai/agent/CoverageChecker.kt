@@ -3,6 +3,7 @@ package com.minibrain.ai.agent
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import com.minibrain.util.DatePrefix
+import com.minibrain.util.runCatchingCancellable
 import timber.log.Timber
 
 data class CoverageResult(
@@ -71,7 +72,7 @@ class CoverageChecker(private val llmService: LlmService) {
 
         val prompt = buildPrompt(query, candidates.take(MAX_CANDIDATES))
         val sb = StringBuilder()
-        runCatching {
+        runCatchingCancellable {
             llmService.generateStream(prompt).collect { token -> sb.append(token) }
         }.onFailure {
             Timber.tag(TAG).w(it, "coverage check LLM failed")

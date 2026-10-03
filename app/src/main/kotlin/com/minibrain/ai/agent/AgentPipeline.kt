@@ -9,6 +9,7 @@ import com.minibrain.ai.rag.SearchRequestCache
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
+import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -161,7 +162,7 @@ class AgentPipeline(
         private suspend fun generateDecision(plannerHint: String?): PlannerDecision {
             val prompt = PlannerPrompt.build(params.question, plannerHint, observations)
             val sb = StringBuilder()
-            runCatching {
+            runCatchingCancellable {
                 llmService.generateStream(prompt).collect { token -> sb.append(token) }
             }.onFailure { Timber.tag(TAG).w(it, "planner LLM failed") }
 
@@ -220,17 +221,14 @@ class AgentPipeline(
         }
     }
 
-    // observation スライディングウィンドウ: 最新2件を full(詳細)、それ以前を compact(要約)に保つ
-    private fun addObservation(observations: MutableList<Observation>, toolCall: ToolCall, summary: String) {
-        val isRecent = observations.size < 2
-        observations.add(Observation(toolCall, summary, full = isRecent))
-        if (observations.size > 2) {
-            val idx = observations.size - 3
-            if (observations[idx].full) {
-                observations[idx] = observations[idx].copy(full = false)
-            }
-        }
+}
+
+// observation スライディングウィンドウ: 最新2件を full(詳細)、それ以前を compact(要約)に保つ。
+// 新しい observation は常に full で追加し、3 件前に押し出されたものだけを compact にする。
+internal fun addObservation(observations: MutableList<Observation>, toolCall: ToolCall, summary: String) {
+    observations.add(Observation(toolCall, summary, full = true))
+    val idx = observations.size - 3
+    if (idx >= 0 && observations[idx].full) {
+        observations[idx] = observations[idx].copy(full = false)
     }
-
-
 }

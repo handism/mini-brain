@@ -10,9 +10,11 @@ import com.minibrain.ai.agent.AgentResult
 import com.minibrain.ai.agent.AgentTraceEvent
 import com.minibrain.ai.agent.FinalAnswerEvent
 import com.minibrain.ai.rag.Citation
-import com.minibrain.ai.rag.SourceType
+import com.minibrain.ai.rag.CitationJson
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.dataStore
+import com.minibrain.util.runCatchingCancellable
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.Flow
@@ -23,8 +25,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 
 private val PREF_TREE_URI = stringPreferencesKey("tree_uri")
 private val PREF_SHOW_SEARCH_LOG = booleanPreferencesKey("show_search_log")
@@ -86,7 +86,7 @@ class ChatViewModel(
                                 id = entity.id,
                                 role = entity.role,
                                 content = entity.content,
-                                citations = parseCitations(entity.citationsJson),
+                                citations = CitationJson.decode(entity.citationsJson),
                                 traceEvents = existingTrace[entity.id] ?: emptyList(),
                             )
                         }
@@ -100,21 +100,31 @@ class ChatViewModel(
         if (question.isBlank() || _isGenerating.value) return
 
         currentJob?.cancel()
-        currentJob = viewModelScope.launch {
-            _isGenerating.value = true
-            _errorMessage.value = null
-            _statusText.value = null
+        // launch 前に立てて、ディスパッチ待ちの間に二重送信されないようにする
+        _isGenerating.value = true
+        _errorMessage.value = null
+        _statusText.value = null
+        // viewModelScope は Main.immediate なので、currentJob を代入してから本体を走らせる
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                setupUserAndStreamingMessages(question)
 
-            setupUserAndStreamingMessages(question)
+                // エージェントループ（計画 → 多段ツール実行 → 回答）
+                val agentResult = runAgentPipeline(question) ?: return@launch
+                val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
 
-            // エージェントループ（計画 → 多段ツール実行 → 回答）
-            val agentResult = runAgentPipeline(question) ?: return@launch
-            val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
-
-            finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents)
-
-            _isGenerating.value = false
+                finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents)
+            } finally {
+                // 途中で例外が出ても送信不能のまま固まらないよう必ず戻す。
+                // キャンセル後に次の送信が始まっていたら、そちらの状態は触らない
+                if (currentJob === coroutineContext[Job]) {
+                    _isGenerating.value = false
+                    _statusText.value = null
+                }
+            }
         }
+        currentJob = job
+        job.start()
     }
 
     private suspend fun setupUserAndStreamingMessages(question: String) {
@@ -142,13 +152,12 @@ class ChatViewModel(
             Pair(msg.role.name.lowercase(), msg.content)
         }
 
-        return runCatching {
+        return runCatchingCancellable {
             app.container.agentPipeline.run(question, treeUri, history) { status ->
                 _statusText.value = status.ifBlank { null }
             }
         }.getOrElse {
             _errorMessage.value = "検索エラー: ${it.message}"
-            _isGenerating.value = false
             removeStreamingMessage()
             null
         }
@@ -161,7 +170,7 @@ class ChatViewModel(
         updateStreamingMessage { it.copy(citations = citations) }
 
         val sb = StringBuilder()
-        runCatching {
+        runCatchingCancellable {
             answerFlow.collect { token ->
                 sb.append(token)
                 val currentContent = sb.toString()
@@ -182,7 +191,7 @@ class ChatViewModel(
     // ストリーミング完了
     private suspend fun finalizeMessage(finalContent: String, citations: List<Citation>, traceEvents: List<AgentTraceEvent>) {
         val filteredCitations = if (isNegativeResponse(finalContent)) emptyList() else citations
-        val citationsJson = serializeCitations(filteredCitations)
+        val citationsJson = CitationJson.encode(filteredCitations)
         val msgId = app.container.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
         val finalTrace = traceEvents + FinalAnswerEvent(finalContent.length)
 
@@ -218,51 +227,31 @@ class ChatViewModel(
     fun cancelGeneration() {
         currentJob?.cancel()
         _isGenerating.value = false
-        updateStreamingMessage { it.copy(isStreaming = false) }
-    }
-
-    private fun isNegativeResponse(text: String): Boolean {
-        val negativeKeywords = listOf(
-            "お答えできません",
-            "分かりません",
-            "わかりません",
-            "情報が見つかりません",
-            "見つかりませんでした",
-            "知識ベースにはありません",
-            "一般的な知識で回答します"
-        )
-        return negativeKeywords.any { text.contains(it) }
-    }
-
-    private fun parseCitations(json: String): List<Citation> = runCatching {
-        val arr = JSONArray(json)
-        List(arr.length()) { i ->
-            val obj = arr.getJSONObject(i)
-            Citation(
-                headingPath = obj.getString("headingPath"),
-                snippet = obj.getString("snippet"),
-                score = obj.optDouble("score", 0.0).toFloat(),
-                docId = if (obj.has("docId")) obj.getLong("docId") else null,
-                relativePath = obj.optString("relativePath").ifBlank { null },
-                source = runCatching { SourceType.valueOf(obj.optString("source")) }.getOrElse { SourceType.UNKNOWN },
-                topicMatch = obj.optBoolean("topicMatch", false),
-            )
+        _statusText.value = null
+        // 検索中（本文がまだ空）に止めた場合は空の吹き出しを残さない
+        if (_messages.value.lastOrNull { it.isStreaming }?.content.isNullOrEmpty()) {
+            removeStreamingMessage()
+        } else {
+            updateStreamingMessage { it.copy(isStreaming = false) }
         }
-    }.getOrElse { emptyList() }
+    }
+}
 
-    private fun serializeCitations(citations: List<Citation>): String = runCatching {
-        JSONArray().also { arr ->
-            citations.forEach { c ->
-                val obj = JSONObject()
-                    .put("headingPath", c.headingPath)
-                    .put("snippet", c.snippet)
-                    .put("score", c.score)
-                    .put("source", c.source.name)
-                if (c.topicMatch) obj.put("topicMatch", true)
-                c.docId?.let { obj.put("docId", it) }
-                c.relativePath?.let { obj.put("relativePath", it) }
-                arr.put(obj)
-            }
-        }.toString()
-    }.getOrElse { "[]" }
+// 回答冒頭がこれらの「答えられない」系の表現なら、無関係な引用元を表示しない
+private val NEGATIVE_KEYWORDS = listOf(
+    "お答えできません",
+    "分かりません",
+    "わかりません",
+    "情報が見つかりません",
+    "見つかりませんでした",
+    "知識ベースにはありません",
+    "一般的な知識で回答します",
+)
+
+// 回答の途中で「〜については分かりません」と触れただけで引用が消えないよう、冒頭だけを判定する
+internal const val NEGATIVE_CHECK_CHARS = 80
+
+internal fun isNegativeResponse(text: String): Boolean {
+    val head = text.trimStart().take(NEGATIVE_CHECK_CHARS)
+    return NEGATIVE_KEYWORDS.any { head.contains(it) }
 }
