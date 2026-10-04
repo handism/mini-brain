@@ -29,10 +29,12 @@ fun AppNav(
 
         composable(Routes.ONBOARDING) {
             OnboardingScreen(
-                onReady = {
+                onReady = { openChat ->
                     navController.navigate(Routes.HOME) {
                         popUpTo(Routes.ONBOARDING) { inclusive = true }
                     }
+                    // 普段使いはチャットから始める。戻ると Home（フォルダ・インデックス状態）
+                    if (openChat) navController.navigate(Routes.CHAT)
                 }
             )
         }

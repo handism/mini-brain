@@ -76,7 +76,6 @@ class HomeViewModelTest {
         every { documentRepository.indexingState } returns indexingStateFlow
 
         every { documentRepository.observeDocCount(any()) } returns flowOf(10)
-        every { documentRepository.observeChunkCount(any()) } returns flowOf(50)
 
         // Setup datastore edit behavior
         coEvery { dataStore.updateData(any()) } returns mockk(relaxed = true)
@@ -109,11 +108,10 @@ class HomeViewModelTest {
 
         assertEquals(null, viewModel.savedTreeUri.value)
         assertEquals(0, viewModel.docCount.value)
-        assertEquals(0, viewModel.chunkCount.value)
     }
 
     @Test
-    fun `savedTreeUri triggers docCount and chunkCount observations`() = runTest(testDispatcher) {
+    fun `savedTreeUri triggers docCount observation`() = runTest(testDispatcher) {
         val uriStr = "content://my_folder"
         val prefs = mockk<Preferences>()
         every { prefs[PREF_TREE_URI] } returns uriStr
@@ -125,7 +123,6 @@ class HomeViewModelTest {
 
         assertEquals(uriStr, viewModel.savedTreeUri.value)
         assertEquals(10, viewModel.docCount.value)
-        assertEquals(50, viewModel.chunkCount.value)
     }
 
     @Test
@@ -160,26 +157,5 @@ class HomeViewModelTest {
         }
         coVerify { documentRepository.indexFolder(mockUri) }
         coVerify { dataStore.updateData(any()) }
-    }
-
-    @Test
-    fun `reindex calls indexFolder with saved uri`() = runTest(testDispatcher) {
-        val uriStr = "content://saved_folder"
-        val prefs = mockk<Preferences>()
-        every { prefs[PREF_TREE_URI] } returns uriStr
-        every { prefs.asMap() } returns mapOf(PREF_TREE_URI to uriStr as Any)
-        prefsFlow.value = prefs
-
-        val mockUri = mockk<Uri>()
-        every { Uri.parse(uriStr) } returns mockUri
-        coEvery { documentRepository.indexFolder(mockUri) } returns Unit
-
-        val viewModel = HomeViewModel(app)
-        advanceUntilIdle()
-
-        viewModel.reindex()
-        advanceUntilIdle()
-
-        coVerify { documentRepository.indexFolder(mockUri) }
     }
 }

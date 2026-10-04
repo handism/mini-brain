@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -97,7 +98,7 @@ class OnboardingViewModelTest {
         val state = viewModel.state.value
         assertTrue("Expected failure state but got $state", state is OnboardingUiState.Failure)
         val failureState = state as OnboardingUiState.Failure
-        assertTrue(failureState.message.contains(errorMessage))
+        assertEquals(errorMessage, failureState.detail)
         assertTrue(failureState.message.contains("端末のメモリ不足の可能性があります"))
         assertTrue(failureState.canTryCpu)
     }
@@ -140,7 +141,7 @@ class OnboardingViewModelTest {
         val state = viewModel.state.value
         assertTrue("Expected failure state but got $state", state is OnboardingUiState.Failure)
         val failureState = state as OnboardingUiState.Failure
-        assertTrue(failureState.message.contains(errorMessage))
+        assertEquals(errorMessage, failureState.detail)
         assertTrue(failureState.canTryCpu)
     }
 
@@ -241,7 +242,7 @@ class OnboardingViewModelTest {
         val state = viewModel.state.value
         assertTrue("Expected failure state but got $state", state is OnboardingUiState.Failure)
         val failureState = state as OnboardingUiState.Failure
-        assertTrue(failureState.message.contains(errorMessage))
+        assertEquals(errorMessage, failureState.detail)
         assertTrue(!failureState.canTryCpu)
     }
 }
