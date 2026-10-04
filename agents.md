@@ -171,7 +171,11 @@
 - 画面の文言は `res/values/strings.xml` に置き、Composable からは `stringResource` で参照します（Compose UI テストは日本語の文言・contentDescription でノードを探すので、文言を変えたらテストも更新）。ViewModel / Repository 由来のメッセージ（エラー文、`IndexingState.Progress.fileName` など）は現状コード内の文字列のままです。
 - 配色は Material 3 の dynamic color が前提です（`Color.kt` は `dynamicColor = false` 時のフォールバックのみ）。色は `MaterialTheme.colorScheme` から取り、固定色を足さないでください。
 - フォルダ名の表示は `folderDisplayName(treeUri)` を使います（ボリューム ID の `primary:` などを落とす処理を画面ごとに書かない）。
-- チャット履歴一覧は `ChatSessionDao.observeSummaries`（最新メッセージ日時順）を使います。削除は `ChatRepository.deleteSession` が返す `DeletedSession` を `restoreSession` に渡すと id を保ったまま戻せます。
+- チャット履歴一覧は `ChatSessionDao.observeSummaries`（最新メッセージ日時順）を使います。削除は `ChatRepository.deleteSession` が返す `DeletedSession` を `restoreSession` に渡すと id を保ったまま戻せます。履歴画面はスワイプで削除し、TalkBack 用に同じ削除を `customActions` にも載せています（ゴミ箱ボタンは置かない）。
+- 起動時、フォルダ選択済みなら Onboarding → Home → Chat と積んでチャットから始めます（`OnboardingViewModel.hasKnowledgeBase`、ADR-033）。再インデックスは Settings に一本化し、Home はフォルダ選択・変更とインデックス状態だけを出します。
+- チャットの回答は吹き出しにせず全幅で表示し、`SelectionContainer` で部分選択できるようにしています。ユーザー発言だけが `primaryContainer` の吹き出しです。引用元はファイル単位のチップ（`distinctCitationSources`）で常に表示し、スニペットは「引用元 (n)」で展開します。
+- `Scaffold` の中で `imePadding` を使うときは、先に `.consumeWindowInsets(padding)` を挟みます（edge-to-edge でナビゲーションバー分の余白が二重になるため）。
+- タップできるアイコンは `IconButton` の既定サイズ（48dp）を縮めないでください。アイコン自体を小さくするのは構いません。
 
 ### 5.6 DB マイグレーション運用
 - 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は、次回の差分インデックス時に自動補完されます。強制的に補完したい場合は Settings → 再インデックスを実行します。

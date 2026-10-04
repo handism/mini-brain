@@ -5,6 +5,9 @@ import android.content.ClipData
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,8 +22,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,12 +58,12 @@ import com.minibrain.ui.vm.ChatMessage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// 固定 dp だとタブレット・横画面で回答が細長くなるので、画面幅に対する割合で決める
+// 固定 dp だとタブレット・横画面で吹き出しが細長くなるので、画面幅に対する割合で決める
 private const val BUBBLE_WIDTH_FRACTION = 0.85f
 private val BUBBLE_MAX_WIDTH = 720.dp
 
 /**
- * @param statusText 回答の本文が届くまでの間、ストリーミング中の吹き出しに出す進行状況
+ * @param statusText 回答の本文が届くまでの間、ストリーミング中の回答欄に出す進行状況
  * @param onOpenCitation 引用元をタップしたとき。null なら引用元は開けない
  */
 @Composable
@@ -97,30 +103,27 @@ fun UserMessageBubble(msg: ChatMessage) {
                     bottomEnd = 4.dp,
                 ),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
                 ),
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                SelectionContainer {
                     Text(
                         text = msg.content,
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                         style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(12.dp),
                     )
                 }
             }
 
             if (!msg.isStreaming && msg.content.isNotEmpty()) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(0.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MessageCopyButton(content = msg.content)
-                }
+                MessageCopyButton(content = msg.content)
             }
         }
     }
 }
 
+/** 回答は吹き出しにせず全幅で出す（長い Markdown を読みやすくするため）。 */
 @Composable
 fun AssistantMessageBubble(
     msg: ChatMessage,
@@ -131,65 +134,54 @@ fun AssistantMessageBubble(
     var citationsExpanded by remember { mutableStateOf(false) }
     var traceExpanded by remember { mutableStateOf(false) }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start,
+    Column(
+        modifier = Modifier.widthIn(max = BUBBLE_MAX_WIDTH).fillMaxWidth(),
+        horizontalAlignment = Alignment.Start,
     ) {
-        Column(
-            modifier = Modifier.widthIn(max = BUBBLE_MAX_WIDTH).fillMaxWidth(BUBBLE_WIDTH_FRACTION),
-            horizontalAlignment = Alignment.Start,
-        ) {
-            AssistantMessageCard(msg = msg, statusText = statusText)
+        AssistantMessageBody(msg = msg, statusText = statusText)
 
-            AssistantMessageActions(
-                msg = msg,
-                citationsExpanded = citationsExpanded,
-                onCitationsExpandedChange = { citationsExpanded = it }
+        if (msg.citations.isNotEmpty() && !msg.isStreaming) {
+            CitationChips(citations = msg.citations, onOpen = onOpenCitation)
+        }
+
+        AssistantMessageActions(
+            msg = msg,
+            citationsExpanded = citationsExpanded,
+            onCitationsExpandedChange = { citationsExpanded = it }
+        )
+
+        if (msg.citations.isNotEmpty() && !msg.isStreaming) {
+            CitationList(citations = msg.citations, expanded = citationsExpanded, onOpen = onOpenCitation)
+        }
+
+        if (!msg.isStreaming && showSearchLog && msg.traceEvents.isNotEmpty()) {
+            SearchLogSection(
+                traceEvents = msg.traceEvents,
+                expanded = traceExpanded,
+                onExpandedChange = { traceExpanded = it }
             )
-
-            if (msg.citations.isNotEmpty() && !msg.isStreaming) {
-                CitationList(citations = msg.citations, expanded = citationsExpanded, onOpen = onOpenCitation)
-            }
-
-            if (!msg.isStreaming && showSearchLog && msg.traceEvents.isNotEmpty()) {
-                SearchLogSection(
-                    traceEvents = msg.traceEvents,
-                    expanded = traceExpanded,
-                    onExpandedChange = { traceExpanded = it }
-                )
-            }
         }
     }
 }
 
 @Composable
-private fun AssistantMessageCard(msg: ChatMessage, statusText: String?) {
-    Card(
-        shape = RoundedCornerShape(
-            topStart = 16.dp,
-            topEnd = 16.dp,
-            bottomStart = 4.dp,
-            bottomEnd = 16.dp,
-        ),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            if (msg.isStreaming && msg.content.isEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = statusText ?: stringResource(R.string.chat_thinking),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
+private fun AssistantMessageBody(msg: ChatMessage, statusText: String?) {
+    Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
+        if (msg.isStreaming && msg.content.isEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = statusText ?: stringResource(R.string.chat_thinking),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            SelectionContainer {
                 MarkdownText(
                     text = msg.content,
-                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textColor = MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
@@ -202,7 +194,7 @@ private fun AssistantMessageActions(
     citationsExpanded: Boolean,
     onCitationsExpandedChange: (Boolean) -> Unit,
 ) {
-    // コピーボタン + 引用元（ストリーミング中は非表示）
+    // コピーボタン + 引用箇所の展開（ストリーミング中は非表示）
     if (!msg.isStreaming && msg.content.isNotEmpty()) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(0.dp),
@@ -215,14 +207,62 @@ private fun AssistantMessageActions(
                     Icon(
                         if (citationsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(18.dp),
                     )
                     Text(
                         stringResource(R.string.chat_citations, msg.citations.size),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                     )
                 }
             }
+        }
+    }
+}
+
+/** チップに出す名前。ファイル名（フォルダは落とす）、無ければ見出しパス。 */
+internal fun citationChipLabel(citation: Citation): String =
+    citation.relativePath?.substringAfterLast('/') ?: citation.headingPath
+
+/** 同じファイルの複数チャンクはチップ 1 つにまとめる。 */
+internal fun distinctCitationSources(citations: List<Citation>): List<Citation> =
+    citations.distinctBy { it.docId ?: citationChipLabel(it) }
+
+/** 回答の根拠をひと目で分かるよう、引用元ファイルは常にチップで並べる。 */
+@Composable
+private fun CitationChips(citations: List<Citation>, onOpen: ((Citation) -> Unit)?) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        distinctCitationSources(citations).forEach { citation ->
+            // docId の無い引用（フォルダ要約など）は開く先のファイルが無い
+            val open = onOpen?.takeIf { citation.docId != null }
+            AssistChip(
+                onClick = { open?.invoke(citation) },
+                enabled = open != null,
+                label = {
+                    Text(
+                        citationChipLabel(citation),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 200.dp),
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Description,
+                        contentDescription = null,
+                        modifier = Modifier.size(AssistChipDefaults.IconSize),
+                    )
+                },
+                // 開けない引用も「根拠」としては読めるよう、無効時もラベル色を落としすぎない
+                colors = AssistChipDefaults.assistChipColors(
+                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    disabledLeadingIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            )
         }
     }
 }
@@ -310,9 +350,9 @@ fun SearchLogSection(
         Icon(
             imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
             contentDescription = null,
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(18.dp),
         )
-        Text(text = stringResource(R.string.search_log), style = MaterialTheme.typography.labelSmall)
+        Text(text = stringResource(R.string.search_log), style = MaterialTheme.typography.labelMedium)
     }
     AnimatedVisibility(visible = expanded) {
         AgentTraceSection(traceEvents)
@@ -339,12 +379,11 @@ fun MessageCopyButton(content: String) {
             }
             copied = true
         },
-        modifier = Modifier.size(32.dp),
     ) {
         Icon(
             imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
             contentDescription = stringResource(R.string.copy),
-            modifier = Modifier.size(15.dp),
+            modifier = Modifier.size(18.dp),
             tint = if (copied) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
