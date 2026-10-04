@@ -1297,9 +1297,12 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - `versionName` はタグから `v` を除いたもの、`versionCode` は `major * 10000 + minor * 100 + patch` とする。
 - 署名鍵は GitHub Secrets（`RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD`）で渡す。`app/build.gradle.kts` は環境変数 `RELEASE_KEYSTORE_PATH` があるときだけ release の `signingConfig` を設定する。
 - モデルファイルは APK に同梱しない（従来どおり初回起動時にダウンロードする）。
+- release ビルドは `ndk.abiFilters` で `arm64-v8a` に絞る（全 ABI だと約 166 MB、絞ると約 51 MB）。debug はエミュレータ（x86_64）のため全 ABI を残す。
+- `gradle/actions/setup-gradle` は v5 に留める。v6 はキャッシュ部分が別ライセンス（Gradle Terms of Use）になり、使うと同意したことになるため。
 
 ### 影響
 
 - 環境変数が無いとき（CI の `ci.yml`・ローカル）の release ビルドは従来どおり未署名。
+- 配布 APK は 32bit / x86 端末にはインストールできない（Android 12+ の実機はほぼ arm64）。
 - 署名鍵を失うと既存インストールへの上書き更新ができなくなるため、keystore はリポジトリ外にバックアップする。
 - minor / patch が 100 以上になると `versionCode` の大小が崩れる。

@@ -191,3 +191,5 @@ context.filesDir/models/e5-tokenizer.json              # XLM-RoBERTa SentencePie
 ### 5.7 リリース（ADR-033）
 - `v1.2.3` 形式のタグを push すると `.github/workflows/release.yml` が署名済み APK を GitHub Release に添付します。`versionCode` はタグから `major * 10000 + minor * 100 + patch` で計算します。
 - release の署名は環境変数 `RELEASE_KEYSTORE_PATH` などがあるときだけ有効です（`app/build.gradle.kts`）。無いときは未署名のまま。keystore や鍵情報をリポジトリに入れないでください。
+- release ビルドは `arm64-v8a` のみ（`ndk.abiFilters`）。debug は全 ABI。
+- `gradle/actions/setup-gradle` は v5 に固定しています。v6 以降はキャッシュ部分のライセンスが変わるため、上げる前に確認してください。
