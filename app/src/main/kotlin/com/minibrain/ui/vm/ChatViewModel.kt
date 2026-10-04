@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minibrain.MiniBrainApp
+import com.minibrain.data.repo.IndexingState
 import com.minibrain.R
 import com.minibrain.ai.agent.AgentResult
 import com.minibrain.ai.agent.AgentTraceEvent
@@ -46,6 +47,11 @@ data class ChatMessage(
     val traceEvents: List<AgentTraceEvent> = emptyList(),
 )
 
+enum class ChatErrorKind { SEARCH, GENERATION }
+
+/** 画面に出す失敗。見出しは [kind] から画面側で決め、例外の中身は [detail] として折りたたんで出す。 */
+data class ChatError(val kind: ChatErrorKind, val detail: String?)
+
 class ChatViewModel(
     application: Application,
     savedStateHandle: SavedStateHandle,
@@ -60,8 +66,11 @@ class ChatViewModel(
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating
 
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage
+    private val _error = MutableStateFlow<ChatError?>(null)
+    val error: StateFlow<ChatError?> = _error
+
+    /** チャット中もインデックスの進み具合を出すため（起動時は Home を経由しないので）。 */
+    val indexingState: StateFlow<IndexingState> = app.container.documentRepository.indexingState
 
     private val _statusText = MutableStateFlow<String?>(null)
     val statusText: StateFlow<String?> = _statusText
@@ -71,8 +80,8 @@ class ChatViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val showSearchLog: StateFlow<Boolean> = app.dataStore.data
-        .map { prefs -> prefs[PREF_SHOW_SEARCH_LOG] ?: true }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+        .map { prefs -> prefs[PREF_SHOW_SEARCH_LOG] ?: SHOW_SEARCH_LOG_DEFAULT }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SHOW_SEARCH_LOG_DEFAULT)
 
     /** 空のチャットに出す質問例。知識ベースから作れるまでは固定の例文。 */
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -124,7 +133,7 @@ class ChatViewModel(
         currentJob?.cancel()
         // launch 前に立てて、ディスパッチ待ちの間に二重送信されないようにする
         _isGenerating.value = true
-        _errorMessage.value = null
+        _error.value = null
         _statusText.value = null
         // viewModelScope は Main.immediate なので、currentJob を代入してから本体を走らせる
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -179,7 +188,7 @@ class ChatViewModel(
                 _statusText.value = status.ifBlank { null }
             }
         }.getOrElse {
-            _errorMessage.value = "検索エラー: ${it.message}"
+            _error.value = ChatError(ChatErrorKind.SEARCH, it.message)
             removeStreamingMessage()
             null
         }
@@ -205,7 +214,7 @@ class ChatViewModel(
                 }
             }
         }.onFailure {
-            _errorMessage.value = "生成エラー: ${it.message}"
+            _error.value = ChatError(ChatErrorKind.GENERATION, it.message)
         }
         return sb.toString()
     }
@@ -270,7 +279,12 @@ class ChatViewModel(
         }.getOrElse { suggestionTexts().fallback }
     }
 
+    fun dismissError() {
+        _error.value = null
+    }
+
     fun newSession() {
+        _error.value = null
         viewModelScope.launch {
             _sessionId.value = app.container.chatRepository.createSession()
             _messages.value = emptyList()

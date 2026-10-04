@@ -11,6 +11,13 @@
     <string name="copy">コピー</string>
     <string name="change_folder">フォルダを変更</string>
     <string name="not_selected">未選択</string>
+    <string name="retry">再試行</string>
+    <string name="close">閉じる</string>
+    <string name="show_detail">詳細を表示</string>
+    <string name="hide_detail">詳細を隠す</string>
+    <string name="folder_change_dialog_title">フォルダを変更しますか？</string>
+    <string name="folder_change_dialog_text">今のフォルダのインデックスを削除し、新しいフォルダで作り直します。チャット履歴は残ります。</string>
+    <string name="folder_change_confirm">変更する</string>
 
     <!-- Onboarding -->
     <string name="onboarding_tagline">プライベートRAG — すべてオンデバイスで動作</string>
@@ -21,11 +28,8 @@
     <string name="onboarding_llm_model">Gemma 4 E2B LLM (約2.5GB)</string>
     <string name="onboarding_initializing">モデルを初期化中...</string>
     <string name="onboarding_error_title">準備を完了できませんでした</string>
-    <string name="onboarding_error_show_detail">詳細を表示</string>
-    <string name="onboarding_error_hide_detail">詳細を隠す</string>
     <string name="onboarding_progress">%1$d%% (%2$d / %3$d MB)</string>
     <string name="onboarding_retry_cpu">CPUモードで試す (低速ですが安定します)</string>
-    <string name="onboarding_retry">再試行</string>
 
     <!-- Home -->
     <string name="home_select_folder_title">mdフォルダを選択してください</string>
@@ -48,8 +52,8 @@
     <!-- Chat -->
     <string name="chat_history">履歴</string>
     <string name="chat_new">新しいチャット</string>
-    <string name="chat_empty_title">質問を入力してください</string>
-    <string name="chat_empty_desc">mdファイルの内容をもとに回答します</string>
+    <string name="chat_empty_title">ノートについて聞いてみましょう</string>
+    <string name="chat_empty_desc">フォルダ内の Markdown をもとに、端末の中だけで回答します</string>
     <string name="chat_suggestions_label">たとえば</string>
     <!-- 知識ベースから質問例を作れたときは、先頭の 1 件だけを末尾に添える -->
     <string-array name="chat_suggestions">
@@ -68,6 +72,10 @@
     <string name="chat_thinking">考え中...</string>
     <string name="chat_citations">引用元 (%1$d)</string>
     <string name="chat_open_file">ファイルを開く</string>
+    <string name="chat_error_search">検索に失敗しました</string>
+    <string name="chat_error_generation">回答の生成に失敗しました</string>
+    <string name="chat_indexing_banner">インデックス作成中（%1$d/%2$d）。完了までは回答に使われないファイルがあります</string>
+    <string name="chat_scroll_to_bottom">最新のメッセージへ</string>
     <string name="chat_open_file_failed">このファイルを開けるアプリが見つかりません</string>
     <string name="search_log">検索ログ</string>
     <string name="trace_done">完了</string>
@@ -106,6 +114,7 @@
     <string name="settings_current_folder">現在のフォルダ</string>
     <string name="settings_reindex_changed">再インデックス</string>
     <string name="settings_reindex_changed_desc">変更・追加・削除されたファイルだけを反映します</string>
+    <string name="settings_reindexing">インデックス中... %1$d/%2$d</string>
     <string name="settings_section_chat_history">チャット履歴</string>
     <string name="settings_clear_history">チャット履歴をすべて削除</string>
     <string name="settings_section_developer">開発者</string>

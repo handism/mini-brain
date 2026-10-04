@@ -12,6 +12,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.minibrain.data.db.entities.MessageRole
+import com.minibrain.data.repo.IndexingState
+import com.minibrain.ui.vm.ChatError
+import com.minibrain.ui.vm.ChatErrorKind
 import com.minibrain.ui.vm.ChatMessage
 import com.minibrain.ui.vm.ChatViewModel
 import io.mockk.every
@@ -35,24 +38,25 @@ class ChatScreenTest {
         val vm = mockk<ChatViewModel>(relaxed = true)
         val messagesFlow = MutableStateFlow<List<ChatMessage>>(emptyList())
         val isGeneratingFlow = MutableStateFlow(false)
-        val errorMessageFlow = MutableStateFlow<String?>(null)
+        val errorMessageFlow = MutableStateFlow<ChatError?>(null)
         val statusTextFlow = MutableStateFlow<String?>(null)
         val showSearchLogFlow = MutableStateFlow(true)
 
         every { vm.messages } returns messagesFlow
         every { vm.isGenerating } returns isGeneratingFlow
-        every { vm.errorMessage } returns errorMessageFlow
+        every { vm.error } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
         }
 
-        composeTestRule.onNodeWithText("質問を入力してください").assertIsDisplayed()
-        composeTestRule.onNodeWithText("mdファイルの内容をもとに回答します").assertIsDisplayed()
+        composeTestRule.onNodeWithText("ノートについて聞いてみましょう").assertIsDisplayed()
+        composeTestRule.onNodeWithText("フォルダ内の Markdown をもとに、端末の中だけで回答します").assertIsDisplayed()
     }
 
     @Test
@@ -162,10 +166,11 @@ class ChatScreenTest {
         val vm = mockk<ChatViewModel>(relaxed = true)
         every { vm.messages } returns MutableStateFlow(messages)
         every { vm.isGenerating } returns MutableStateFlow(isGenerating)
-        every { vm.errorMessage } returns MutableStateFlow<String?>(null)
+        every { vm.error } returns MutableStateFlow<ChatError?>(null)
         every { vm.statusText } returns MutableStateFlow(statusText)
         every { vm.showSearchLog } returns MutableStateFlow(true)
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
         return vm
     }
@@ -179,16 +184,17 @@ class ChatScreenTest {
         )
         val messagesFlow = MutableStateFlow(messages)
         val isGeneratingFlow = MutableStateFlow(false)
-        val errorMessageFlow = MutableStateFlow<String?>(null)
+        val errorMessageFlow = MutableStateFlow<ChatError?>(null)
         val statusTextFlow = MutableStateFlow<String?>(null)
         val showSearchLogFlow = MutableStateFlow(true)
 
         every { vm.messages } returns messagesFlow
         every { vm.isGenerating } returns isGeneratingFlow
-        every { vm.errorMessage } returns errorMessageFlow
+        every { vm.error } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -204,16 +210,17 @@ class ChatScreenTest {
         val vm = mockk<ChatViewModel>(relaxed = true)
         val messagesFlow = MutableStateFlow<List<ChatMessage>>(emptyList())
         val isGeneratingFlow = MutableStateFlow(true)
-        val errorMessageFlow = MutableStateFlow<String?>(null)
+        val errorMessageFlow = MutableStateFlow<ChatError?>(null)
         val statusTextFlow = MutableStateFlow("Searching...")
         val showSearchLogFlow = MutableStateFlow(true)
 
         every { vm.messages } returns messagesFlow
         every { vm.isGenerating } returns isGeneratingFlow
-        every { vm.errorMessage } returns errorMessageFlow
+        every { vm.error } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -231,23 +238,45 @@ class ChatScreenTest {
         val vm = mockk<ChatViewModel>(relaxed = true)
         val messagesFlow = MutableStateFlow<List<ChatMessage>>(emptyList())
         val isGeneratingFlow = MutableStateFlow(false)
-        val errorMessageFlow = MutableStateFlow("An error occurred")
+        val errorMessageFlow = MutableStateFlow<ChatError?>(ChatError(ChatErrorKind.GENERATION, "An error occurred"))
         val statusTextFlow = MutableStateFlow<String?>(null)
         val showSearchLogFlow = MutableStateFlow(true)
 
         every { vm.messages } returns messagesFlow
         every { vm.isGenerating } returns isGeneratingFlow
-        every { vm.errorMessage } returns errorMessageFlow
+        every { vm.error } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
         }
 
+        composeTestRule.onNodeWithText("回答の生成に失敗しました").assertIsDisplayed()
+        // 例外の中身は「詳細を表示」で開いたときだけ出す
+        composeTestRule.onNodeWithText("An error occurred").assertDoesNotExist()
+        composeTestRule.onNodeWithText("詳細を表示").performClick()
         composeTestRule.onNodeWithText("An error occurred").assertIsDisplayed()
+
+        composeTestRule.onNodeWithText("再試行").performClick()
+        verify { vm.regenerate() }
+        composeTestRule.onNodeWithContentDescription("閉じる").performClick()
+        verify { vm.dismissError() }
+    }
+
+    @Test
+    fun testIndexingBannerIsShownWhileIndexing() {
+        val vm = relaxedVm()
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Progress(3, 10, "a.md"))
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        composeTestRule.onNodeWithText("インデックス作成中（3/10）。完了までは回答に使われないファイルがあります").assertIsDisplayed()
     }
 
     @Test
@@ -255,16 +284,17 @@ class ChatScreenTest {
         val vm = mockk<ChatViewModel>(relaxed = true)
         val messagesFlow = MutableStateFlow<List<ChatMessage>>(emptyList())
         val isGeneratingFlow = MutableStateFlow(false)
-        val errorMessageFlow = MutableStateFlow<String?>(null)
+        val errorMessageFlow = MutableStateFlow<ChatError?>(null)
         val statusTextFlow = MutableStateFlow<String?>(null)
         val showSearchLogFlow = MutableStateFlow(true)
 
         every { vm.messages } returns messagesFlow
         every { vm.isGenerating } returns isGeneratingFlow
-        every { vm.errorMessage } returns errorMessageFlow
+        every { vm.error } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -285,16 +315,17 @@ class ChatScreenTest {
 
         val messagesFlow = MutableStateFlow<List<ChatMessage>>(emptyList())
         val isGeneratingFlow = MutableStateFlow(false)
-        val errorMessageFlow = MutableStateFlow<String?>(null)
+        val errorMessageFlow = MutableStateFlow<ChatError?>(null)
         val statusTextFlow = MutableStateFlow<String?>(null)
         val showSearchLogFlow = MutableStateFlow(true)
 
         every { vm.messages } returns messagesFlow
         every { vm.isGenerating } returns isGeneratingFlow
-        every { vm.errorMessage } returns errorMessageFlow
+        every { vm.error } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {

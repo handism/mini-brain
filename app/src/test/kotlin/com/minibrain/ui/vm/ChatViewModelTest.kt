@@ -192,7 +192,7 @@ class ChatViewModelTest {
 
         // We can just check the final state because advanceUntilIdle finishes it all
         assertFalse(viewModel.isGenerating.value)
-        assertNull(viewModel.errorMessage.value)
+        assertNull(viewModel.error.value)
 
         val msgs = viewModel.messages.value
         assertEquals(2, msgs.size)
@@ -290,7 +290,7 @@ class ChatViewModelTest {
         val finalMsgs = viewModel.messages.value
         assertFalse(finalMsgs.last().isStreaming)
         // キャンセルはエラーではないので、エラーメッセージは出さない
-        assertNull(viewModel.errorMessage.value)
+        assertNull(viewModel.error.value)
     }
 
     @Test

@@ -2,7 +2,6 @@ package com.minibrain.ui.vm
 
 import android.app.Application
 import android.net.Uri
-import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -56,18 +55,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onFolderSelected(uri: Uri) {
         viewModelScope.launch {
-            runCatching {
-                app.contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            }
-            saveTreeUri(uri.toString())
-            app.container.documentRepository.indexFolder(uri)
+            app.switchKnowledgeFolder(uri, oldUri = savedTreeUri.value)
         }
-    }
-
-    private suspend fun saveTreeUri(uriString: String) {
-        app.dataStore.edit { prefs -> prefs[PREF_TREE_URI] = uriString }
     }
 }

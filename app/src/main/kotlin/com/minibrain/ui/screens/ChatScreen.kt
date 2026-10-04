@@ -6,6 +6,12 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.Column
@@ -32,23 +38,30 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,8 +70,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -71,6 +90,9 @@ import com.minibrain.ai.rag.Citation
 import com.minibrain.ui.components.CHAT_CONTENT_MAX_WIDTH
 import com.minibrain.ui.components.MessageBubble
 import com.minibrain.data.db.entities.MessageRole
+import com.minibrain.data.repo.IndexingState
+import com.minibrain.ui.vm.ChatError
+import com.minibrain.ui.vm.ChatErrorKind
 import com.minibrain.ui.vm.ChatMessage
 import com.minibrain.ui.vm.ChatViewModel
 import kotlinx.coroutines.launch
@@ -84,7 +106,8 @@ fun ChatScreen(
 ) {
     val messages by vm.messages.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
-    val errorMessage by vm.errorMessage.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
+    val indexingState by vm.indexingState.collectAsStateWithLifecycle()
     val statusText by vm.statusText.collectAsStateWithLifecycle()
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
     val sessionTitle by vm.sessionTitle.collectAsStateWithLifecycle()
@@ -95,8 +118,11 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val openFailedMessage = stringResource(R.string.chat_open_file_failed)
+    val inputFocusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
 
-    ChatAutoScroll(messages = messages, listState = listState)
+    val isNearBottom = rememberIsNearBottom(listState)
+    ChatAutoScroll(messages = messages, listState = listState, isNearBottom = isNearBottom)
 
     Scaffold(
         topBar = {
@@ -117,13 +143,20 @@ fun ChatScreen(
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
+            (indexingState as? IndexingState.Progress)?.let { ChatIndexingBanner(it) }
+
             ChatMessageList(
                 messages = messages,
                 showSearchLog = showSearchLog,
                 statusText = statusText,
                 listState = listState,
                 suggestions = suggestions,
-                onSuggestionClick = { inputText = it },
+                // 固有名詞などを書き換えてから送れるよう、入力欄に入れてキーボードを出す
+                onSuggestionClick = {
+                    inputText = it
+                    inputFocusRequester.requestFocus()
+                    keyboard?.show()
+                },
                 onRegenerate = { vm.regenerate() }.takeUnless { isGenerating },
                 onOpenCitation = { citation ->
                     scope.launch {
@@ -133,13 +166,16 @@ fun ChatScreen(
                         }
                     }
                 },
+                isNearBottom = isNearBottom.value,
                 modifier = Modifier.weight(1f)
             )
 
             ChatStatusArea(
                 // ストリーミング中の吹き出しがあればそちらに出すので、ここでは出さない
                 statusText = statusText.takeIf { isGenerating && messages.none { it.isStreaming } },
-                errorMessage = errorMessage
+                error = error,
+                onRetry = { vm.regenerate() }.takeUnless { isGenerating },
+                onDismissError = { vm.dismissError() },
             )
 
             ChatInputArea(
@@ -147,7 +183,8 @@ fun ChatScreen(
                 isGenerating = isGenerating,
                 onValueChange = { inputText = it },
                 onSendMessage = { vm.sendMessage(it) },
-                onStopGenerating = { vm.cancelGeneration() }
+                onStopGenerating = { vm.cancelGeneration() },
+                focusRequester = inputFocusRequester,
             )
         }
     }
@@ -158,17 +195,9 @@ fun ChatScreen(
  * ユーザーが上へスクロールして読んでいない限り末尾に追従する。
  */
 @Composable
-private fun ChatAutoScroll(messages: List<ChatMessage>, listState: LazyListState) {
+private fun ChatAutoScroll(messages: List<ChatMessage>, listState: LazyListState, isNearBottom: State<Boolean>) {
     // 先頭・末尾の Spacer を含めたアイテム数
     val lastIndex = messages.size + 1
-    val isNearBottom by remember(listState) {
-        derivedStateOf {
-            val info = listState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf true
-            // 最後のメッセージが一部でも見えていれば「読んでいる最中」とみなす
-            lastVisible >= info.totalItemsCount - 2
-        }
-    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(lastIndex)
@@ -176,7 +205,40 @@ private fun ChatAutoScroll(messages: List<ChatMessage>, listState: LazyListState
 
     val streamingLength = messages.lastOrNull()?.takeIf { it.isStreaming }?.content?.length
     LaunchedEffect(streamingLength) {
-        if (streamingLength != null && isNearBottom) listState.scrollToItem(lastIndex)
+        if (streamingLength != null && isNearBottom.value) listState.scrollToItem(lastIndex)
+    }
+}
+
+/** 最後のメッセージが一部でも見えていれば「読んでいる最中」とみなす。 */
+@Composable
+private fun rememberIsNearBottom(listState: LazyListState): State<Boolean> = remember(listState) {
+    derivedStateOf {
+        val info = listState.layoutInfo
+        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf true
+        lastVisible >= info.totalItemsCount - 2
+    }
+}
+
+/** 起動直後はチャットから始まり Home の進捗が見えないので、インデックス中はここにも出す。 */
+@Composable
+private fun ChatIndexingBanner(state: IndexingState.Progress) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                stringResource(R.string.chat_indexing_banner, state.current, state.total),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            if (state.total > 0) {
+                LinearProgressIndicator(
+                    progress = { state.current.toFloat() / state.total },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
     }
 }
 
@@ -241,13 +303,20 @@ fun ChatMessageList(
     onSuggestionClick: (String) -> Unit = {},
     onOpenCitation: ((Citation) -> Unit)? = null,
     onRegenerate: (() -> Unit)? = null,
+    isNearBottom: Boolean = true,
 ) {
     if (messages.isEmpty()) {
         ChatEmptyState(suggestions = suggestions, onSuggestionClick = onSuggestionClick, modifier = modifier)
-    } else {
+        return
+    }
+    val scope = rememberCoroutineScope()
+    // ストリーミングに追従している間は出さない（追従が止まるのは上へスクロールしたときだけ）
+    val streaming = messages.lastOrNull()?.isStreaming == true
+    val showJumpToBottom = listState.canScrollForward && !(streaming && isNearBottom)
+    Box(modifier = modifier) {
         LazyColumn(
             state = listState,
-            modifier = modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { Spacer(Modifier.height(8.dp)) }
@@ -269,6 +338,19 @@ fun ChatMessageList(
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
+        AnimatedVisibility(
+            visible = showJumpToBottom,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+        ) {
+            SmallFloatingActionButton(
+                onClick = { scope.launch { listState.animateScrollToItem(messages.size + 1) } },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.chat_scroll_to_bottom))
+            }
+        }
     }
 }
 
@@ -287,7 +369,7 @@ private fun ChatEmptyState(
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(
-            Icons.Default.Psychology,
+            painterResource(R.drawable.ic_logo),
             contentDescription = null,
             modifier = Modifier.size(48.dp),
             tint = MaterialTheme.colorScheme.primary,
@@ -329,7 +411,9 @@ private fun ChatEmptyState(
 @Composable
 fun ChatStatusArea(
     statusText: String?,
-    errorMessage: String?,
+    error: ChatError?,
+    onRetry: (() -> Unit)?,
+    onDismissError: () -> Unit,
 ) {
     statusText?.let {
         Text(
@@ -340,13 +424,72 @@ fun ChatStatusArea(
         )
     }
 
-    errorMessage?.let {
-        Text(
-            text = it,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+    error?.let {
+        ChatErrorCard(
+            error = it,
+            onRetry = onRetry,
+            onDismiss = onDismissError,
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentWidth(Alignment.CenterHorizontally)
+                .widthIn(max = CHAT_CONTENT_MAX_WIDTH)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         )
+    }
+}
+
+/** 失敗したことと、やり直す手段を出す。例外の中身は利用者には読めないことが多いので折りたたむ。 */
+@Composable
+private fun ChatErrorCard(
+    error: ChatError,
+    onRetry: (() -> Unit)?,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showDetail by remember(error) { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = modifier,
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.ErrorOutline, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(
+                    stringResource(
+                        when (error.kind) {
+                            ChatErrorKind.SEARCH -> R.string.chat_error_search
+                            ChatErrorKind.GENERATION -> R.string.chat_error_generation
+                        }
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close), modifier = Modifier.size(18.dp))
+                }
+            }
+            if (showDetail && !error.detail.isNullOrBlank()) {
+                SelectionContainer {
+                    Text(
+                        error.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(end = 12.dp, bottom = 4.dp),
+                    )
+                }
+            }
+            Row {
+                if (!error.detail.isNullOrBlank()) {
+                    TextButton(onClick = { showDetail = !showDetail }) {
+                        Text(stringResource(if (showDetail) R.string.hide_detail else R.string.show_detail))
+                    }
+                }
+                onRetry?.let { retry ->
+                    TextButton(onClick = retry) { Text(stringResource(R.string.retry)) }
+                }
+            }
+        }
     }
 }
 
@@ -357,7 +500,13 @@ fun ChatInputArea(
     onValueChange: (String) -> Unit,
     onSendMessage: (String) -> Unit,
     onStopGenerating: () -> Unit,
+    focusRequester: FocusRequester? = null,
 ) {
+    // 質問例のように外から文字が入ったときは、カーソルを末尾に置いて続きを書けるようにする
+    var fieldValue by remember { mutableStateOf(TextFieldValue(inputText, TextRange(inputText.length))) }
+    if (fieldValue.text != inputText) {
+        fieldValue = TextFieldValue(inputText, TextRange(inputText.length))
+    }
     val canSend = !isGenerating && inputText.isNotBlank()
     val send = {
         if (canSend) {
@@ -376,9 +525,14 @@ fun ChatInputArea(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         OutlinedTextField(
-            value = inputText,
-            onValueChange = onValueChange,
-            modifier = Modifier.weight(1f),
+            value = fieldValue,
+            onValueChange = {
+                fieldValue = it
+                onValueChange(it.text)
+            },
+            modifier = Modifier
+                .weight(1f)
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier),
             placeholder = { Text(stringResource(R.string.chat_input_placeholder)) },
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Sentences,

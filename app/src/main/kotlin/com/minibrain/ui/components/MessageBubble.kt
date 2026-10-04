@@ -132,10 +132,7 @@ fun UserMessageBubble(msg: ChatMessage, modifier: Modifier = Modifier) {
                     )
                 }
             }
-
-            if (!msg.isStreaming && msg.content.isNotEmpty()) {
-                MessageCopyButton(content = msg.content)
-            }
+            // 自分の発言は長押しで選択できるので、コピーボタンは回答側だけに置く
         }
     }
 }

@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import com.minibrain.ui.components.FolderChangeDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.FolderOpen
@@ -69,6 +72,7 @@ fun HomeScreen(
     val docCount by vm.docCount.collectAsStateWithLifecycle()
     val lastIndexedAt by vm.lastIndexedAt.collectAsStateWithLifecycle()
     val recentSessions by vm.recentSessions.collectAsStateWithLifecycle()
+    var showFolderChangeDialog by remember { mutableStateOf(false) }
 
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -93,7 +97,10 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(24.dp),
+                .padding(24.dp)
+                // タブレット・横画面でボタンが端まで伸びないよう、中央に寄せて幅を抑える
+                .wrapContentWidth(Alignment.CenterHorizontally)
+                .widthIn(max = HOME_CONTENT_MAX_WIDTH),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val uri = treeUri
@@ -107,7 +114,7 @@ fun HomeScreen(
                     stats = KnowledgeBaseStats(docCount, lastIndexedAt),
                     indexState = indexState,
                     onOpenChat = onOpenChat,
-                    onChangeFolder = { folderLauncher.launch(null) }
+                    onChangeFolder = { showFolderChangeDialog = true }
                 )
                 if (recentSessions.isNotEmpty()) {
                     RecentChats(sessions = recentSessions, onOpenSession = onOpenSession)
@@ -115,7 +122,19 @@ fun HomeScreen(
             }
         }
     }
+
+    if (showFolderChangeDialog) {
+        FolderChangeDialog(
+            onConfirm = {
+                showFolderChangeDialog = false
+                folderLauncher.launch(null)
+            },
+            onDismiss = { showFolderChangeDialog = false },
+        )
+    }
 }
+
+private val HOME_CONTENT_MAX_WIDTH = 600.dp
 
 // チャンク数は利用者向けの指標ではないので出さない（ADR-034）
 private data class KnowledgeBaseStats(val docCount: Int, val lastIndexedAt: Long?)

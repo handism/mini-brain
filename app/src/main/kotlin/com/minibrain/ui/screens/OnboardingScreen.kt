@@ -1,6 +1,7 @@
 @file:Suppress("unused", "UnusedImport")
 package com.minibrain.ui.screens
 
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.minibrain.R
 import androidx.compose.foundation.layout.Arrangement
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -63,7 +63,7 @@ fun OnboardingScreen(
             verticalArrangement = Arrangement.Center,
         ) {
             Icon(
-                imageVector = Icons.Default.Psychology,
+                painter = painterResource(R.drawable.ic_logo),
                 contentDescription = null,
                 modifier = Modifier.size(80.dp),
                 tint = MaterialTheme.colorScheme.primary,
@@ -209,7 +209,7 @@ private fun FailureStateView(
         TextButton(onClick = { showDetail = !showDetail }) {
             Text(
                 stringResource(
-                    if (showDetail) R.string.onboarding_error_hide_detail else R.string.onboarding_error_show_detail
+                    if (showDetail) R.string.hide_detail else R.string.show_detail
                 )
             )
         }
@@ -228,11 +228,11 @@ private fun FailureStateView(
         }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.onboarding_retry))
+            Text(stringResource(R.string.retry))
         }
     } else {
         Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.onboarding_retry))
+            Text(stringResource(R.string.retry))
         }
     }
 }

@@ -36,7 +36,8 @@ class MessageBubbleTest {
         }
 
         composeTestRule.onNodeWithText("Hello from User").assertIsDisplayed()
-        composeTestRule.onNodeWithContentDescription("コピー").assertIsDisplayed()
+        // 自分の発言は長押しで選択できるので、コピーボタンは出さない
+        composeTestRule.onNodeWithContentDescription("コピー").assertDoesNotExist()
     }
 
     @Test

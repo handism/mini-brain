@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  アプリ内で使う単色のロゴ。ランチャーアイコン（ic_launcher_foreground）と同じ脳＋Markdown の意匠を、
+  M・矢印・点をくり抜いた 1 本のパスにしている。色は Icon の tint で付ける。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="60"
+    android:viewportHeight="60">
+    <group android:translateX="-10" android:translateY="-8.5">
+        <path
+            android:fillColor="#FF000000"
+            android:fillType="evenOdd"
+            android:pathData="M40,10c-11,0 -20,9 -20,20c0,2.1 0.3,4.1 1,5.9c-3.6,1.9 -6,5.7 -6,10.1c0,6.6 5.4,12 12,12c1.1,0 2.1,-0.2 3.1,-0.5c2.7,4.9 6,8.5 9.9,8.5c3.9,0 7.2,-3.5 9.9,-8.5c1,0.3 2,0.5 3.1,0.5c6.6,0 12,-5.4 12,-12c0,-4.4 -2.4,-8.2 -6,-10.1c0.7,-1.8 1,-3.8 1,-5.9c0,-11 -9,-20 -20,-20z M28,28h6l3,4.5l3,-4.5h6v18h-3v-10l-6,9l-6,-9v10h-3z M49,28h6v10h4l-7,8l-7,-8h4z M25,48a2,2 0,1,1 0,-4a2,2 0,0,1 0,4z M55,48a2,2 0,1,1 0,-4a2,2 0,0,1 0,4z M40,58a2,2 0,1,1 0,-4a2,2 0,0,1 0,4z" />
+    </group>
+</vector>

@@ -213,4 +213,26 @@ class HomeViewModelTest {
         coVerify { documentRepository.indexFolder(mockUri) }
         coVerify { dataStore.updateData(any()) }
     }
+
+    @Test
+    fun `onFolderSelected clears the index of the previous folder`() = runTest(testDispatcher) {
+        val prefs = mockk<Preferences>()
+        every { prefs[PREF_TREE_URI] } returns "content://old_folder"
+        stubNoIndexRecord(prefs)
+        prefsFlow.value = prefs
+
+        val newUri = mockk<Uri>()
+        every { newUri.toString() } returns "content://new_folder"
+        every { contentResolver.takePersistableUriPermission(newUri, any()) } returns Unit
+        coEvery { documentRepository.clearFolder("content://old_folder") } returns Unit
+        coEvery { documentRepository.indexFolder(newUri) } returns Unit
+
+        val viewModel = HomeViewModel(app)
+        advanceUntilIdle()
+        viewModel.onFolderSelected(newUri)
+        advanceUntilIdle()
+
+        coVerify { documentRepository.clearFolder("content://old_folder") }
+        coVerify { documentRepository.indexFolder(newUri) }
+    }
 }

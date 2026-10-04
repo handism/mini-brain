@@ -8,6 +8,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import com.minibrain.data.repo.IndexingState
+import com.minibrain.ui.components.FolderChangeDialog
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,7 +64,9 @@ fun SettingsScreen(
 ) {
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
+    val indexingState by vm.indexingState.collectAsStateWithLifecycle()
     var showClearDialog by remember { mutableStateOf(false) }
+    var showFolderChangeDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clearedMessage = stringResource(R.string.settings_history_cleared)
@@ -76,13 +82,27 @@ fun SettingsScreen(
         snackbarHostState = snackbarHostState,
         treeUri = treeUri,
         showSearchLog = showSearchLog,
+        indexingProgress = indexingState as? IndexingState.Progress,
         llmModelFile = vm.llmModelFile,
         embedderModelFile = vm.embedderModelFile,
         onReindex = { vm.reindex() },
-        onChangeFolder = { folderLauncher.launch(null) },
+        // 初めて選ぶときは消えるインデックスが無いので、確認せずに開く
+        onChangeFolder = {
+            if (treeUri == null) folderLauncher.launch(null) else showFolderChangeDialog = true
+        },
         onClearChat = { showClearDialog = true },
         onShowSearchLogChange = { vm.setShowSearchLog(it) }
     )
+
+    if (showFolderChangeDialog) {
+        FolderChangeDialog(
+            onConfirm = {
+                showFolderChangeDialog = false
+                folderLauncher.launch(null)
+            },
+            onDismiss = { showFolderChangeDialog = false },
+        )
+    }
 
     if (showClearDialog) {
         ClearChatDialog(
@@ -103,6 +123,7 @@ private fun SettingsScreenContent(
     snackbarHostState: SnackbarHostState,
     treeUri: String?,
     showSearchLog: Boolean,
+    indexingProgress: IndexingState.Progress?,
     llmModelFile: java.io.File,
     embedderModelFile: java.io.File,
     onReindex: () -> Unit,
@@ -132,6 +153,7 @@ private fun SettingsScreenContent(
         ) {
             KnowledgeBaseSection(
                 treeUri = treeUri,
+                indexingProgress = indexingProgress,
                 onReindex = onReindex,
                 onChangeFolder = onChangeFolder
             )
@@ -153,6 +175,7 @@ private fun SettingsScreenContent(
 @Composable
 private fun KnowledgeBaseSection(
     treeUri: String?,
+    indexingProgress: IndexingState.Progress?,
     onReindex: () -> Unit,
     onChangeFolder: () -> Unit,
 ) {
@@ -161,14 +184,26 @@ private fun KnowledgeBaseSection(
         icon = Icons.Default.Folder,
         headline = stringResource(R.string.settings_current_folder),
         supporting = treeUri?.let { folderDisplayName(it) } ?: stringResource(R.string.not_selected),
-        trailing = { Text(stringResource(R.string.change_folder), color = MaterialTheme.colorScheme.primary) },
-        onClick = onChangeFolder,
+        trailing = {
+            Text(
+                stringResource(R.string.change_folder),
+                color = if (indexingProgress == null) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        // インデックス中に切り替えると、走っている索引の後で消すことになるので待ってもらう
+        onClick = onChangeFolder.takeIf { indexingProgress == null },
     )
     SettingsListItem(
         icon = Icons.Default.Sync,
         headline = stringResource(R.string.settings_reindex_changed),
-        supporting = stringResource(R.string.settings_reindex_changed_desc),
-        onClick = onReindex,
+        supporting = indexingProgress?.let {
+            stringResource(R.string.settings_reindexing, it.current, it.total)
+        } ?: stringResource(R.string.settings_reindex_changed_desc),
+        trailing = indexingProgress?.let {
+            { CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp) }
+        },
+        onClick = onReindex.takeIf { indexingProgress == null },
     )
 }
 

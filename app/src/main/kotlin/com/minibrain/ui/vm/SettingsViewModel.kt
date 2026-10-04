@@ -8,7 +8,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minibrain.MiniBrainApp
+import com.minibrain.data.repo.IndexingState
 import com.minibrain.dataStore
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -16,6 +18,9 @@ import kotlinx.coroutines.launch
 
 private val PREF_TREE_URI_SETTINGS = stringPreferencesKey("tree_uri")
 private val PREF_SHOW_SEARCH_LOG = booleanPreferencesKey("show_search_log")
+
+/** 検索ログは開発者向けなので、普段使いでは出さない。 */
+internal const val SHOW_SEARCH_LOG_DEFAULT = false
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -26,8 +31,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val showSearchLog = app.dataStore.data
-        .map { prefs -> prefs[PREF_SHOW_SEARCH_LOG] ?: true }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+        .map { prefs -> prefs[PREF_SHOW_SEARCH_LOG] ?: SHOW_SEARCH_LOG_DEFAULT }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SHOW_SEARCH_LOG_DEFAULT)
 
     fun setShowSearchLog(enabled: Boolean) {
         viewModelScope.launch {
@@ -38,8 +43,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val llmModelFile get() = app.container.modelDownloader.llmModelFile
     val embedderModelFile get() = app.container.modelDownloader.embedderModelFile
 
+    /** 再インデックスを押したあと、設定画面でも進み具合を出すため。 */
+    val indexingState: StateFlow<IndexingState> = app.container.documentRepository.indexingState
+
     fun reindex() {
         val uri = savedTreeUri.value ?: return
+        // 走っている最中に重ねて押されても、終わったあとにもう一周しないようにする
+        if (indexingState.value is IndexingState.Progress) return
         viewModelScope.launch {
             app.container.documentRepository.indexFolder(Uri.parse(uri))
         }
@@ -47,19 +57,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun changeFolder(newUri: Uri) {
         viewModelScope.launch {
-            // 既存フォルダのインデックスを削除して新規インデックス
-            val oldUri = savedTreeUri.value
-            if (oldUri != null) {
-                app.container.documentRepository.clearFolder(oldUri)
-            }
-            runCatching {
-                app.contentResolver.takePersistableUriPermission(
-                    newUri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            }
-            app.dataStore.edit { prefs -> prefs[PREF_TREE_URI_SETTINGS] = newUri.toString() }
-            app.container.documentRepository.indexFolder(newUri)
+            app.switchKnowledgeFolder(newUri, oldUri = savedTreeUri.value)
         }
     }
 

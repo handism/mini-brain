@@ -11,6 +11,7 @@ import com.minibrain.MiniBrainApp
 import com.minibrain.ai.llm.ModelDownloader
 import com.minibrain.data.repo.ChatRepository
 import com.minibrain.data.repo.DocumentRepository
+import com.minibrain.data.repo.IndexingState
 import com.minibrain.dataStore
 import com.minibrain.di.AppContainer
 import io.mockk.MockKAnnotations
@@ -63,6 +64,7 @@ class SettingsViewModelTest {
     private val prefsFlow = MutableStateFlow<Preferences>(mockk())
     private val PREF_TREE_URI_SETTINGS = stringPreferencesKey("tree_uri")
     private val PREF_SHOW_SEARCH_LOG = booleanPreferencesKey("show_search_log")
+    private val indexingStateFlow = MutableStateFlow<IndexingState>(IndexingState.Idle)
 
     @Before
     fun setUp() {
@@ -77,6 +79,7 @@ class SettingsViewModelTest {
         every { container.chatRepository } returns chatRepository
         every { container.modelDownloader } returns modelDownloader
         every { app.contentResolver } returns contentResolver
+        every { documentRepository.indexingState } returns indexingStateFlow
 
         // Setup datastore edit behavior
         coEvery { dataStore.updateData(any()) } returns mockk(relaxed = true)
@@ -125,7 +128,7 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `default showSearchLog is true when not set`() = runTest(testDispatcher) {
+    fun `default showSearchLog is false when not set`() = runTest(testDispatcher) {
         val prefs = mockk<Preferences>()
         every { prefs[PREF_TREE_URI_SETTINGS] } returns null
         every { prefs[PREF_SHOW_SEARCH_LOG] } returns null
@@ -135,7 +138,7 @@ class SettingsViewModelTest {
         val viewModel = SettingsViewModel(app)
         advanceUntilIdle()
 
-        assertEquals(true, viewModel.showSearchLog.value)
+        assertEquals(false, viewModel.showSearchLog.value)
     }
 
     @Test
@@ -167,6 +170,46 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         coVerify { documentRepository.indexFolder(mockUri) }
+    }
+
+    @Test
+    fun `reindex does nothing while indexing is running`() = runTest(testDispatcher) {
+        val uriStr = "content://saved_folder"
+        val prefs = mockk<Preferences>()
+        every { prefs[PREF_TREE_URI_SETTINGS] } returns uriStr
+        every { prefs[PREF_SHOW_SEARCH_LOG] } returns null
+        prefsFlow.value = prefs
+        indexingStateFlow.value = IndexingState.Progress(1, 10, "a.md")
+
+        val viewModel = SettingsViewModel(app)
+        advanceUntilIdle()
+
+        viewModel.reindex()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { documentRepository.indexFolder(any()) }
+    }
+
+    @Test
+    fun `changeFolder keeps the index when the same folder is chosen again`() = runTest(testDispatcher) {
+        val uriStr = "content://same_folder"
+        val prefs = mockk<Preferences>()
+        every { prefs[PREF_TREE_URI_SETTINGS] } returns uriStr
+        every { prefs[PREF_SHOW_SEARCH_LOG] } returns null
+        prefsFlow.value = prefs
+        val sameUri = mockk<Uri>()
+        every { sameUri.toString() } returns uriStr
+        every { contentResolver.takePersistableUriPermission(sameUri, any()) } returns Unit
+        coEvery { documentRepository.indexFolder(sameUri) } returns Unit
+
+        val viewModel = SettingsViewModel(app)
+        advanceUntilIdle()
+
+        viewModel.changeFolder(sameUri)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { documentRepository.clearFolder(any()) }
+        coVerify { documentRepository.indexFolder(sameUri) }
     }
 
     @Test
