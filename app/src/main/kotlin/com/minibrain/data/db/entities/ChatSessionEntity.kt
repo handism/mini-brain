@@ -9,3 +9,11 @@ data class ChatSessionEntity(
     val title: String,
     val createdAt: Long = System.currentTimeMillis(),
 )
+
+/** 履歴一覧用。[updatedAt] はセッション内の最新メッセージの日時。 */
+data class ChatSessionSummary(
+    val id: Long,
+    val title: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)

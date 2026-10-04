@@ -1,5 +1,8 @@
 package com.minibrain.ui.screens
 
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -45,7 +48,66 @@ class ChatScreenTest {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
         }
 
-        composeTestRule.onNodeWithText("質問を入力してください\nmdファイルの内容をもとに回答します").assertIsDisplayed()
+        composeTestRule.onNodeWithText("質問を入力してください").assertIsDisplayed()
+        composeTestRule.onNodeWithText("mdファイルの内容をもとに回答します").assertIsDisplayed()
+    }
+
+    @Test
+    fun testSuggestionChipFillsInput() {
+        val vm = relaxedVm()
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        composeTestRule.onNodeWithText("最近書いたメモは？").performClick()
+        composeTestRule.onNodeWithContentDescription("送信").performClick()
+
+        verify { vm.sendMessage("最近書いたメモは？") }
+    }
+
+    @Test
+    fun testImeSendActionSendsMessage() {
+        val vm = relaxedVm()
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        composeTestRule.onNodeWithText("質問を入力...").performTextInput("IME send")
+        composeTestRule.onNodeWithText("IME send").performImeAction()
+
+        verify { vm.sendMessage("IME send") }
+    }
+
+    @Test
+    fun testStatusIsShownInsideStreamingBubble() {
+        val vm = relaxedVm(
+            messages = listOf(ChatMessage(role = MessageRole.ASSISTANT, content = "", isStreaming = true)),
+            isGenerating = true,
+            statusText = "再ランク中...",
+        )
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        // 吹き出しの中に 1 回だけ出る（下部のステータス行と二重にならない）
+        composeTestRule.onAllNodesWithText("再ランク中...").assertCountEquals(1)
+    }
+
+    private fun relaxedVm(
+        messages: List<ChatMessage> = emptyList(),
+        isGenerating: Boolean = false,
+        statusText: String? = null,
+    ): ChatViewModel {
+        val vm = mockk<ChatViewModel>(relaxed = true)
+        every { vm.messages } returns MutableStateFlow(messages)
+        every { vm.isGenerating } returns MutableStateFlow(isGenerating)
+        every { vm.errorMessage } returns MutableStateFlow<String?>(null)
+        every { vm.statusText } returns MutableStateFlow(statusText)
+        every { vm.showSearchLog } returns MutableStateFlow(true)
+        return vm
     }
 
     @Test

@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,10 +37,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.minibrain.R
+import com.minibrain.ui.components.folderDisplayName
 import com.minibrain.ui.vm.SettingsViewModel
 
 @Composable
@@ -51,6 +57,7 @@ fun SettingsScreen(
     var showClearDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val clearedMessage = stringResource(R.string.settings_history_cleared)
 
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -76,7 +83,7 @@ fun SettingsScreen(
             onConfirm = {
                 vm.clearChatHistory()
                 showClearDialog = false
-                scope.launch { snackbarHostState.showSnackbar("チャット履歴を削除しました") }
+                scope.launch { snackbarHostState.showSnackbar(clearedMessage) }
             },
             onDismiss = { showClearDialog = false }
         )
@@ -100,10 +107,10 @@ private fun SettingsScreenContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("設定") },
+                title = { Text(stringResource(R.string.settings)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 }
             )
@@ -114,6 +121,7 @@ private fun SettingsScreenContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
             KnowledgeBaseSection(
@@ -151,37 +159,37 @@ private fun KnowledgeBaseSection(
     onReindex: () -> Unit,
     onChangeFolder: () -> Unit,
 ) {
-    SectionTitle("知識ベース")
+    SectionTitle(stringResource(R.string.settings_section_knowledge_base))
 
     SettingItem(
-        label = "現在のフォルダ",
-        value = treeUri?.let { Uri.parse(it).lastPathSegment } ?: "未選択",
+        label = stringResource(R.string.settings_current_folder),
+        value = treeUri?.let { folderDisplayName(it) } ?: stringResource(R.string.not_selected),
     )
     Spacer(Modifier.height(8.dp))
     FilledTonalButton(
         onClick = onReindex,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text("再インデックス（変更ファイルのみ）")
+        Text(stringResource(R.string.settings_reindex_changed))
     }
     Spacer(Modifier.height(8.dp))
     OutlinedButton(
         onClick = onChangeFolder,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text("フォルダを変更")
+        Text(stringResource(R.string.change_folder))
     }
 }
 
 @Composable
 private fun ChatHistorySection(onClearChat: () -> Unit) {
-    SectionTitle("チャット履歴")
+    SectionTitle(stringResource(R.string.settings_section_chat_history))
 
     OutlinedButton(
         onClick = onClearChat,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text("チャット履歴をすべて削除", color = MaterialTheme.colorScheme.error)
+        Text(stringResource(R.string.settings_clear_history), color = MaterialTheme.colorScheme.error)
     }
 }
 
@@ -190,16 +198,16 @@ private fun DeveloperSection(
     showSearchLog: Boolean,
     onShowSearchLogChange: (Boolean) -> Unit,
 ) {
-    SectionTitle("開発者")
+    SectionTitle(stringResource(R.string.settings_section_developer))
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("検索ログを表示する", style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.settings_show_search_log), style = MaterialTheme.typography.bodyMedium)
             Text(
-                "回答の下にエージェントの検索過程を表示します",
+                stringResource(R.string.settings_show_search_log_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -216,26 +224,37 @@ private fun ModelInfoSection(
     llmModelFile: java.io.File,
     embedderModelFile: java.io.File,
 ) {
-    SectionTitle("モデル情報")
+    SectionTitle(stringResource(R.string.settings_section_model))
 
-    SettingItem(label = "LLM モデル", value = "Gemma 4 E2B (LiteRT-LM)")
     SettingItem(
-        label = "LLM ファイル",
-        value = if (llmModelFile.exists()) "${llmModelFile.length() / 1024 / 1024} MB" else "未ダウンロード",
+        label = stringResource(R.string.settings_llm_model),
+        value = stringResource(R.string.settings_llm_model_value),
     )
-    SettingItem(label = "Embedder", value = "Universal Sentence Encoder Multilingual")
     SettingItem(
-        label = "Embedder ファイル",
-        value = if (embedderModelFile.exists()) "${embedderModelFile.length() / 1024 / 1024} MB" else "未ダウンロード",
+        label = stringResource(R.string.settings_llm_file),
+        value = modelFileSize(llmModelFile),
+    )
+    SettingItem(
+        label = stringResource(R.string.settings_embedder),
+        value = stringResource(R.string.settings_embedder_value),
+    )
+    SettingItem(
+        label = stringResource(R.string.settings_embedder_file),
+        value = modelFileSize(embedderModelFile),
     )
 }
 
 @Composable
+private fun modelFileSize(file: java.io.File): String =
+    if (file.exists()) stringResource(R.string.settings_file_size_mb, (file.length() / 1024 / 1024).toInt())
+    else stringResource(R.string.settings_not_downloaded)
+
+@Composable
 private fun PrivacySection() {
-    SectionTitle("プライバシー")
+    SectionTitle(stringResource(R.string.settings_section_privacy))
 
     Text(
-        "すべての推論はオンデバイスで行われます。\n質問・回答・mdの内容はクラウドに送信されません。\nネットワーク通信は初回モデルダウンロード時のみです。",
+        stringResource(R.string.settings_privacy_text),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -248,15 +267,15 @@ private fun ClearChatDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("チャット履歴を削除") },
-        text = { Text("すべてのチャット履歴が削除されます。この操作は取り消せません。") },
+        title = { Text(stringResource(R.string.settings_clear_dialog_title)) },
+        text = { Text(stringResource(R.string.settings_clear_dialog_text)) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("削除", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("キャンセル") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
 }

@@ -33,12 +33,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.minibrain.R
 import com.minibrain.data.repo.IndexingState
+import com.minibrain.ui.components.folderDisplayName
 import com.minibrain.ui.vm.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,10 +67,10 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Mini Brain") },
+                title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "設定")
+                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings))
                     }
                 }
             )
@@ -119,11 +124,12 @@ private fun FolderUnselectedContent(
         tint = MaterialTheme.colorScheme.primary,
     )
     Spacer(Modifier.height(16.dp))
-    Text("mdフォルダを選択してください", style = MaterialTheme.typography.titleLarge)
+    Text(stringResource(R.string.home_select_folder_title), style = MaterialTheme.typography.titleLarge)
     Spacer(Modifier.height(8.dp))
     Text(
-        "Markdownファイルが格納されたフォルダを選ぶと\n自動でインデックスを作成します",
+        stringResource(R.string.home_select_folder_desc),
         style = MaterialTheme.typography.bodyMedium,
+        textAlign = TextAlign.Center,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Spacer(Modifier.height(32.dp))
@@ -132,7 +138,7 @@ private fun FolderUnselectedContent(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Icon(Icons.Default.FolderOpen, contentDescription = null)
-        Text("フォルダを選択", modifier = Modifier.padding(start = 8.dp))
+        Text(stringResource(R.string.home_select_folder), modifier = Modifier.padding(start = 8.dp))
     }
 }
 
@@ -149,19 +155,18 @@ private fun FolderSelectedContent(
     // フォルダ選択済み
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("知識ベース", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.home_knowledge_base), style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.height(4.dp))
             Text(
-                (Uri.parse(treeUri).lastPathSegment ?: treeUri)
-                    .removePrefix("primary:"),
+                folderDisplayName(treeUri),
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                StatItem(label = "ファイル数", value = "$docCount")
-                StatItem(label = "チャンク数", value = "$chunkCount")
+                StatItem(label = stringResource(R.string.home_stat_files), value = "$docCount")
+                StatItem(label = stringResource(R.string.home_stat_chunks), value = "$chunkCount")
             }
         }
     }
@@ -171,31 +176,16 @@ private fun FolderSelectedContent(
     // インデックス状態
     when (val s = indexState) {
         is IndexingState.Idle -> { /* No UI to display when idle */ }
-        is IndexingState.Progress -> {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                Text(
-                    " インデックス中... ${s.current}/${s.total} ${s.fileName}",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-            if (s.total > 0) {
-                LinearProgressIndicator(
-                    progress = { s.current.toFloat() / s.total },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
+        is IndexingState.Progress -> IndexingProgress(s)
         is IndexingState.Done -> {
             Text(
-                "インデックス完了: ${s.fileCount}ファイル / ${s.chunkCount}チャンク",
+                stringResource(R.string.home_indexing_done, s.fileCount, s.chunkCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
         }
         is IndexingState.Error -> {
-            Text("エラー: ${s.message}", color = MaterialTheme.colorScheme.error)
+            Text(stringResource(R.string.home_indexing_error, s.message), color = MaterialTheme.colorScheme.error)
         }
     }
 
@@ -207,7 +197,16 @@ private fun FolderSelectedContent(
         enabled = indexState !is IndexingState.Progress,
     ) {
         Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
-        Text("チャットを開く", modifier = Modifier.padding(start = 8.dp))
+        Text(stringResource(R.string.home_open_chat), modifier = Modifier.padding(start = 8.dp))
+    }
+
+    if (indexState is IndexingState.Progress) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(R.string.home_indexing_chat_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 
     Spacer(Modifier.height(12.dp))
@@ -219,14 +218,62 @@ private fun FolderSelectedContent(
             enabled = indexState !is IndexingState.Progress,
         ) {
             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("再インデックス", modifier = Modifier.padding(start = 4.dp))
+            Text(stringResource(R.string.reindex), modifier = Modifier.padding(start = 4.dp))
         }
         OutlinedButton(
             onClick = onChangeFolder,
             modifier = Modifier.weight(1f),
         ) {
             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("フォルダ変更", modifier = Modifier.padding(start = 4.dp))
+            Text(stringResource(R.string.home_change_folder), modifier = Modifier.padding(start = 4.dp))
         }
     }
+}
+
+@Composable
+private fun IndexingProgress(state: IndexingState.Progress) {
+    // スキャンと解析（埋め込み）で total が変わるので、フェーズごとに計測をやり直す
+    val phaseStartMs = remember(state.total) { System.currentTimeMillis() }
+    val phaseStartCount = remember(state.total) { state.current }
+    val remainingMs = estimateRemainingMs(
+        done = state.current - phaseStartCount,
+        remaining = state.total - state.current,
+        elapsedMs = System.currentTimeMillis() - phaseStartMs,
+    )
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+        Text(
+            stringResource(R.string.home_indexing, state.current, state.total, state.fileName),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+    }
+    if (state.total > 0) {
+        Spacer(Modifier.height(8.dp))
+        LinearProgressIndicator(
+            progress = { state.current.toFloat() / state.total },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    remainingMs?.let { ms ->
+        Spacer(Modifier.height(4.dp))
+        val minutes = (ms / 60_000L).toInt()
+        Text(
+            if (minutes >= 1) stringResource(R.string.home_indexing_eta_minutes, minutes + 1)
+            else stringResource(R.string.home_indexing_eta_soon),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+// 数件処理するまでは速度がぶれるので出さない
+private const val ETA_MIN_SAMPLES = 3
+
+/** 残り時間の推定。サンプルが少ないうちは null。 */
+internal fun estimateRemainingMs(done: Int, remaining: Int, elapsedMs: Long): Long? {
+    if (done < ETA_MIN_SAMPLES || remaining <= 0 || elapsedMs <= 0) return null
+    return elapsedMs * remaining / done
 }

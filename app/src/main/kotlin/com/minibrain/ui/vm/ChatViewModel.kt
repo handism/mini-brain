@@ -224,6 +224,12 @@ class ChatViewModel(
         }
     }
 
+    /** 引用元ファイルの SAF URI。docId を持たない引用や、再インデックスで消えたファイルなら null。 */
+    suspend fun citationFileUri(citation: Citation): String? {
+        val docId = citation.docId ?: return null
+        return app.container.database.documentDao().getById(docId)?.fileUri
+    }
+
     fun cancelGeneration() {
         currentJob?.cancel()
         _isGenerating.value = false

@@ -1,6 +1,8 @@
 @file:Suppress("unused", "UnusedImport")
 package com.minibrain.ui.screens
 
+import androidx.compose.ui.res.stringResource
+import com.minibrain.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -60,12 +62,12 @@ fun OnboardingScreen(
             )
             Spacer(Modifier.height(24.dp))
             Text(
-                text = "Mini Brain",
+                text = stringResource(R.string.app_name),
                 style = MaterialTheme.typography.headlineMedium,
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = "プライベートRAG — すべてオンデバイスで動作",
+                text = stringResource(R.string.onboarding_tagline),
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -99,26 +101,26 @@ fun OnboardingScreen(
 @Composable
 private fun RequiredStateView(onStartDownload: () -> Unit) {
     Text(
-        "初回起動時に約 2.8GB のモデルをダウンロードします。\nWi-Fi 接続を推奨します。",
+        stringResource(R.string.onboarding_download_notice),
         style = MaterialTheme.typography.bodySmall,
         textAlign = TextAlign.Center,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Spacer(Modifier.height(24.dp))
     Button(onClick = onStartDownload, modifier = Modifier.fillMaxWidth()) {
-        Text("ダウンロード開始")
+        Text(stringResource(R.string.onboarding_download_start))
     }
 }
 
 @Composable
 private fun DownloadingStateView(state: OnboardingUiState.Downloading) {
-    Text("モデルをダウンロード中...", style = MaterialTheme.typography.bodyMedium)
+    Text(stringResource(R.string.onboarding_downloading), style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(8.dp))
     Text(state.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(12.dp))
     if (state.embedderFraction > 0f || state.llmFraction > 0f) {
         if (state.embedderFraction > 0f) {
-            Text("Embedderモデル", style = MaterialTheme.typography.labelSmall)
+            Text(stringResource(R.string.onboarding_embedder_model), style = MaterialTheme.typography.labelSmall)
             LinearProgressIndicator(
                 progress = { state.embedderFraction },
                 modifier = Modifier.fillMaxWidth(),
@@ -126,7 +128,7 @@ private fun DownloadingStateView(state: OnboardingUiState.Downloading) {
             Spacer(Modifier.height(8.dp))
         }
         if (state.llmFraction > 0f) {
-            Text("Gemma 4 E2B LLM (約2.5GB)", style = MaterialTheme.typography.labelSmall)
+            Text(stringResource(R.string.onboarding_llm_model), style = MaterialTheme.typography.labelSmall)
             LinearProgressIndicator(
                 progress = { state.llmFraction },
                 modifier = Modifier.fillMaxWidth(),
@@ -141,7 +143,7 @@ private fun DownloadingStateView(state: OnboardingUiState.Downloading) {
 private fun InitializingStateView() {
     CircularProgressIndicator()
     Spacer(Modifier.height(12.dp))
-    Text("モデルを初期化中...", style = MaterialTheme.typography.bodyMedium)
+    Text(stringResource(R.string.onboarding_initializing), style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable
@@ -152,18 +154,18 @@ private fun FailureStateView(
     onRetry: () -> Unit,
 ) {
     Text(
-        "エラーが発生しました:\n${message}",
+        stringResource(R.string.onboarding_error, message),
         color = MaterialTheme.colorScheme.error,
         textAlign = TextAlign.Center,
     )
     Spacer(Modifier.height(16.dp))
     if (canTryCpu) {
         Button(onClick = onRetryCpu, modifier = Modifier.fillMaxWidth()) {
-            Text("CPUモードで試す (低速ですが安定します)")
+            Text(stringResource(R.string.onboarding_retry_cpu))
         }
         Spacer(Modifier.height(8.dp))
     }
     Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-        Text("再試行")
+        Text(stringResource(R.string.onboarding_retry))
     }
 }

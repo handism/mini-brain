@@ -1,5 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Mini Brain</string>
+
+    <!-- 共通 -->
+    <string name="back">戻る</string>
+    <string name="settings">設定</string>
+    <string name="delete">削除</string>
+    <string name="cancel">キャンセル</string>
+    <string name="undo">元に戻す</string>
+    <string name="copy">コピー</string>
+    <string name="reindex">再インデックス</string>
+    <string name="change_folder">フォルダを変更</string>
+    <string name="not_selected">未選択</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_tagline">プライベートRAG — すべてオンデバイスで動作</string>
+    <string name="onboarding_download_notice">初回起動時に約 2.8GB のモデルをダウンロードします。\nWi-Fi 接続を推奨します。</string>
+    <string name="onboarding_download_start">ダウンロード開始</string>
+    <string name="onboarding_downloading">モデルをダウンロード中...</string>
+    <string name="onboarding_embedder_model">Embedderモデル</string>
+    <string name="onboarding_llm_model">Gemma 4 E2B LLM (約2.5GB)</string>
+    <string name="onboarding_initializing">モデルを初期化中...</string>
+    <string name="onboarding_error">エラーが発生しました:\n%1$s</string>
+    <string name="onboarding_retry_cpu">CPUモードで試す (低速ですが安定します)</string>
+    <string name="onboarding_retry">再試行</string>
+
+    <!-- Home -->
+    <string name="home_select_folder_title">mdフォルダを選択してください</string>
+    <string name="home_select_folder_desc">Markdownファイルが格納されたフォルダを選ぶと\n自動でインデックスを作成します</string>
+    <string name="home_select_folder">フォルダを選択</string>
+    <string name="home_knowledge_base">知識ベース</string>
+    <string name="home_stat_files">ファイル数</string>
+    <string name="home_stat_chunks">チャンク数</string>
+    <string name="home_indexing">インデックス中... %1$d/%2$d %3$s</string>
+    <string name="home_indexing_eta_minutes">残り約 %1$d 分</string>
+    <string name="home_indexing_eta_soon">まもなく完了</string>
+    <string name="home_indexing_chat_hint">インデックス完了後にチャットを開けます</string>
+    <string name="home_indexing_done">インデックス完了: %1$dファイル / %2$dチャンク</string>
+    <string name="home_indexing_error">エラー: %1$s</string>
+    <string name="home_open_chat">チャットを開く</string>
+    <string name="home_change_folder">フォルダ変更</string>
+
+    <!-- Chat -->
+    <string name="chat_history">履歴</string>
+    <string name="chat_new">新しいチャット</string>
+    <string name="chat_empty_title">質問を入力してください</string>
+    <string name="chat_empty_desc">mdファイルの内容をもとに回答します</string>
+    <string name="chat_suggestions_label">たとえば</string>
+    <string-array name="chat_suggestions">
+        <item>先月の日記を要約して</item>
+        <item>最近書いたメモは？</item>
+        <item>〇〇にいつ行ったっけ？</item>
+    </string-array>
+    <string name="chat_input_placeholder">質問を入力...</string>
+    <string name="chat_send">送信</string>
+    <string name="chat_stop">停止</string>
+    <string name="chat_thinking">考え中...</string>
+    <string name="chat_citations">引用元 (%1$d)</string>
+    <string name="chat_open_file">ファイルを開く</string>
+    <string name="chat_open_file_failed">このファイルを開けるアプリが見つかりません</string>
     <string name="search_log">検索ログ</string>
+    <string name="trace_done">完了</string>
+    <string name="trace_answer_length">回答 %1$d字</string>
+
+    <!-- Chat history -->
+    <string name="history_title">チャット履歴</string>
+    <string name="history_empty">チャット履歴がありません</string>
+    <string name="history_deleted">チャットを削除しました</string>
+    <string name="history_today">今日 %1$s</string>
+    <string name="history_yesterday">昨日 %1$s</string>
+
+    <!-- Settings -->
+    <string name="settings_section_knowledge_base">知識ベース</string>
+    <string name="settings_current_folder">現在のフォルダ</string>
+    <string name="settings_reindex_changed">再インデックス（変更ファイルのみ）</string>
+    <string name="settings_section_chat_history">チャット履歴</string>
+    <string name="settings_clear_history">チャット履歴をすべて削除</string>
+    <string name="settings_section_developer">開発者</string>
+    <string name="settings_show_search_log">検索ログを表示する</string>
+    <string name="settings_show_search_log_desc">回答の下にエージェントの検索過程を表示します</string>
+    <string name="settings_section_model">モデル情報</string>
+    <string name="settings_llm_model">LLM モデル</string>
+    <string name="settings_llm_model_value">Gemma 4 E2B (LiteRT-LM)</string>
+    <string name="settings_llm_file">LLM ファイル</string>
+    <string name="settings_embedder">Embedder</string>
+    <string name="settings_embedder_value">multilingual-e5-small (INT8 ONNX)</string>
+    <string name="settings_embedder_file">Embedder ファイル</string>
+    <string name="settings_file_size_mb">%1$d MB</string>
+    <string name="settings_not_downloaded">未ダウンロード</string>
+    <string name="settings_section_privacy">プライバシー</string>
+    <string name="settings_privacy_text">すべての推論はオンデバイスで行われます。\n質問・回答・mdの内容はクラウドに送信されません。\nネットワーク通信は初回モデルダウンロード時のみです。</string>
+    <string name="settings_clear_dialog_title">チャット履歴を削除</string>
+    <string name="settings_clear_dialog_text">すべてのチャット履歴が削除されます。この操作は取り消せません。</string>
+    <string name="settings_history_cleared">チャット履歴を削除しました</string>
 </resources>

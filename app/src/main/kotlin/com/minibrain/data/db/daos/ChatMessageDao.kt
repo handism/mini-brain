@@ -17,6 +17,12 @@ interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY createdAt DESC LIMIT :limit")
     suspend fun getRecentBySession(sessionId: Long, limit: Int): List<ChatMessageEntity>
 
+    @Insert
+    suspend fun insertAll(messages: List<ChatMessageEntity>)
+
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY createdAt ASC")
+    suspend fun getAllBySession(sessionId: Long): List<ChatMessageEntity>
+
     @Query("DELETE FROM chat_messages WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: Long)
 }
