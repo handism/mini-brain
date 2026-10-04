@@ -1278,3 +1278,28 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - 固有名詞 +「いつ」クエリで LLM 呼び出しが 1 回減る（Reranker と CoverageCheck が両方とも省略される）。上位 10 件の残りは Reranker ではなく RRF 順になる。
 - その他のクエリの検索結果は変わらない（埋め込みのバッチ化は padding を attention_mask で除外するため、ベクトルは 1 件ずつの場合と数値誤差の範囲で一致する）。
 
+
+---
+
+## ADR-033: GitHub Releases での APK 配布
+
+**日付:** 2026-10-05  
+**ステータス:** 採用
+
+### 背景
+
+- Google Play での公開は予定していないが、ビルド済み APK を配布したい。
+- CI の `assembleRelease` は未署名の APK しか作らず、そのままではインストールできない。
+
+### 決定
+
+- `.github/workflows/release.yml` を追加する。`v1.2.3` 形式のタグを push すると、テスト → 署名済み APK のビルド → GitHub Release の作成（APK を添付、リリースノートは自動生成）を行う。`-` を含むタグ（`v1.0.0-beta.1` など）は prerelease にする。
+- `versionName` はタグから `v` を除いたもの、`versionCode` は `major * 10000 + minor * 100 + patch` とする。
+- 署名鍵は GitHub Secrets（`RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD`）で渡す。`app/build.gradle.kts` は環境変数 `RELEASE_KEYSTORE_PATH` があるときだけ release の `signingConfig` を設定する。
+- モデルファイルは APK に同梱しない（従来どおり初回起動時にダウンロードする）。
+
+### 影響
+
+- 環境変数が無いとき（CI の `ci.yml`・ローカル）の release ビルドは従来どおり未署名。
+- 署名鍵を失うと既存インストールへの上書き更新ができなくなるため、keystore はリポジトリ外にバックアップする。
+- minor / patch が 100 以上になると `versionCode` の大小が崩れる。

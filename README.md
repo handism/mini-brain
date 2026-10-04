@@ -47,6 +47,10 @@
 - JDK 17
 - Android 12 以上の実機（RAM 6 GB 以上、空き容量 4 GB 以上推奨）
 
+### APK からインストール
+
+[Releases](https://github.com/handism/mini-brain/releases) から最新の `mini-brain-x.y.z.apk` をダウンロードして端末で開きます。初回は「提供元不明のアプリ」のインストールを許可してください。[Obtainium](https://github.com/ImranR98/Obtainium) にこのリポジトリの URL を登録すると、新しいリリースを自動で受け取れます。
+
 ### ビルド手順
 
 ```bash
@@ -64,6 +68,26 @@ gradle wrapper --gradle-version 9.5.1
 #    実機を開発者向けオプション有効化し、USBデバッグを有効化してUSBで接続
 ./gradlew installDebug
 ```
+
+### リリース手順（メンテナ向け）
+
+`v1.2.3` 形式のタグを push すると、`.github/workflows/release.yml` が署名済み APK をビルドして GitHub Release に添付します（`v1.0.0-beta.1` のように `-` を含むタグは prerelease）。
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+初回だけ、リポジトリの Settings → Secrets and variables → Actions に次の 4 つを登録します。
+
+| Secret | 内容 |
+| --- | --- |
+| `RELEASE_KEYSTORE_BASE64` | `base64 -i release.jks` の出力 |
+| `RELEASE_KEYSTORE_PASSWORD` | keystore のパスワード |
+| `RELEASE_KEY_ALIAS` | 鍵のエイリアス |
+| `RELEASE_KEY_PASSWORD` | 鍵のパスワード |
+
+keystore は `keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 4096 -validity 36500 -alias mini-brain` で作れます。なくすと既存のインストールを上書き更新できなくなるので、リポジトリ外にバックアップしてください。
 
 ### 初回起動
 
