@@ -1,5 +1,7 @@
 package com.minibrain.ui.vm
 
+import com.minibrain.data.repo.DeletedSession
+import com.minibrain.data.db.entities.ChatSessionSummary
 import com.minibrain.MiniBrainApp
 import com.minibrain.data.db.entities.ChatSessionEntity
 import com.minibrain.data.repo.ChatRepository
@@ -58,7 +60,7 @@ class ChatHistoryViewModelTest {
     @Test
     fun `sessions stateflow emits sessions from repository`() = runTest(testDispatcher) {
         val sampleSessions = listOf(
-            ChatSessionEntity(id = 1L, title = "Session 1", createdAt = 1000L)
+            ChatSessionSummary(id = 1L, title = "Session 1", createdAt = 1000L, updatedAt = 2000L)
         )
         every { chatRepository.observeSessions() } returns flowOf(sampleSessions)
 
@@ -73,12 +75,29 @@ class ChatHistoryViewModelTest {
     @Test
     fun `deleteSession calls repository deleteSession`() = runTest(testDispatcher) {
         every { chatRepository.observeSessions() } returns flowOf(emptyList())
-        coEvery { chatRepository.deleteSession(1L) } returns Unit
+        coEvery { chatRepository.deleteSession(1L) } returns null
 
         val viewModel = ChatHistoryViewModel(app)
         viewModel.deleteSession(1L)
         advanceUntilIdle()
 
         coVerify { chatRepository.deleteSession(1L) }
+    }
+
+    @Test
+    fun `undoDelete restores the last deleted session once`() = runTest(testDispatcher) {
+        val deleted = DeletedSession(ChatSessionEntity(id = 1L, title = "t", createdAt = 1000L), emptyList())
+        every { chatRepository.observeSessions() } returns flowOf(emptyList())
+        coEvery { chatRepository.deleteSession(1L) } returns deleted
+        coEvery { chatRepository.restoreSession(deleted) } returns Unit
+
+        val viewModel = ChatHistoryViewModel(app)
+        viewModel.deleteSession(1L)
+        advanceUntilIdle()
+        viewModel.undoDelete()
+        viewModel.undoDelete()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { chatRepository.restoreSession(deleted) }
     }
 }

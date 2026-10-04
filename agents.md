@@ -167,7 +167,13 @@
 - `AnswerPromptBuilder.buildAnswerPrompt` は `dateRange != null` のとき、期間（start〜end）と「日付を拾う優先順位 3 段」の照合指示を context block 直後に差し込みます（ADR-025 + ADR-026）。`citations` に日付プレフィックス付きが 1 件もない場合は「`[日付:]` 付きは無いが本文ラベル / 表記を期間と照合せよ」というフェールセーフ文に切り替えます。
 - `dateRange == null` でも `DATE_QUERY_REGEX`（`いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで`）にマッチすれば「日付に関する質問」ブロックを差し込み、同じ 3 段優先順位で本文から日付を拾うよう LLM に指示します（ADR-026）。固有名詞 +「いつ」クエリ（例:「サウナしきじにいつ行ったっけ」）で `documentDate` が無くても本文中の「初回訪問日: 2022/01/01」を回答に乗せられます。
 
-### 5.5 DB マイグレーション運用
+### 5.5 UI 実装の約束事
+- 画面の文言は `res/values/strings.xml` に置き、Composable からは `stringResource` で参照します（Compose UI テストは日本語の文言・contentDescription でノードを探すので、文言を変えたらテストも更新）。ViewModel / Repository 由来のメッセージ（エラー文、`IndexingState.Progress.fileName` など）は現状コード内の文字列のままです。
+- 配色は Material 3 の dynamic color が前提です（`Color.kt` は `dynamicColor = false` 時のフォールバックのみ）。色は `MaterialTheme.colorScheme` から取り、固定色を足さないでください。
+- フォルダ名の表示は `folderDisplayName(treeUri)` を使います（ボリューム ID の `primary:` などを落とす処理を画面ごとに書かない）。
+- チャット履歴一覧は `ChatSessionDao.observeSummaries`（最新メッセージ日時順）を使います。削除は `ChatRepository.deleteSession` が返す `DeletedSession` を `restoreSession` に渡すと id を保ったまま戻せます。
+
+### 5.6 DB マイグレーション運用
 - 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は、次回の差分インデックス時に自動補完されます。強制的に補完したい場合は Settings → 再インデックスを実行します。
 
 ---

@@ -4,16 +4,19 @@ package com.minibrain.ui.components
 import android.content.ClipData
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
@@ -35,9 +38,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.minibrain.R
 import com.minibrain.ai.agent.AgentTraceEvent
@@ -47,12 +52,30 @@ import com.minibrain.ui.vm.ChatMessage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+// 固定 dp だとタブレット・横画面で回答が細長くなるので、画面幅に対する割合で決める
+private const val BUBBLE_WIDTH_FRACTION = 0.85f
+private val BUBBLE_MAX_WIDTH = 720.dp
+
+/**
+ * @param statusText 回答の本文が届くまでの間、ストリーミング中の吹き出しに出す進行状況
+ * @param onOpenCitation 引用元をタップしたとき。null なら引用元は開けない
+ */
 @Composable
-fun MessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
+fun MessageBubble(
+    msg: ChatMessage,
+    showSearchLog: Boolean,
+    statusText: String? = null,
+    onOpenCitation: ((Citation) -> Unit)? = null,
+) {
     if (msg.role == MessageRole.USER) {
         UserMessageBubble(msg = msg)
     } else {
-        AssistantMessageBubble(msg = msg, showSearchLog = showSearchLog)
+        AssistantMessageBubble(
+            msg = msg,
+            showSearchLog = showSearchLog,
+            statusText = statusText,
+            onOpenCitation = onOpenCitation,
+        )
     }
 }
 
@@ -63,7 +86,7 @@ fun UserMessageBubble(msg: ChatMessage) {
         horizontalArrangement = Arrangement.End,
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 300.dp),
+            modifier = Modifier.widthIn(max = BUBBLE_MAX_WIDTH).fillMaxWidth(BUBBLE_WIDTH_FRACTION),
             horizontalAlignment = Alignment.End,
         ) {
             Card(
@@ -99,7 +122,12 @@ fun UserMessageBubble(msg: ChatMessage) {
 }
 
 @Composable
-fun AssistantMessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
+fun AssistantMessageBubble(
+    msg: ChatMessage,
+    showSearchLog: Boolean,
+    statusText: String? = null,
+    onOpenCitation: ((Citation) -> Unit)? = null,
+) {
     var citationsExpanded by remember { mutableStateOf(false) }
     var traceExpanded by remember { mutableStateOf(false) }
 
@@ -108,10 +136,10 @@ fun AssistantMessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
         horizontalArrangement = Arrangement.Start,
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 300.dp),
+            modifier = Modifier.widthIn(max = BUBBLE_MAX_WIDTH).fillMaxWidth(BUBBLE_WIDTH_FRACTION),
             horizontalAlignment = Alignment.Start,
         ) {
-            AssistantMessageCard(msg = msg)
+            AssistantMessageCard(msg = msg, statusText = statusText)
 
             AssistantMessageActions(
                 msg = msg,
@@ -120,7 +148,7 @@ fun AssistantMessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
             )
 
             if (msg.citations.isNotEmpty() && !msg.isStreaming) {
-                CitationList(citations = msg.citations, expanded = citationsExpanded)
+                CitationList(citations = msg.citations, expanded = citationsExpanded, onOpen = onOpenCitation)
             }
 
             if (!msg.isStreaming && showSearchLog && msg.traceEvents.isNotEmpty()) {
@@ -135,7 +163,7 @@ fun AssistantMessageBubble(msg: ChatMessage, showSearchLog: Boolean) {
 }
 
 @Composable
-private fun AssistantMessageCard(msg: ChatMessage) {
+private fun AssistantMessageCard(msg: ChatMessage, statusText: String?) {
     Card(
         shape = RoundedCornerShape(
             topStart = 16.dp,
@@ -149,7 +177,15 @@ private fun AssistantMessageCard(msg: ChatMessage) {
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             if (msg.isStreaming && msg.content.isEmpty()) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = statusText ?: stringResource(R.string.chat_thinking),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             } else {
                 MarkdownText(
                     text = msg.content,
@@ -182,7 +218,7 @@ private fun AssistantMessageActions(
                         modifier = Modifier.size(14.dp),
                     )
                     Text(
-                        "引用元 (${msg.citations.size})",
+                        stringResource(R.string.chat_citations, msg.citations.size),
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -192,33 +228,71 @@ private fun AssistantMessageActions(
 }
 
 @Composable
-fun CitationList(citations: List<Citation>, expanded: Boolean) {
+fun CitationList(
+    citations: List<Citation>,
+    expanded: Boolean,
+    onOpen: ((Citation) -> Unit)? = null,
+) {
     AnimatedVisibility(visible = expanded) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             citations.forEach { citation ->
-                Box(
-                    modifier = Modifier
-                        .background(
-                            MaterialTheme.colorScheme.surfaceContainerLow,
-                            RoundedCornerShape(8.dp),
-                        )
-                        .padding(8.dp),
-                ) {
-                    Column {
-                        Text(
-                            text = citation.headingPath,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = citation.snippet,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 3,
-                        )
-                    }
-                }
+                CitationItem(
+                    citation = citation,
+                    // docId の無い引用（フォルダ要約など）は開く先のファイルが無い
+                    onClick = onOpen?.takeIf { citation.docId != null }?.let { open -> { open(citation) } },
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun CitationItem(citation: Citation, onClick: (() -> Unit)?) {
+    val shape = RoundedCornerShape(8.dp)
+    val fileLabel = citation.relativePath
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow, shape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            if (fileLabel != null) {
+                Text(
+                    text = fileLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // ファイル名と同じ見出しパス（先頭チャンクのヒットなど）は重ねて出さない
+            if (citation.headingPath != fileLabel) {
+                Text(
+                    text = citation.headingPath,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (fileLabel == null) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = citation.snippet,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (onClick != null) {
+            Icon(
+                Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = stringResource(R.string.chat_open_file),
+                modifier = Modifier.padding(start = 4.dp).size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -269,7 +343,7 @@ fun MessageCopyButton(content: String) {
     ) {
         Icon(
             imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-            contentDescription = "コピー",
+            contentDescription = stringResource(R.string.copy),
             modifier = Modifier.size(15.dp),
             tint = if (copied) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant,

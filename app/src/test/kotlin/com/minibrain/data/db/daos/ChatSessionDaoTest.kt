@@ -4,7 +4,9 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.minibrain.data.db.AppDatabase
+import com.minibrain.data.db.entities.ChatMessageEntity
 import com.minibrain.data.db.entities.ChatSessionEntity
+import com.minibrain.data.db.entities.MessageRole
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -47,6 +49,23 @@ class ChatSessionDaoTest {
         // Check order (DESC by createdAt)
         assertEquals("Test 2", sessions[0].title)
         assertEquals("Test 1", sessions[1].title)
+    }
+
+    @Test
+    fun observeSummaries_ordersByLastMessage() = runBlocking {
+        val oldId = dao.insert(ChatSessionEntity(title = "Old", createdAt = 1000))
+        dao.insert(ChatSessionEntity(title = "New", createdAt = 2000))
+        // 古いセッションに後から書き込んだら先頭に来る
+        db.chatMessageDao().insert(
+            ChatMessageEntity(sessionId = oldId, role = MessageRole.USER, content = "q", createdAt = 3000)
+        )
+
+        val summaries = dao.observeSummaries().first()
+
+        assertEquals(listOf("Old", "New"), summaries.map { it.title })
+        assertEquals(3000L, summaries[0].updatedAt)
+        // メッセージの無いセッションは作成日時
+        assertEquals(2000L, summaries[1].updatedAt)
     }
 
     @Test

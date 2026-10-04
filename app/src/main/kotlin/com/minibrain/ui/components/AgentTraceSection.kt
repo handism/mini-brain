@@ -1,5 +1,7 @@
 package com.minibrain.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.minibrain.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -100,7 +102,7 @@ private fun ObservationItem(event: ObservationEvent) {
 private fun PlannerDecisionItem(event: PlannerDecisionEvent) {
     if (event.decision.startsWith("finalize")) {
         Text(
-            "完了",
+            stringResource(R.string.trace_done),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.tertiary,
         )
@@ -110,7 +112,7 @@ private fun PlannerDecisionItem(event: PlannerDecisionEvent) {
 @Composable
 private fun FinalAnswerItem(event: FinalAnswerEvent) {
     Text(
-        "回答 ${event.answerLength}字",
+        stringResource(R.string.trace_answer_length, event.answerLength),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.tertiary,
     )

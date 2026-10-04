@@ -4,6 +4,7 @@ import com.minibrain.data.db.daos.ChatMessageDao
 import com.minibrain.data.db.daos.ChatSessionDao
 import com.minibrain.data.db.entities.ChatMessageEntity
 import com.minibrain.data.db.entities.ChatSessionEntity
+import com.minibrain.data.db.entities.ChatSessionSummary
 import com.minibrain.data.db.entities.MessageRole
 import kotlinx.coroutines.flow.Flow
 
@@ -11,7 +12,7 @@ class ChatRepository(
     private val sessionDao: ChatSessionDao,
     private val messageDao: ChatMessageDao,
 ) {
-    fun observeSessions(): Flow<List<ChatSessionEntity>> = sessionDao.observeAll()
+    fun observeSessions(): Flow<List<ChatSessionSummary>> = sessionDao.observeSummaries()
 
     fun observeMessages(sessionId: Long): Flow<List<ChatMessageEntity>> =
         messageDao.observeBySession(sessionId)
@@ -32,9 +33,26 @@ class ChatRepository(
 
     suspend fun updateSessionTitle(id: Long, title: String) = sessionDao.updateTitle(id, title)
 
-    suspend fun deleteSession(id: Long) = sessionDao.deleteById(id)
+    /** 削除したセッションを返す（[restoreSession] で取り消せるように）。存在しなければ null。 */
+    suspend fun deleteSession(id: Long): DeletedSession? {
+        val session = sessionDao.getById(id) ?: return null
+        val messages = messageDao.getAllBySession(id)
+        sessionDao.deleteById(id) // CASCADE で messages も削除される
+        return DeletedSession(session, messages)
+    }
+
+    /** id を保ったまま戻すので、履歴画面から開き直しても同じセッションになる。 */
+    suspend fun restoreSession(deleted: DeletedSession) {
+        sessionDao.insert(deleted.session)
+        if (deleted.messages.isNotEmpty()) messageDao.insertAll(deleted.messages)
+    }
 
     suspend fun clearAll() {
         sessionDao.deleteAll() // CASCADE で messages も削除される
     }
 }
+
+data class DeletedSession(
+    val session: ChatSessionEntity,
+    val messages: List<ChatMessageEntity>,
+)

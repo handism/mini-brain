@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.minibrain.data.db.entities.ChatSessionEntity
+import com.minibrain.data.db.entities.ChatSessionSummary
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -13,6 +14,22 @@ interface ChatSessionDao {
 
     @Query("SELECT * FROM chat_sessions ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<ChatSessionEntity>>
+
+    // 履歴一覧は「最後にやり取りした日時」順に並べる（メッセージが無いセッションは作成日時）
+    @Query(
+        """
+        SELECT s.id, s.title, s.createdAt,
+               COALESCE(MAX(m.createdAt), s.createdAt) AS updatedAt
+        FROM chat_sessions s
+        LEFT JOIN chat_messages m ON m.sessionId = s.id
+        GROUP BY s.id
+        ORDER BY updatedAt DESC
+        """
+    )
+    fun observeSummaries(): Flow<List<ChatSessionSummary>>
+
+    @Query("SELECT * FROM chat_sessions WHERE id = :id")
+    suspend fun getById(id: Long): ChatSessionEntity?
 
     @Query("SELECT * FROM chat_sessions ORDER BY createdAt DESC LIMIT 1")
     suspend fun getLatest(): ChatSessionEntity?

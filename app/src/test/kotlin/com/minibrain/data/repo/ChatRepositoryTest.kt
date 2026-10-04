@@ -1,5 +1,7 @@
 package com.minibrain.data.repo
 
+import io.mockk.coVerifyOrder
+import com.minibrain.data.db.entities.ChatSessionSummary
 import com.minibrain.data.db.daos.ChatMessageDao
 import com.minibrain.data.db.daos.ChatSessionDao
 import com.minibrain.data.db.entities.ChatMessageEntity
@@ -41,8 +43,8 @@ class ChatRepositoryTest {
 
     @Test
     fun observeSessions_returnsFlow() {
-        val flow = flowOf(emptyList<ChatSessionEntity>())
-        every { sessionDao.observeAll() } returns flow
+        val flow = flowOf(emptyList<ChatSessionSummary>())
+        every { sessionDao.observeSummaries() } returns flow
 
         val result = repository.observeSessions()
         assertEquals(flow, result)
@@ -134,12 +136,40 @@ class ChatRepositoryTest {
     }
 
     @Test
-    fun deleteSession_callsDao() = runTest {
+    fun deleteSession_callsDaoAndReturnsBackup() = runTest {
+        val session = ChatSessionEntity(id = 1L, title = "t", createdAt = 1000L)
+        val messages = listOf(ChatMessageEntity(id = 10L, sessionId = 1L, role = MessageRole.USER, content = "q"))
+        coEvery { sessionDao.getById(1L) } returns session
+        coEvery { messageDao.getAllBySession(1L) } returns messages
         coEvery { sessionDao.deleteById(any()) } returns Unit
 
-        repository.deleteSession(1L)
+        val deleted = repository.deleteSession(1L)
 
         coVerify { sessionDao.deleteById(1L) }
+        assertEquals(DeletedSession(session, messages), deleted)
+    }
+
+    @Test
+    fun deleteSession_missingSessionReturnsNull() = runTest {
+        coEvery { sessionDao.getById(1L) } returns null
+
+        assertEquals(null, repository.deleteSession(1L))
+        coVerify(exactly = 0) { sessionDao.deleteById(any()) }
+    }
+
+    @Test
+    fun restoreSession_reinsertsSessionAndMessages() = runTest {
+        val session = ChatSessionEntity(id = 1L, title = "t", createdAt = 1000L)
+        val messages = listOf(ChatMessageEntity(id = 10L, sessionId = 1L, role = MessageRole.USER, content = "q"))
+        coEvery { sessionDao.insert(session) } returns 1L
+        coEvery { messageDao.insertAll(messages) } returns Unit
+
+        repository.restoreSession(DeletedSession(session, messages))
+
+        coVerifyOrder {
+            sessionDao.insert(session)
+            messageDao.insertAll(messages)
+        }
     }
 
     @Test
