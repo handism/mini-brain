@@ -27,19 +27,6 @@
 - **初期化と実行**:
   - `Engine` の初期化はバックグラウンドスレッド（`Dispatchers.Default` など）で行う必要があります。
   - GPU 初期化が失敗した場合は、CPU フォールバックを行ってください。詳細は [LlmService.kt](app/src/main/kotlin/com/minibrain/ai/llm/LlmService.kt) を参照。
-  - API 使用例：
-    ```kotlin
-    val engine = Engine(EngineConfig(modelPath = "...", backend = Backend.GPU()))
-    engine.initialize() // バックグラウンドスレッド必須
-    engine.createConversation().use { conv ->
-        conv.sendMessageAsync(prompt).collect { message ->
-            val text = message.contents.contents
-                .filterIsInstance<Content.Text>()
-                .joinToString("") { it.text }
-            // text を emit して UI またはフローへ流す
-        }
-    }
-    ```
 - **ビルド設定**: `app/build.gradle.kts` の `kotlinOptions` に `-Xskip-metadata-version-check` が指定されている必要があります（Kotlin のコンパイルバージョンの差異をスキップするため）。
 - **権限・マニフェスト**: native-library 宣言が `AndroidManifest.xml` に必要です。
   ```xml
@@ -49,54 +36,21 @@
 - **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。
 
 ### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
-- **依存関係**:
-  - `com.microsoft.onnxruntime:onnxruntime-android` (推論ランタイム)
-  - `ai.djl.huggingface:tokenizers` + `ai.djl.android:tokenizer-native` (XLM-RoBERTa Tokenizer、arm64-v8a 用 `libdjl_tokenizer.so` 同梱)
-- **モデル**: `Xenova/multilingual-e5-small` の INT8 量子化版（`model_quantized.onnx` 約118MB + `tokenizer.json` 約17MB）。
-- **仕様**:
-  - 埋め込み次元: **384**
-  - 最大トークン長: **512**
-  - **クエリ・文章プレフィックス**: クエリには `query: `、文書（チャンク）には `passage: ` のプレフィックス付与が必須。`EmbedType` enum を使用します。
-  - 内部処理: トークナイズ後、ONNX による推論値 (`last_hidden_state`) に対して `attention_mask` を用いた重み平均 pooling と L2 正規化を行います。
+- **クエリ・文章プレフィックス**: クエリには `query: `、文書（チャンク）には `passage: ` のプレフィックス付与が必須。`EmbedType` enum を使用します。
 - **実行制御**: `EmbedderService` 内の推論は `Mutex` でシリアライズされています。初期化はバックグラウンドスレッドで行い、並列推論は避けてください。
 
 ### 2.3 Room データベース
 - **ベクトル保存**: `FloatArray`（384次元ベクトル）は `ByteArray` に変換して Room に保存します。変換用メソッドとして `EmbedderService.floatArrayToBytes()` / `bytesToFloatArray()` を利用してください。
 - **類似度計算**: スケールが小さいため（個人用途、数千チャンク以下）、コサイン類似度は全件をメモリにロードして CPU 上で計算します。
-- **データベースバージョン**: **6**
-  - v6 移行時に e5 384次元の導入に伴い、既存のベクトルインデックスがクリアされています。再インデックスが必要です。
 
 ### 2.4 Storage Access Framework (SAF)
 - フォルダの選択には `ActivityResultContracts.OpenDocumentTree()` を使用し、`takePersistableUriPermission` で永続アクセス権を取得してファイルを読み込みます。
 
 ---
 
-## 3. アーキテクチャと検索フロー (AgentPipeline)
+## 3. アーキテクチャと検索フロー
 
-### 3.1 検索・回答生成フロー（Search First）
-ユーザーからの質問は、まず [AgentPipeline.kt](app/src/main/kotlin/com/minibrain/ai/agent/AgentPipeline.kt) を通じて処理されます。
-
-1. **クエリ分類**: [QueryClassifier.kt](app/src/main/kotlin/com/minibrain/ai/agent/QueryClassifier.kt) で分類。`GENERAL_KNOWLEDGE` の場合は RAG をスキップして LLM が直接回答。それ以外は RAG 検索へ。
-2. **クエリ展開 & HyDE**:
-   - `QueryExpander` でクエリを 3〜8 件に展開。
-   - `HyDE` で仮想回答を生成（タイムアウト 6秒、失敗時はスキップ）。
-3. **並行検索 (Parallel Retrieval)**:
-   - **BM25 検索**: 展開クエリ × FTS4 によるテキスト検索。
-   - **メタデータ検索**: `fileName`, `path`, `tags`, `documentDate` を検索。また、ファイル名（拡張子除く `FileNames.MIN_STEM_MATCH_CHARS = 1` 文字以上）がクエリの部分文字列として一致する場合（`topicMatch=true`）、先頭チャンクから 500文字をスニペットとして抽出（ADR-026）。
-   - **ベクトル検索**: 元クエリ＋展開クエリ＋HyDE 仮想回答によるベクトル類似度検索（類似度 0.45 未満は除外）。
-4. **候補の融合 (RRF)**:
-   - RRF（Reciprocal Rank Fusion）によりマージ（重み: META=1.5 / VECTOR=1.0 / BM25=1.2）し、上位50件を抽出。
-5. **再ランカー (LlmReranker)**:
-   - LLM が候補をスコアリングし上位10件を選択。日付クエリや `topicMatch=true` の候補を優先。
-   - 期間クエリ（`dateRange != null`）でマッチする結果がある場合、上位5件を再ランカー結果の先頭に強制マージ（ピン留め）して10件でカット。
-   - 日付クエリ + `topicMatch=true` 候補ありのときは LLM を呼ばず、topicMatch 候補を先頭・残りを RRF 順にして10件でカット（`SearchPipeline.shouldSkipRerank`、ADR-032）。
-6. **回答可能性判定 (CoverageCheck)**:
-   - 判定が `true` の場合、回答を生成。
-   - `false` の場合、ReAct ループ（DSL形式のツール呼び出し）へ移行。
-7. **ReAct ループ (フォールバック)**:
-   - Planner LLM が `glob`, `list_dir`, `read_file`, `grep`, `vector_search`, `rrf_search`, `timeline_search` などのツールを DSL（key:value）形式で発行し、情報を補填（最大6回）。
-8. **引用統合・回答生成**:
-   - 引用データを重複排除・優先度順に整列して LLM 回答プロンプトを構築し、回答をストリーミング出力。
+検索・回答生成の流れ（クエリ分類 → 展開/HyDE → BM25・メタデータ・ベクトルの並行検索 → RRF → Reranker → CoverageCheck → ReAct）は [AgentPipeline.kt](app/src/main/kotlin/com/minibrain/ai/agent/AgentPipeline.kt) を起点に読むこと。壊れやすい定数・挙動は §5 を参照。
 
 ---
 
@@ -179,15 +133,3 @@
 
 ### 5.6 DB マイグレーション運用
 - 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は、次回の差分インデックス時に自動補完されます。強制的に補完したい場合は Settings → 再インデックスを実行します。
-
----
-
-## 6. モデルファイルのパス
-
-```
-context.filesDir/models/gemma-4-E2B-it.litertlm        # LLM（約 2.5 GB）
-context.filesDir/models/multilingual-e5-small-q.onnx   # Embedder（INT8 量子化、約 118 MB）
-context.filesDir/models/e5-tokenizer.json              # XLM-RoBERTa SentencePiece tokenizer（約 17 MB）
-```
-
-モデルは `ModelDownloader` が Range リクエスト対応でダウンロードし、レジュームをサポートします。
