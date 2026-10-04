@@ -143,4 +143,5 @@
 - `v1.2.3` 形式のタグを push すると `.github/workflows/release.yml` が署名済み APK を GitHub Release に添付します。`versionCode` はタグから `major * 10000 + minor * 100 + patch` で計算します。
 - release の署名は環境変数 `RELEASE_KEYSTORE_PATH` などがあるときだけ有効です（`app/build.gradle.kts`）。無いときは未署名のまま。keystore や鍵情報をリポジトリに入れないでください。
 - release ビルドは `arm64-v8a` のみ（`ndk.abiFilters`）。debug は全 ABI。
+- release は R8（`isMinifyEnabled = true`）で難読化されます。JNI からクラス名で引かれるライブラリ（LiteRT-LM、ONNX Runtime）は `proguard-rules.pro` で `-keep` してください。ONNX Runtime の AAR は consumer ルールを持たず、keep が無いと埋め込み推論で native abort します（v1.0.1 の実機クラッシュ）。
 - `gradle/actions/setup-gradle` は v5 に固定しています。v6 以降はキャッシュ部分のライセンスが変わるため、上げる前に確認してください。
