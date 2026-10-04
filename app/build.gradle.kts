@@ -18,8 +18,24 @@ android {
         versionName = (findProperty("versionName") as String?) ?: "1.0"
     }
 
+    // 署名鍵は環境変数で渡す（Release ワークフロー用）。未設定なら未署名の release APK になる
+    val releaseKeystore = System.getenv("RELEASE_KEYSTORE_PATH")?.let(::file)
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseKeystore != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
