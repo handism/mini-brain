@@ -49,7 +49,17 @@
 
 ### APK からインストール
 
-[Releases](https://github.com/handism/mini-brain/releases) から最新の `mini-brain-x.y.z.apk` をダウンロードして端末で開きます（arm64 端末のみ対応）。初回は「提供元不明のアプリ」のインストールを許可してください。[Obtainium](https://github.com/ImranR98/Obtainium) にこのリポジトリの URL を登録すると、新しいリリースを自動で受け取れます。
+Android 12 以上の arm64 端末に対応しています。
+
+1. 端末のブラウザで [Releases](https://github.com/handism/mini-brain/releases) を開き、最新版の Assets にある `mini-brain-x.y.z.apk` をダウンロードする
+2. ダウンロードした APK を開く
+3. 初回は「このソースからのアプリを許可」を求められるので、ブラウザ（またはファイルアプリ）に許可を出してインストールする
+4. Play プロテクトの警告が出たら「詳細」→「インストールする」で進める
+
+新しいバージョンも同じ手順で上書き更新できます。[Obtainium](https://github.com/ImranR98/Obtainium) にこのリポジトリの URL を登録すると、新しいリリースを自動で受け取れます。
+
+> [!WARNING]
+> `./gradlew installDebug` で入れた debug ビルドが端末にある場合、Releases の APK は署名鍵が違うため上書きできません（「既存のパッケージと競合しています」と表示されます）。debug ビルドをアンインストールしてから入れてください。アンインストールするとダウンロード済みのモデル（約 2.6 GB）・インデックス・チャット履歴も消えるため、モデルは Wi-Fi 環境で再ダウンロードが必要です。
 
 ### ビルド手順
 
