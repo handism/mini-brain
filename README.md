@@ -223,13 +223,16 @@ finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECA
 
 ### 評価フレーム
 
-`app/src/main/kotlin/com/minibrain/eval/` に Precision@K / Recall@K / MRR を計測する評価フレームを同梱。`assets/eval/queries.sample.json` をテンプレに「質問 → 正解ファイル」セットを記述し、`EvalRunner.run(treeUri, cases, k)` で検索パイプラインを走らせて指標を取得する。VECTOR_MIN_SCORE や RRF 重みなどのチューニングはこのフレームでオフライン計測しながら詰める想定。
+`app/src/main/kotlin/com/minibrain/eval/` に Precision@K / Recall@K / MRR / 候補 Recall を計測する評価フレームを同梱。チューニング（VECTOR_MIN_SCORE、RRF 重み、チャンクの作り方など）の前後で同じ評価セットを流し、数字で比べる。
 
-```kotlin
-val cases = EvalRunner.loadFromAssets(context, "eval/queries.sample.json")
-val result = EvalRunner(searchPipeline).run(treeUri, cases, k = 10)
-println("P@10=${result.precisionAtK}  R@10=${result.recallAtK}  MRR=${result.mrr}")
-```
+1. 「質問 → 正解ファイル（フォルダからの相対パス）」の JSON を作る（`assets/eval/queries.sample.json` が書式見本。個人ノートのパスを含むのでリポジトリには入れない）。
+   ```json
+   [{ "id": "q1", "query": "スパイス堂にいつ行ったっけ？", "expected": ["food/スパイス堂.md"] }]
+   ```
+2. 端末に置き、設定 → 開発者 →「検索精度の評価」で選んで実行する（1 件 10〜20 秒ほど）。
+3. 結果をコピーし、施策の前後で並べる。取りこぼしは「候補に無い」（検索で拾えていない）と「絞り込みで落ちた」（Reranker が落とした）に分けて出る。
+
+測るのは `SearchPipeline`（展開〜Reranker）まで。LLM の出力は実行ごとに揺れるので、小さな差は 2 回流して確かめる。
 
 ### Folder Embedding
 
@@ -243,7 +246,7 @@ println("P@10=${result.precisionAtK}  R@10=${result.recallAtK}  MRR=${result.mrr
 | Home       | フォルダ選択・変更（変更時は確認あり、前のフォルダのインデックスは削除）・インデックス状態（残り時間の目安）・ファイル数 |
 | Chat       | Q&A（ストリーミング、回答はテキスト選択可）・セッション名の表示・検索ステータス・質問例・引用元ファイルのチップ（タップで元ファイルを開く）と引用箇所の展開・インデックス中の進捗バナー・失敗時の再試行 |
 | History    | 日付グループ付きのチャット一覧・タイトル検索・スワイプで削除（Snackbar から取り消し可） |
-| Settings   | フォルダ変更・再インデックス（進捗表示）・チャット履歴削除・検索ログ表示（既定は OFF）・モデル情報 |
+| Settings   | フォルダ変更・再インデックス（進捗表示）・チャット履歴削除・検索ログ表示（既定は OFF）・検索精度の評価・モデル情報 |
 
 ## モデル情報
 

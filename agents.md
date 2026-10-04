@@ -139,6 +139,7 @@
 - インデックスの進み具合は Home だけでなく Chat（バナー）と Settings（再インデックス行）にも出します。Settings はインデックス中に再インデックス・フォルダ変更を押せません。
 - チャットの失敗は `ChatViewModel.error`（`ChatError(kind, detail)`）で渡し、見出しは `kind` から strings.xml で決め、例外の中身は「詳細を表示」で折りたたみます。「再試行」は `regenerate` です。
 - 検索ログ表示の既定値は `SHOW_SEARCH_LOG_DEFAULT = false`（開発者向けのため）。コピーボタンは回答側だけに付けます。
+- 検索精度の評価（設定 → 開発者、`EvalScreen`）は SAF で選んだ評価セット JSON を `EvalRunner` に流します。検索まわりを変えたら前後で流して Recall / MRR / 候補 Recall を比べてください。`SearchPipelineResult.candidates`（RRF 後・Reranker 前）は評価で「候補に無い / 絞り込みで落ちた」を分けるのに使うので外さないこと（ADR-037）。
 - アプリ内のロゴは `R.drawable.ic_logo`（ランチャーアイコンと同じ意匠の単色版）を `Icon` の tint で塗ります。Typography は title / label 系も日本語向けに字間を詰めています（`Type.kt`）。
 
 ### 5.6 DB マイグレーション運用

@@ -7,18 +7,20 @@ import com.squareup.moshi.JsonReader
 import okio.buffer
 import okio.source
 import timber.log.Timber
+import java.io.InputStream
 
 /**
  * 評価セットを SearchPipeline に流し込み、P@K / R@K / MRR を算出する。
  *
  * 呼び出し例（デバッグメニュー等から）:
  * ```kotlin
- * val cases = EvalRunner.loadFromAssets(context, "eval/queries.sample.json")
+ * val cases = EvalRunner.load(contentResolver.openInputStream(uri)!!)
  * val result = EvalRunner(searchPipeline).run(treeUri, cases, k = 10)
  * ```
  *
  * 評価セットは個人ノートの実 path を含むためリポジトリには sample のみ置く。
- * 実運用ではユーザーが自分の質問〜正解 path セットを足して使う想定。
+ * 実運用ではユーザーが自分の質問〜正解 path の JSON を作り、設定 → 開発者 →「検索精度の評価」で選ぶ。
+ * 測るのは SearchPipeline（展開〜Reranker）までで、CoverageCheck / ReAct は通らない。
  */
 class EvalRunner(private val searchPipeline: SearchPipeline) {
 
@@ -36,13 +38,12 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
          * ]
          * ```
          */
-        fun loadFromAssets(context: Context, assetPath: String): List<EvalCase> {
-            return context.assets.open(assetPath).use { stream ->
-                JsonReader.of(stream.source().buffer()).use { reader ->
-                    parseArray(reader)
-                }
-            }
-        }
+        fun loadFromAssets(context: Context, assetPath: String): List<EvalCase> =
+            context.assets.open(assetPath).use(::load)
+
+        /** SAF で選んだファイルなど、任意のストリームから評価ケースを読む。形式は loadFromAssets と同じ。 */
+        fun load(stream: InputStream): List<EvalCase> =
+            JsonReader.of(stream.source().buffer()).use(::parseArray)
 
         private fun parseArray(reader: JsonReader): List<EvalCase> {
             val out = mutableListOf<EvalCase>()
@@ -89,16 +90,24 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
         k: Int = 10,
         onProgress: (Int, Int) -> Unit = { _, _ -> },
     ): EvalResult {
-        val collected = mutableListOf<Pair<EvalCase, List<com.minibrain.ai.rag.Citation>>>()
-        cases.forEachIndexed { idx, case ->
+        val observations = cases.mapIndexed { idx, case ->
             onProgress(idx, cases.size)
-            val result = runCatchingCancellable {
-                searchPipeline.search(case.query, treeUri).citations
-            }.onFailure { Timber.tag(TAG).w(it, "eval case '${case.id}' failed") }
-                .getOrDefault(emptyList())
-            collected += case to result
+            val startedAt = System.currentTimeMillis()
+            runCatchingCancellable { searchPipeline.search(case.query, treeUri) }
+                .fold(
+                    onSuccess = {
+                        EvalObservation(case, it.citations, it.candidates, System.currentTimeMillis() - startedAt)
+                    },
+                    onFailure = {
+                        Timber.tag(TAG).w(it, "eval case '${case.id}' failed")
+                        EvalObservation(
+                            case, emptyList(), emptyList(), System.currentTimeMillis() - startedAt,
+                            error = it.message ?: it.javaClass.simpleName,
+                        )
+                    },
+                )
         }
         onProgress(cases.size, cases.size)
-        return EvalMetrics.compute(collected, k)
+        return EvalMetrics.computeObservations(observations, k)
     }
 }

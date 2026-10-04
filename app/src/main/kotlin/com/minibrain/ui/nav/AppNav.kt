@@ -14,6 +14,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.minibrain.ui.screens.ChatHistoryScreen
 import com.minibrain.ui.screens.ChatScreen
+import com.minibrain.ui.screens.EvalScreen
 import com.minibrain.ui.screens.HomeScreen
 import com.minibrain.ui.screens.OnboardingScreen
 import com.minibrain.ui.screens.SettingsScreen
@@ -26,6 +27,7 @@ object Routes {
     const val CHAT = "chat"
     const val CHAT_HISTORY = "chat_history"
     const val SETTINGS = "settings"
+    const val EVAL = "eval"
 }
 
 @Composable
@@ -88,6 +90,13 @@ fun AppNav(
 
         composable(Routes.SETTINGS) {
             SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenEval = { navController.navigate(Routes.EVAL) },
+            )
+        }
+
+        composable(Routes.EVAL) {
+            EvalScreen(
                 onBack = { navController.popBackStack() },
             )
         }

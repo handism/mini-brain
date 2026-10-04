@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Sync
@@ -60,6 +61,7 @@ import com.minibrain.ui.vm.SettingsViewModel
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenEval: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
 ) {
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
@@ -91,7 +93,8 @@ fun SettingsScreen(
             if (treeUri == null) folderLauncher.launch(null) else showFolderChangeDialog = true
         },
         onClearChat = { showClearDialog = true },
-        onShowSearchLogChange = { vm.setShowSearchLog(it) }
+        onShowSearchLogChange = { vm.setShowSearchLog(it) },
+        onOpenEval = onOpenEval,
     )
 
     if (showFolderChangeDialog) {
@@ -130,6 +133,7 @@ private fun SettingsScreenContent(
     onChangeFolder: () -> Unit,
     onClearChat: () -> Unit,
     onShowSearchLogChange: (Boolean) -> Unit,
+    onOpenEval: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -166,7 +170,8 @@ private fun SettingsScreenContent(
             // 普段は触らない項目なので最後に置く
             DeveloperSection(
                 showSearchLog = showSearchLog,
-                onShowSearchLogChange = onShowSearchLogChange
+                onShowSearchLogChange = onShowSearchLogChange,
+                onOpenEval = onOpenEval,
             )
         }
     }
@@ -222,6 +227,7 @@ private fun ChatHistorySection(onClearChat: () -> Unit) {
 private fun DeveloperSection(
     showSearchLog: Boolean,
     onShowSearchLogChange: (Boolean) -> Unit,
+    onOpenEval: () -> Unit,
 ) {
     SectionTitle(stringResource(R.string.settings_section_developer))
     // 行全体をタップで切り替えられるようにし、Switch 自体はクリックを持たない
@@ -235,6 +241,12 @@ private fun DeveloperSection(
             role = Role.Switch,
             onValueChange = onShowSearchLogChange,
         ),
+    )
+    SettingsListItem(
+        icon = Icons.Default.Insights,
+        headline = stringResource(R.string.settings_eval),
+        supporting = stringResource(R.string.settings_eval_desc),
+        onClick = onOpenEval,
     )
 }
 

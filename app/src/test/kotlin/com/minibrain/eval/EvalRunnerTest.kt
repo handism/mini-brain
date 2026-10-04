@@ -198,4 +198,33 @@ class EvalRunnerTest {
             progressLog
         )
     }
+
+    @Test
+    fun `候補と失敗理由を結果に残す`() = runTest {
+        val treeUri = "content://dummy"
+        coEvery { searchPipeline.search("q1", treeUri) } returns SearchPipelineResult(
+            citations = listOf(cit("x.md")),
+            traceEvents = emptyList(),
+            candidates = listOf(cit("x.md"), cit("a.md")),
+        )
+        coEvery { searchPipeline.search("q2", treeUri) } throws RuntimeException("boom")
+
+        val result = evalRunner.run(
+            treeUri,
+            listOf(EvalCase("c1", "q1", listOf("a.md")), EvalCase("c2", "q2", listOf("b.md"))),
+            k = 1,
+        )
+
+        val c1 = result.perCase.single { it.id == "c1" }
+        assertEquals(1.0, c1.candidateRecall, 1e-9)
+        assertEquals(listOf("a.md"), c1.droppedByRerank)
+        assertEquals("boom", result.perCase.single { it.id == "c2" }.error)
+    }
+
+    @Test
+    fun `load はストリームから読める`() {
+        val json = """[{"id": "c1", "query": "q", "expected": ["a.md"], "note": "無視される"}]"""
+        val cases = EvalRunner.load(ByteArrayInputStream(json.toByteArray()))
+        assertEquals(listOf(EvalCase("c1", "q", listOf("a.md"))), cases)
+    }
 }

@@ -120,6 +120,29 @@
     <string name="settings_section_developer">開発者</string>
     <string name="settings_show_search_log">検索ログを表示する</string>
     <string name="settings_show_search_log_desc">回答の下にエージェントの検索過程を表示します</string>
+    <string name="settings_eval">検索精度の評価</string>
+    <string name="settings_eval_desc">質問と正解ファイルの一覧で Recall / MRR を測ります</string>
+    <string name="eval_title">検索精度の評価</string>
+    <string name="eval_file">評価セット</string>
+    <string name="eval_choose_file">選ぶ</string>
+    <string name="eval_format_help">質問と正解ファイル（フォルダからの相対パス）を並べた JSON を選んでください。
+[{\"id\": \"q1\", \"query\": \"スパイス堂にいつ行った？\", \"expected\": [\"food/スパイス堂.md\"]}]
+実行には 1 件あたり 10〜20 秒ほどかかります。</string>
+    <string name="eval_run">評価を実行</string>
+    <string name="eval_rerun">もう一度実行</string>
+    <string name="eval_cancel">中止</string>
+    <string name="eval_running">%1$d / %2$d 件目</string>
+    <string name="eval_wait_indexing">インデックスが終わってから実行できます</string>
+    <string name="eval_failed">評価できませんでした</string>
+    <string name="eval_metric_candidate_recall">候補 Recall</string>
+    <string name="eval_metric_candidate_recall_desc">絞り込み前の候補に正解が入っていた割合。Recall との差が絞り込みで落ちた分です</string>
+    <string name="eval_cases_duration">%1$d 件 · %2$s</string>
+    <string name="eval_unknown_paths">インデックスに無い正解パス（打ち間違いの可能性）</string>
+    <string name="eval_misses">取りこぼし (%1$d)</string>
+    <string name="eval_all_hit">すべてのケースで正解が上位に入りました</string>
+    <string name="eval_reason_not_retrieved">候補に無い</string>
+    <string name="eval_reason_dropped">絞り込みで落ちた</string>
+    <string name="eval_case_metrics">Recall %1$s · RR %2$s</string>
     <string name="settings_section_model">モデル情報</string>
     <string name="settings_llm_model">LLM モデル</string>
     <string name="settings_llm_model_value">Gemma 4 E2B (LiteRT-LM)</string>

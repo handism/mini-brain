@@ -8,6 +8,8 @@ import com.minibrain.ai.rag.Citation
  * - Precision@K: 上位 K 件のうち正解集合に含まれるものの割合
  * - Recall@K   : 正解集合のうち上位 K 件で拾えたものの割合
  * - MRR        : 正解が初めて出現した順位の逆数（出現しなければ 0）
+ * - 候補 Recall : 正解集合のうち Reranker 前の候補（RRF 融合後）に入っていたものの割合。
+ *                Recall@K との差が「絞り込みで落ちた」分になる
  *
  * ケース全体の集計は単純な算術平均（マイクロではなくマクロ平均）。
  */
@@ -18,6 +20,8 @@ data class EvalResult(
     val recallAtK: Double,
     val mrr: Double,
     val perCase: List<PerCaseResult>,
+    val candidateRecall: Double = recallAtK,
+    val totalDurationMs: Long = 0L,
 )
 
 data class PerCaseResult(
@@ -28,6 +32,22 @@ data class PerCaseResult(
     val reciprocalRank: Double,
     val hitPaths: List<String>,
     val missedPaths: List<String>,
+    val candidateRecall: Double = recallAtK,
+    /** missedPaths のうち、候補には入っていたが上位 K 件に残らなかったもの */
+    val droppedByRerank: List<String> = emptyList(),
+    /** 上位 K 件の relativePath（順位順、重複なし）。取りこぼしの原因を眺めるため */
+    val retrievedPaths: List<String> = emptyList(),
+    val durationMs: Long = 0L,
+    val error: String? = null,
+)
+
+/** 1 ケース分の検索結果。candidates が null なら citations を候補とみなす。 */
+data class EvalObservation(
+    val case: EvalCase,
+    val citations: List<Citation>,
+    val candidates: List<Citation>? = null,
+    val durationMs: Long = 0L,
+    val error: String? = null,
 )
 
 object EvalMetrics {
@@ -35,11 +55,13 @@ object EvalMetrics {
     fun compute(
         cases: List<Pair<EvalCase, List<Citation>>>,
         k: Int,
-    ): EvalResult {
-        require(k > 0)
-        if (cases.isEmpty()) return EvalResult(0, k, 0.0, 0.0, 0.0, emptyList())
+    ): EvalResult = computeObservations(cases.map { (case, citations) -> EvalObservation(case, citations) }, k)
 
-        val perCase = cases.map { (case, citations) -> computeOne(case, citations, k) }
+    fun computeObservations(observations: List<EvalObservation>, k: Int): EvalResult {
+        require(k > 0)
+        if (observations.isEmpty()) return EvalResult(0, k, 0.0, 0.0, 0.0, emptyList())
+
+        val perCase = observations.map { computeOne(it, k) }
         val avg = { sel: (PerCaseResult) -> Double -> perCase.sumOf(sel) / perCase.size }
         return EvalResult(
             cases = perCase.size,
@@ -48,12 +70,23 @@ object EvalMetrics {
             recallAtK = avg { it.recallAtK },
             mrr = avg { it.reciprocalRank },
             perCase = perCase,
+            candidateRecall = avg { it.candidateRecall },
+            totalDurationMs = perCase.sumOf { it.durationMs },
         )
     }
 
-    private fun computeOne(case: EvalCase, citations: List<Citation>, k: Int): PerCaseResult {
+    /** インデックスに無い正解パス（打ち間違い・移動済み）を拾う。大文字小文字は無視する。 */
+    fun findUnknownPaths(cases: List<EvalCase>, indexedPaths: Collection<String>): List<String> {
+        val known = indexedPaths.map { it.lowercase() }.toHashSet()
+        return cases.flatMap { it.expectedRelativePaths }
+            .distinct()
+            .filterNot { it.lowercase() in known }
+    }
+
+    private fun computeOne(obs: EvalObservation, k: Int): PerCaseResult {
+        val case = obs.case
         val expected = case.expectedRelativePaths.map { it.lowercase() }.toSet()
-        val topK = citations.take(k)
+        val topK = obs.citations.take(k)
         val retrievedPaths = topK.mapNotNull { it.relativePath?.lowercase() }
 
         val hits = retrievedPaths.filter { it in expected }.toSet()
@@ -67,6 +100,15 @@ object EvalMetrics {
         val firstHitRank = retrievedPaths.indexOfFirst { it in expected }
         val rr = if (firstHitRank < 0) 0.0 else 1.0 / (firstHitRank + 1)
 
+        // Reranker が上位 K 件に無い候補を足すことはない（日付 pin も候補由来）が、
+        // 念のため上位 K 件の hit も候補側に含めて「候補 Recall >= Recall@K」を保つ
+        val candidatePaths = (obs.candidates ?: obs.citations)
+            .mapNotNull { it.relativePath?.lowercase() }
+            .toSet() + hits
+        val candidateHits = expected.filter { it in candidatePaths }
+        val candidateRecall = if (expected.isEmpty()) 1.0 else candidateHits.size.toDouble() / expected.size
+
+        val missed = expected - hits
         return PerCaseResult(
             id = case.id,
             query = case.query,
@@ -74,7 +116,12 @@ object EvalMetrics {
             recallAtK = recall,
             reciprocalRank = rr,
             hitPaths = hits.toList(),
-            missedPaths = (expected - hits).toList(),
+            missedPaths = missed.toList(),
+            candidateRecall = candidateRecall,
+            droppedByRerank = missed.filter { it in candidatePaths },
+            retrievedPaths = retrievedPaths.distinct(),
+            durationMs = obs.durationMs,
+            error = obs.error,
         )
     }
 }

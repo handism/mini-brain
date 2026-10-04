@@ -32,6 +32,8 @@ import timber.log.Timber
 data class SearchPipelineResult(
     val citations: List<Citation>,
     val traceEvents: List<AgentTraceEvent>,
+    // RRF 融合後・Reranker 前の候補。評価で「候補に無い」と「絞り込みで落ちた」を分けるため
+    val candidates: List<Citation> = emptyList(),
 )
 
 class SearchPipeline(
@@ -120,7 +122,7 @@ class SearchPipeline(
             query, merged, dateRange, retrievalResult.dateRangeHits, onStatus, traceEvents
         )
 
-        return SearchPipelineResult(final, traceEvents)
+        return SearchPipelineResult(final, traceEvents, candidates = merged)
     }
 
     private data class QueryExpansionResult(

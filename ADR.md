@@ -1398,3 +1398,29 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - Home からフォルダを変えたときも前のインデックスが消える（従来は残り、DB に孤立していた）。
 - 既存利用者でも検索ログの設定を一度も触っていなければ非表示になる。
 
+---
+
+## ADR-037: 検索評価をアプリから実行し、取りこぼしの原因を分ける
+
+**日付:** 2026-10-05  
+**ステータス:** 採用
+
+### 背景
+
+- ADR-023 で `EvalRunner` / `EvalMetrics` を入れたが、呼び出し元が無く、評価セットも assets のサンプルだけだった。チューニングの前後を数字で比べられなかった。
+- 評価セットは個人ノートのパスを含むので、リポジトリや APK には入れられない。
+- Recall@K だけでは、正解が検索で拾えていないのか、拾えたのに Reranker が落としたのかが分からない。
+
+### 決定
+
+- 設定 → 開発者に「検索精度の評価」画面（`EvalScreen` / `EvalViewModel`）を置く。評価セットの JSON は SAF（`OpenDocument`）で選び、永続権限を取って URI を DataStore（`eval_file_uri`）に保存する。
+- `SearchPipelineResult.candidates` に RRF 融合後・Reranker 前の候補を載せ、`EvalMetrics` で候補 Recall と `droppedByRerank`（候補にはあったが上位 K 件に残らなかった正解）を出す。
+- 実行前に、正解パスがインデックスに無いもの（打ち間違い・移動）を `EvalMetrics.findUnknownPaths` で拾って警告する。
+- 結果は `EvalReport.toMarkdown` で Markdown にしてコピーできるようにする。K は 10（`RERANK_TOP_K` と同じ）。
+
+### 影響
+
+- 測るのは `SearchPipeline` まで（CoverageCheck / ReAct は通らない）。
+- LLM（展開・HyDE・Reranker）の出力が実行ごとに揺れるため、小さな差は複数回流して確かめる。
+- 画面を離れると評価は止まる。実行中は画面を消灯させない。
+

@@ -118,4 +118,47 @@ class EvalMetricsTest {
             EvalMetrics.compute(listOf(case to citations), k = -1)
         }
     }
+
+    @Test
+    fun `候補にはあったが上位 K 件に残らなかった正解は droppedByRerank に入る`() {
+        val case = EvalCase("c8", "q8", listOf("a.md", "b.md"))
+        val obs = EvalObservation(
+            case = case,
+            citations = listOf(cit("x.md")),
+            candidates = listOf(cit("x.md"), cit("a.md")),
+        )
+        val c = EvalMetrics.computeObservations(listOf(obs), k = 1).perCase.single()
+
+        assertEquals(0.0, c.recallAtK, 1e-9)
+        assertEquals(0.5, c.candidateRecall, 1e-9)
+        assertEquals(listOf("a.md"), c.droppedByRerank)
+        assertEquals(setOf("a.md", "b.md"), c.missedPaths.toSet())
+    }
+
+    @Test
+    fun `候補 Recall は上位 K 件の hit を下回らない`() {
+        val case = EvalCase("c9", "q9", listOf("a.md"))
+        val obs = EvalObservation(case, citations = listOf(cit("a.md")), candidates = emptyList())
+        val result = EvalMetrics.computeObservations(listOf(obs), k = 3)
+
+        assertEquals(1.0, result.recallAtK, 1e-9)
+        assertEquals(1.0, result.candidateRecall, 1e-9)
+    }
+
+    @Test
+    fun `所要時間はケースの合計`() {
+        val a = EvalObservation(EvalCase("a", "qa", listOf("a.md")), emptyList(), durationMs = 1_500)
+        val b = EvalObservation(EvalCase("b", "qb", listOf("b.md")), emptyList(), durationMs = 2_500)
+        assertEquals(4_000L, EvalMetrics.computeObservations(listOf(a, b), k = 1).totalDurationMs)
+    }
+
+    @Test
+    fun `インデックスに無い正解パスを大文字小文字を無視して拾う`() {
+        val cases = listOf(
+            EvalCase("c1", "q1", listOf("Notes/A.md", "typo.md")),
+            EvalCase("c2", "q2", listOf("typo.md")),
+        )
+        val unknown = EvalMetrics.findUnknownPaths(cases, listOf("notes/a.md", "b.md"))
+        assertEquals(listOf("typo.md"), unknown)
+    }
 }
