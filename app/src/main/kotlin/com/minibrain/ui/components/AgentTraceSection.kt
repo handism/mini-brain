@@ -57,10 +57,10 @@ private fun AgentTraceEventItem(event: AgentTraceEvent) {
         is FinalAnswerEvent -> FinalAnswerItem(event)
         is QueryExpansionEvent -> QueryExpansionItem(event)
         is HyDeGeneratedEvent -> HyDeGeneratedItem(event)
-        is BM25SearchHitEvent -> SearchHitItem("BM25", event.hitCount)
-        is MetadataSearchHitEvent -> SearchHitItem("Metadata", event.hitCount)
-        is GrepSearchHitEvent -> SearchHitItem("Grep", event.hitCount)
-        is VectorSearchHitEvent -> SearchHitItem("Vector", event.hitCount)
+        is BM25SearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_bm25), event.hitCount)
+        is MetadataSearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_metadata), event.hitCount)
+        is GrepSearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_grep), event.hitCount)
+        is VectorSearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_vector), event.hitCount)
         is CandidateMergeEvent -> CandidateMergeItem(event)
         is RerankEvent -> RerankItem(event)
         is CoverageCheckEvent -> CoverageCheckItem(event)
@@ -71,7 +71,7 @@ private fun AgentTraceEventItem(event: AgentTraceEvent) {
 @Composable
 private fun ToolCallItem(event: ToolCallEvent) {
     Text(
-        "Planner",
+        stringResource(R.string.trace_tool_call),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
     )
@@ -87,7 +87,7 @@ private fun ToolCallItem(event: ToolCallEvent) {
 @Composable
 private fun ObservationItem(event: ObservationEvent) {
     Text(
-        "Observation",
+        stringResource(R.string.trace_observation),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.secondary,
     )
@@ -121,7 +121,7 @@ private fun FinalAnswerItem(event: FinalAnswerEvent) {
 @Composable
 private fun QueryExpansionItem(event: QueryExpansionEvent) {
     Text(
-        "Query Expansion",
+        stringResource(R.string.trace_query_expansion),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
     )
@@ -135,7 +135,7 @@ private fun QueryExpansionItem(event: QueryExpansionEvent) {
 @Composable
 private fun HyDeGeneratedItem(event: HyDeGeneratedEvent) {
     Text(
-        "HyDE",
+        stringResource(R.string.trace_hyde),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
     )
@@ -149,7 +149,7 @@ private fun HyDeGeneratedItem(event: HyDeGeneratedEvent) {
 @Composable
 private fun SearchHitItem(source: String, hitCount: Int) {
     Text(
-        "$source  $hitCount hits",
+        stringResource(R.string.trace_search_hits, source, hitCount),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -158,7 +158,7 @@ private fun SearchHitItem(source: String, hitCount: Int) {
 @Composable
 private fun CandidateMergeItem(event: CandidateMergeEvent) {
     Text(
-        "Merge  ${event.totalCount} candidates",
+        stringResource(R.string.trace_merge, event.totalCount),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -167,7 +167,7 @@ private fun CandidateMergeItem(event: CandidateMergeEvent) {
 @Composable
 private fun RerankItem(event: RerankEvent) {
     Text(
-        "Rerank  ${event.before} → ${event.after}",
+        stringResource(R.string.trace_rerank, event.before, event.after),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.secondary,
     )
@@ -175,7 +175,8 @@ private fun RerankItem(event: RerankEvent) {
 
 @Composable
 private fun CoverageCheckItem(event: CoverageCheckEvent) {
-    val label = if (event.canAnswer) "Coverage  OK" else "Coverage  NG — missing: ${event.missingInformation.joinToString(", ")}"
+    val label = if (event.canAnswer) stringResource(R.string.trace_coverage_ok)
+    else stringResource(R.string.trace_coverage_missing, event.missingInformation.joinToString(", "))
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
@@ -186,7 +187,7 @@ private fun CoverageCheckItem(event: CoverageCheckEvent) {
 @Composable
 private fun ExplorerStrategyItem(event: ExplorerStrategyEvent) {
     Text(
-        "Explorer  ${event.strategy}",
+        stringResource(R.string.trace_explorer, event.strategy),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
     )

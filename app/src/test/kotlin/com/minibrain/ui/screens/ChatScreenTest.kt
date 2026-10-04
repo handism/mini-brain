@@ -43,6 +43,7 @@ class ChatScreenTest {
         every { vm.errorMessage } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
+        every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -107,6 +108,7 @@ class ChatScreenTest {
         every { vm.errorMessage } returns MutableStateFlow<String?>(null)
         every { vm.statusText } returns MutableStateFlow(statusText)
         every { vm.showSearchLog } returns MutableStateFlow(true)
+        every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         return vm
     }
 
@@ -128,6 +130,7 @@ class ChatScreenTest {
         every { vm.errorMessage } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
+        every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -151,6 +154,7 @@ class ChatScreenTest {
         every { vm.errorMessage } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
+        every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -176,6 +180,7 @@ class ChatScreenTest {
         every { vm.errorMessage } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
+        every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -198,6 +203,7 @@ class ChatScreenTest {
         every { vm.errorMessage } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
+        every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -226,6 +232,7 @@ class ChatScreenTest {
         every { vm.errorMessage } returns errorMessageFlow
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
+        every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
 
         composeTestRule.setContent {
             ChatScreen(
@@ -243,5 +250,17 @@ class ChatScreenTest {
 
         composeTestRule.onNodeWithContentDescription("新しいチャット").performClick()
         verify { vm.newSession() }
+    }
+
+    @Test
+    fun testTopBarShowsSessionTitle() {
+        val vm = relaxedVm()
+        every { vm.sessionTitle } returns MutableStateFlow<String?>("先月の日記")
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        composeTestRule.onNodeWithText("先月の日記").assertIsDisplayed()
     }
 }

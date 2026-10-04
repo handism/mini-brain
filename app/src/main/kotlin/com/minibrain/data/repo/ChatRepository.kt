@@ -14,6 +14,8 @@ class ChatRepository(
 ) {
     fun observeSessions(): Flow<List<ChatSessionSummary>> = sessionDao.observeSummaries()
 
+    fun observeSessionTitle(sessionId: Long): Flow<String?> = sessionDao.observeTitle(sessionId)
+
     fun observeMessages(sessionId: Long): Flow<List<ChatMessageEntity>> =
         messageDao.observeBySession(sessionId)
 

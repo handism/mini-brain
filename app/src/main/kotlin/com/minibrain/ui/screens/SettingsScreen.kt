@@ -4,25 +4,28 @@ package com.minibrain.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ManageSearch
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -36,13 +39,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.minibrain.R
 import com.minibrain.ui.components.folderDisplayName
 import com.minibrain.ui.vm.SettingsViewModel
@@ -122,32 +128,22 @@ private fun SettingsScreenContent(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(vertical = 8.dp),
         ) {
             KnowledgeBaseSection(
                 treeUri = treeUri,
                 onReindex = onReindex,
                 onChangeFolder = onChangeFolder
             )
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            ChatHistorySection(
-                onClearChat = onClearChat
-            )
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            ChatHistorySection(onClearChat = onClearChat)
             DeveloperSection(
                 showSearchLog = showSearchLog,
                 onShowSearchLogChange = onShowSearchLogChange
             )
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             ModelInfoSection(
                 llmModelFile = llmModelFile,
                 embedderModelFile = embedderModelFile
             )
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
             PrivacySection()
         }
     }
@@ -160,37 +156,30 @@ private fun KnowledgeBaseSection(
     onChangeFolder: () -> Unit,
 ) {
     SectionTitle(stringResource(R.string.settings_section_knowledge_base))
-
-    SettingItem(
-        label = stringResource(R.string.settings_current_folder),
-        value = treeUri?.let { folderDisplayName(it) } ?: stringResource(R.string.not_selected),
-    )
-    Spacer(Modifier.height(8.dp))
-    FilledTonalButton(
-        onClick = onReindex,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.settings_reindex_changed))
-    }
-    Spacer(Modifier.height(8.dp))
-    OutlinedButton(
+    SettingsListItem(
+        icon = Icons.Default.Folder,
+        headline = stringResource(R.string.settings_current_folder),
+        supporting = treeUri?.let { folderDisplayName(it) } ?: stringResource(R.string.not_selected),
+        trailing = { Text(stringResource(R.string.change_folder), color = MaterialTheme.colorScheme.primary) },
         onClick = onChangeFolder,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.change_folder))
-    }
+    )
+    SettingsListItem(
+        icon = Icons.Default.Sync,
+        headline = stringResource(R.string.settings_reindex_changed),
+        supporting = stringResource(R.string.settings_reindex_changed_desc),
+        onClick = onReindex,
+    )
 }
 
 @Composable
 private fun ChatHistorySection(onClearChat: () -> Unit) {
     SectionTitle(stringResource(R.string.settings_section_chat_history))
-
-    OutlinedButton(
+    SettingsListItem(
+        icon = Icons.Default.DeleteForever,
+        headline = stringResource(R.string.settings_clear_history),
+        contentColor = MaterialTheme.colorScheme.error,
         onClick = onClearChat,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.settings_clear_history), color = MaterialTheme.colorScheme.error)
-    }
+    )
 }
 
 @Composable
@@ -199,24 +188,18 @@ private fun DeveloperSection(
     onShowSearchLogChange: (Boolean) -> Unit,
 ) {
     SectionTitle(stringResource(R.string.settings_section_developer))
-
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(stringResource(R.string.settings_show_search_log), style = MaterialTheme.typography.bodyMedium)
-            Text(
-                stringResource(R.string.settings_show_search_log_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = showSearchLog,
-            onCheckedChange = onShowSearchLogChange,
-        )
-    }
+    // 行全体をタップで切り替えられるようにし、Switch 自体はクリックを持たない
+    ListItem(
+        leadingContent = { Icon(Icons.AutoMirrored.Filled.ManageSearch, contentDescription = null) },
+        headlineContent = { Text(stringResource(R.string.settings_show_search_log)) },
+        supportingContent = { Text(stringResource(R.string.settings_show_search_log_desc)) },
+        trailingContent = { Switch(checked = showSearchLog, onCheckedChange = null) },
+        modifier = Modifier.toggleable(
+            value = showSearchLog,
+            role = Role.Switch,
+            onValueChange = onShowSearchLogChange,
+        ),
+    )
 }
 
 @Composable
@@ -225,22 +208,15 @@ private fun ModelInfoSection(
     embedderModelFile: java.io.File,
 ) {
     SectionTitle(stringResource(R.string.settings_section_model))
-
-    SettingItem(
-        label = stringResource(R.string.settings_llm_model),
-        value = stringResource(R.string.settings_llm_model_value),
+    SettingsListItem(
+        icon = Icons.Default.Psychology,
+        headline = stringResource(R.string.settings_llm_model),
+        supporting = stringResource(R.string.settings_llm_model_value) + " · " + modelFileSize(llmModelFile),
     )
-    SettingItem(
-        label = stringResource(R.string.settings_llm_file),
-        value = modelFileSize(llmModelFile),
-    )
-    SettingItem(
-        label = stringResource(R.string.settings_embedder),
-        value = stringResource(R.string.settings_embedder_value),
-    )
-    SettingItem(
-        label = stringResource(R.string.settings_embedder_file),
-        value = modelFileSize(embedderModelFile),
+    SettingsListItem(
+        icon = Icons.Default.Hub,
+        headline = stringResource(R.string.settings_embedder),
+        supporting = stringResource(R.string.settings_embedder_value) + " · " + modelFileSize(embedderModelFile),
     )
 }
 
@@ -252,11 +228,9 @@ private fun modelFileSize(file: java.io.File): String =
 @Composable
 private fun PrivacySection() {
     SectionTitle(stringResource(R.string.settings_section_privacy))
-
-    Text(
-        stringResource(R.string.settings_privacy_text),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    SettingsListItem(
+        icon = Icons.Default.Lock,
+        headline = stringResource(R.string.settings_privacy_text),
     )
 }
 
@@ -281,15 +255,36 @@ private fun ClearChatDialog(
 }
 
 @Composable
-private fun SettingItem(label: String, value: String) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
-    }
+private fun SettingsListItem(
+    icon: ImageVector,
+    headline: String,
+    supporting: String? = null,
+    contentColor: Color = Color.Unspecified,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    val color = contentColor.takeOrElse { MaterialTheme.colorScheme.onSurface }
+    ListItem(
+        leadingContent = {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = contentColor.takeOrElse { MaterialTheme.colorScheme.onSurfaceVariant },
+            )
+        },
+        headlineContent = { Text(headline, color = color) },
+        supportingContent = supporting?.let { { Text(it) } },
+        trailingContent = trailing,
+        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+    )
 }
 
 @Composable
 private fun SectionTitle(title: String) {
-    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-    Spacer(Modifier.height(8.dp))
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+    )
 }

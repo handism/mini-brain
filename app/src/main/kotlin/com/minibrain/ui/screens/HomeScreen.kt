@@ -4,6 +4,7 @@ package com.minibrain.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,23 +18,26 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -45,6 +49,7 @@ import com.minibrain.R
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.ui.components.folderDisplayName
 import com.minibrain.ui.vm.HomeViewModel
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +61,6 @@ fun HomeScreen(
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
     val indexState by vm.indexingState.collectAsStateWithLifecycle()
     val docCount by vm.docCount.collectAsStateWithLifecycle()
-    val chunkCount by vm.chunkCount.collectAsStateWithLifecycle()
 
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -92,10 +96,8 @@ fun HomeScreen(
                 FolderSelectedContent(
                     treeUri = uri,
                     docCount = docCount,
-                    chunkCount = chunkCount,
                     indexState = indexState,
                     onOpenChat = onOpenChat,
-                    onReindex = { vm.reindex() },
                     onChangeFolder = { folderLauncher.launch(null) }
                 )
             }
@@ -146,10 +148,8 @@ private fun FolderUnselectedContent(
 private fun FolderSelectedContent(
     treeUri: String,
     docCount: Int,
-    chunkCount: Int,
     indexState: IndexingState,
     onOpenChat: () -> Unit,
-    onReindex: () -> Unit,
     onChangeFolder: () -> Unit,
 ) {
     // フォルダ選択済み
@@ -162,12 +162,7 @@ private fun FolderSelectedContent(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-            ) {
-                StatItem(label = stringResource(R.string.home_stat_files), value = "$docCount")
-                StatItem(label = stringResource(R.string.home_stat_chunks), value = "$chunkCount")
-            }
+            StatItem(label = stringResource(R.string.home_stat_files), value = "$docCount")
         }
     }
 
@@ -177,16 +172,8 @@ private fun FolderSelectedContent(
     when (val s = indexState) {
         is IndexingState.Idle -> { /* No UI to display when idle */ }
         is IndexingState.Progress -> IndexingProgress(s)
-        is IndexingState.Done -> {
-            Text(
-                stringResource(R.string.home_indexing_done, s.fileCount, s.chunkCount),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        is IndexingState.Error -> {
-            Text(stringResource(R.string.home_indexing_error, s.message), color = MaterialTheme.colorScheme.error)
-        }
+        is IndexingState.Done -> IndexingDoneMessage(s)
+        is IndexingState.Error -> IndexingErrorMessage(s.message)
     }
 
     Spacer(Modifier.height(24.dp))
@@ -211,21 +198,50 @@ private fun FolderSelectedContent(
 
     Spacer(Modifier.height(12.dp))
 
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        FilledTonalButton(
-            onClick = onReindex,
-            modifier = Modifier.weight(1f),
-            enabled = indexState !is IndexingState.Progress,
-        ) {
-            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(stringResource(R.string.reindex), modifier = Modifier.padding(start = 4.dp))
-        }
-        OutlinedButton(
-            onClick = onChangeFolder,
-            modifier = Modifier.weight(1f),
-        ) {
-            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(stringResource(R.string.home_change_folder), modifier = Modifier.padding(start = 4.dp))
+    // 再インデックスは設定画面にまとめる（ここはフォルダの切り替えだけ）
+    OutlinedButton(
+        onClick = onChangeFolder,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(stringResource(R.string.home_change_folder), modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+// 完了メッセージを出し続けると「まだ何か起きている」ように見えるので、少し出したら消す
+private const val DONE_MESSAGE_VISIBLE_MS = 4_000L
+
+@Composable
+private fun IndexingDoneMessage(state: IndexingState.Done) {
+    var visible by remember(state) { mutableStateOf(true) }
+    LaunchedEffect(state) {
+        delay(DONE_MESSAGE_VISIBLE_MS)
+        visible = false
+    }
+    AnimatedVisibility(visible = visible) {
+        Text(
+            stringResource(R.string.home_indexing_done, state.fileCount),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@Composable
+private fun IndexingErrorMessage(message: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.ErrorOutline, contentDescription = null)
+            Text(
+                stringResource(R.string.home_indexing_error, message),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 8.dp),
+            )
         }
     }
 }

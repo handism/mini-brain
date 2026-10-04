@@ -9,7 +9,6 @@
     <string name="cancel">キャンセル</string>
     <string name="undo">元に戻す</string>
     <string name="copy">コピー</string>
-    <string name="reindex">再インデックス</string>
     <string name="change_folder">フォルダを変更</string>
     <string name="not_selected">未選択</string>
 
@@ -21,7 +20,10 @@
     <string name="onboarding_embedder_model">Embedderモデル</string>
     <string name="onboarding_llm_model">Gemma 4 E2B LLM (約2.5GB)</string>
     <string name="onboarding_initializing">モデルを初期化中...</string>
-    <string name="onboarding_error">エラーが発生しました:\n%1$s</string>
+    <string name="onboarding_error_title">準備を完了できませんでした</string>
+    <string name="onboarding_error_show_detail">詳細を表示</string>
+    <string name="onboarding_error_hide_detail">詳細を隠す</string>
+    <string name="onboarding_progress">%1$d%% (%2$d / %3$d MB)</string>
     <string name="onboarding_retry_cpu">CPUモードで試す (低速ですが安定します)</string>
     <string name="onboarding_retry">再試行</string>
 
@@ -31,13 +33,12 @@
     <string name="home_select_folder">フォルダを選択</string>
     <string name="home_knowledge_base">知識ベース</string>
     <string name="home_stat_files">ファイル数</string>
-    <string name="home_stat_chunks">チャンク数</string>
     <string name="home_indexing">インデックス中... %1$d/%2$d %3$s</string>
     <string name="home_indexing_eta_minutes">残り約 %1$d 分</string>
     <string name="home_indexing_eta_soon">まもなく完了</string>
     <string name="home_indexing_chat_hint">インデックス完了後にチャットを開けます</string>
-    <string name="home_indexing_done">インデックス完了: %1$dファイル / %2$dチャンク</string>
-    <string name="home_indexing_error">エラー: %1$s</string>
+    <string name="home_indexing_done">インデックス完了: %1$d ファイル</string>
+    <string name="home_indexing_error">インデックスに失敗しました: %1$s</string>
     <string name="home_open_chat">チャットを開く</string>
     <string name="home_change_folder">フォルダ変更</string>
 
@@ -61,6 +62,20 @@
     <string name="chat_open_file_failed">このファイルを開けるアプリが見つかりません</string>
     <string name="search_log">検索ログ</string>
     <string name="trace_done">完了</string>
+    <string name="trace_tool_call">ツール呼び出し</string>
+    <string name="trace_observation">観測結果</string>
+    <string name="trace_query_expansion">クエリ展開</string>
+    <string name="trace_hyde">仮想回答 (HyDE)</string>
+    <string name="trace_source_bm25">BM25</string>
+    <string name="trace_source_metadata">メタデータ</string>
+    <string name="trace_source_grep">Grep</string>
+    <string name="trace_source_vector">ベクトル</string>
+    <string name="trace_search_hits">%1$s 検索: %2$d 件</string>
+    <string name="trace_merge">候補を統合: %1$d 件</string>
+    <string name="trace_rerank">再ランク: %1$d → %2$d 件</string>
+    <string name="trace_coverage_ok">回答可能性: OK</string>
+    <string name="trace_coverage_missing">回答可能性: 不足（%1$s）</string>
+    <string name="trace_explorer">探索戦略: %1$s</string>
     <string name="trace_answer_length">回答 %1$d字</string>
 
     <!-- Chat history -->
@@ -69,11 +84,18 @@
     <string name="history_deleted">チャットを削除しました</string>
     <string name="history_today">今日 %1$s</string>
     <string name="history_yesterday">昨日 %1$s</string>
+    <string name="history_search">履歴を検索</string>
+    <string name="history_search_empty">一致するチャットがありません</string>
+    <string name="history_group_today">今日</string>
+    <string name="history_group_yesterday">昨日</string>
+    <string name="history_group_week">過去 7 日間</string>
+    <string name="history_group_older">それ以前</string>
 
     <!-- Settings -->
     <string name="settings_section_knowledge_base">知識ベース</string>
     <string name="settings_current_folder">現在のフォルダ</string>
-    <string name="settings_reindex_changed">再インデックス（変更ファイルのみ）</string>
+    <string name="settings_reindex_changed">再インデックス</string>
+    <string name="settings_reindex_changed_desc">変更・追加・削除されたファイルだけを反映します</string>
     <string name="settings_section_chat_history">チャット履歴</string>
     <string name="settings_clear_history">チャット履歴をすべて削除</string>
     <string name="settings_section_developer">開発者</string>
