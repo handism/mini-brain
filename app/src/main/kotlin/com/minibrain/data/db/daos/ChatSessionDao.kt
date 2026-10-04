@@ -28,6 +28,9 @@ interface ChatSessionDao {
     )
     fun observeSummaries(): Flow<List<ChatSessionSummary>>
 
+    @Query("SELECT title FROM chat_sessions WHERE id = :id")
+    fun observeTitle(id: Long): Flow<String?>
+
     @Query("SELECT * FROM chat_sessions WHERE id = :id")
     suspend fun getById(id: Long): ChatSessionEntity?
 

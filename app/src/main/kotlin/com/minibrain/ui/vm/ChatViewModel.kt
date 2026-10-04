@@ -15,6 +15,7 @@ import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.dataStore
 import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.Flow
@@ -22,6 +23,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -67,6 +70,14 @@ class ChatViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private val _sessionId = MutableStateFlow<Long>(-1)
+
+    /** トップバーに出すセッション名。セッション確定前は null。 */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val sessionTitle: StateFlow<String?> = _sessionId
+        .flatMapLatest { id ->
+            if (id == -1L) flowOf(null) else app.container.chatRepository.observeSessionTitle(id)
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private var currentJob: Job? = null
 
     init {

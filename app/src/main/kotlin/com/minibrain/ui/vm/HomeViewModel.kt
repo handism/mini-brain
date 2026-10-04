@@ -37,12 +37,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
-    val chunkCount: StateFlow<Int> = savedTreeUri
-        .flatMapLatest { uri ->
-            if (uri != null) app.container.documentRepository.observeChunkCount(uri) else flowOf(0)
-        }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
-
     fun onFolderSelected(uri: Uri) {
         viewModelScope.launch {
             runCatching {
@@ -53,13 +47,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
             saveTreeUri(uri.toString())
             app.container.documentRepository.indexFolder(uri)
-        }
-    }
-
-    fun reindex() {
-        val uri = savedTreeUri.value ?: return
-        viewModelScope.launch {
-            app.container.documentRepository.indexFolder(Uri.parse(uri))
         }
     }
 
