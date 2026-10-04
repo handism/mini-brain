@@ -7,11 +7,15 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.minibrain.MiniBrainApp
+import com.minibrain.PREF_LAST_INDEXED_AT
+import com.minibrain.PREF_LAST_INDEXED_TREE
+import com.minibrain.data.db.entities.ChatSessionSummary
 import com.minibrain.data.repo.ChatRepository
 import com.minibrain.data.repo.DocumentRepository
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.dataStore
 import com.minibrain.di.AppContainer
+import kotlinx.coroutines.launch
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -76,6 +80,13 @@ class HomeViewModelTest {
         every { documentRepository.indexingState } returns indexingStateFlow
 
         every { documentRepository.observeDocCount(any()) } returns flowOf(10)
+        every { chatRepository.observeSessions() } returns flowOf(
+            listOf(
+                ChatSessionSummary(id = 1, title = "空", createdAt = 0, updatedAt = 3, messageCount = 0),
+                ChatSessionSummary(id = 2, title = "A", createdAt = 0, updatedAt = 2, messageCount = 2),
+                ChatSessionSummary(id = 3, title = "B", createdAt = 0, updatedAt = 1, messageCount = 4),
+            )
+        )
 
         // Setup datastore edit behavior
         coEvery { dataStore.updateData(any()) } returns mockk(relaxed = true)
@@ -96,10 +107,52 @@ class HomeViewModelTest {
         unmockkStatic(Uri::class)
     }
 
+    private fun stubNoIndexRecord(prefs: Preferences) {
+        every { prefs[PREF_LAST_INDEXED_AT] } returns null
+        every { prefs[PREF_LAST_INDEXED_TREE] } returns null
+    }
+
+    @Test
+    fun `lastIndexedAt is shown only for the current folder`() = runTest(testDispatcher) {
+        val prefs = mockk<Preferences>()
+        every { prefs[PREF_TREE_URI] } returns "content://a"
+        every { prefs[PREF_LAST_INDEXED_AT] } returns 1234L
+        every { prefs[PREF_LAST_INDEXED_TREE] } returns "content://a"
+        prefsFlow.value = prefs
+
+        val viewModel = HomeViewModel(app)
+        advanceUntilIdle()
+        assertEquals(1234L, viewModel.lastIndexedAt.value)
+
+        val otherFolder = mockk<Preferences>()
+        every { otherFolder[PREF_TREE_URI] } returns "content://b"
+        every { otherFolder[PREF_LAST_INDEXED_AT] } returns 1234L
+        every { otherFolder[PREF_LAST_INDEXED_TREE] } returns "content://a"
+        prefsFlow.value = otherFolder
+        advanceUntilIdle()
+        assertEquals(null, viewModel.lastIndexedAt.value)
+    }
+
+    @Test
+    fun `recentSessions skips sessions without messages`() = runTest(testDispatcher) {
+        val prefs = mockk<Preferences>()
+        every { prefs[PREF_TREE_URI] } returns null
+        stubNoIndexRecord(prefs)
+        prefsFlow.value = prefs
+
+        val viewModel = HomeViewModel(app)
+        val job = launch { viewModel.recentSessions.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(listOf(2L, 3L), viewModel.recentSessions.value.map { it.id })
+        job.cancel()
+    }
+
     @Test
     fun `initial state is null and counts are zero`() = runTest(testDispatcher) {
         val emptyPrefs = mockk<Preferences>()
         every { emptyPrefs[PREF_TREE_URI] } returns null
+        stubNoIndexRecord(emptyPrefs)
         every { emptyPrefs.asMap() } returns emptyMap()
         prefsFlow.value = emptyPrefs
 
@@ -115,6 +168,7 @@ class HomeViewModelTest {
         val uriStr = "content://my_folder"
         val prefs = mockk<Preferences>()
         every { prefs[PREF_TREE_URI] } returns uriStr
+        stubNoIndexRecord(prefs)
         every { prefs.asMap() } returns mapOf(PREF_TREE_URI to uriStr as Any)
         prefsFlow.value = prefs
 
@@ -129,6 +183,7 @@ class HomeViewModelTest {
     fun `onFolderSelected takes permission, saves uri, and starts index`() = runTest(testDispatcher) {
         val emptyPrefs = mockk<Preferences>()
         every { emptyPrefs[PREF_TREE_URI] } returns null
+        stubNoIndexRecord(emptyPrefs)
         every { emptyPrefs.asMap() } returns emptyMap()
         prefsFlow.value = emptyPrefs
 

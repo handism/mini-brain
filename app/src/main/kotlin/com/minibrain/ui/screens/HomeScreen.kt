@@ -6,6 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,11 +23,13 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -46,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.minibrain.R
+import com.minibrain.data.db.entities.ChatSessionSummary
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.ui.components.folderDisplayName
 import com.minibrain.ui.vm.HomeViewModel
@@ -56,11 +61,14 @@ import kotlinx.coroutines.delay
 fun HomeScreen(
     onOpenChat: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSession: (Long) -> Unit = {},
     vm: HomeViewModel = viewModel(),
 ) {
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
     val indexState by vm.indexingState.collectAsStateWithLifecycle()
     val docCount by vm.docCount.collectAsStateWithLifecycle()
+    val lastIndexedAt by vm.lastIndexedAt.collectAsStateWithLifecycle()
+    val recentSessions by vm.recentSessions.collectAsStateWithLifecycle()
 
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -84,6 +92,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -95,20 +104,26 @@ fun HomeScreen(
             } else {
                 FolderSelectedContent(
                     treeUri = uri,
-                    docCount = docCount,
+                    stats = KnowledgeBaseStats(docCount, lastIndexedAt),
                     indexState = indexState,
                     onOpenChat = onOpenChat,
                     onChangeFolder = { folderLauncher.launch(null) }
                 )
+                if (recentSessions.isNotEmpty()) {
+                    RecentChats(sessions = recentSessions, onOpenSession = onOpenSession)
+                }
             }
         }
     }
 }
 
+// チャンク数は利用者向けの指標ではないので出さない（ADR-034）
+private data class KnowledgeBaseStats(val docCount: Int, val lastIndexedAt: Long?)
+
 @Composable
-private fun StatItem(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, style = MaterialTheme.typography.titleLarge)
+private fun StatItem(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.titleMedium, maxLines = 1)
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -147,7 +162,7 @@ private fun FolderUnselectedContent(
 @Composable
 private fun FolderSelectedContent(
     treeUri: String,
-    docCount: Int,
+    stats: KnowledgeBaseStats,
     indexState: IndexingState,
     onOpenChat: () -> Unit,
     onChangeFolder: () -> Unit,
@@ -159,10 +174,21 @@ private fun FolderSelectedContent(
             Spacer(Modifier.height(4.dp))
             Text(
                 folderDisplayName(treeUri),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.titleMedium,
             )
-            Spacer(Modifier.height(12.dp))
-            StatItem(label = stringResource(R.string.home_stat_files), value = "$docCount")
+            Spacer(Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                StatItem(
+                    label = stringResource(R.string.home_stat_files),
+                    value = "${stats.docCount}",
+                    modifier = Modifier.weight(1f),
+                )
+                StatItem(
+                    label = stringResource(R.string.home_stat_last_indexed),
+                    value = stats.lastIndexedAt?.let { formatTimestamp(it) } ?: stringResource(R.string.home_stat_none),
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 
@@ -205,6 +231,31 @@ private fun FolderSelectedContent(
     ) {
         Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
         Text(stringResource(R.string.home_change_folder), modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+@Composable
+private fun RecentChats(sessions: List<ChatSessionSummary>, onOpenSession: (Long) -> Unit) {
+    Spacer(Modifier.height(32.dp))
+    Text(
+        stringResource(R.string.home_recent_chats),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+    )
+    // ListItem の背景をカードと同じ色にして、1 枚のカードに並んで見えるようにする
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        sessions.forEach { session ->
+            SessionListItem(
+                session = session,
+                onClick = { onOpenSession(session.id) },
+                colors = ListItemDefaults.colors(containerColor = containerColor),
+            )
+        }
     }
 }
 

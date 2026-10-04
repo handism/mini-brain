@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -19,7 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -55,7 +58,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -66,7 +68,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.minibrain.R
 import com.minibrain.ai.rag.Citation
+import com.minibrain.ui.components.CHAT_CONTENT_MAX_WIDTH
 import com.minibrain.ui.components.MessageBubble
+import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.ui.vm.ChatMessage
 import com.minibrain.ui.vm.ChatViewModel
 import kotlinx.coroutines.launch
@@ -84,6 +88,7 @@ fun ChatScreen(
     val statusText by vm.statusText.collectAsStateWithLifecycle()
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
     val sessionTitle by vm.sessionTitle.collectAsStateWithLifecycle()
+    val suggestions by vm.suggestions.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -117,7 +122,9 @@ fun ChatScreen(
                 showSearchLog = showSearchLog,
                 statusText = statusText,
                 listState = listState,
+                suggestions = suggestions,
                 onSuggestionClick = { inputText = it },
+                onRegenerate = { vm.regenerate() }.takeUnless { isGenerating },
                 onOpenCitation = { citation ->
                     scope.launch {
                         val uri = vm.citationFileUri(citation)
@@ -230,11 +237,13 @@ fun ChatMessageList(
     listState: LazyListState,
     modifier: Modifier = Modifier,
     statusText: String? = null,
+    suggestions: List<String> = emptyList(),
     onSuggestionClick: (String) -> Unit = {},
     onOpenCitation: ((Citation) -> Unit)? = null,
+    onRegenerate: (() -> Unit)? = null,
 ) {
     if (messages.isEmpty()) {
-        ChatEmptyState(onSuggestionClick = onSuggestionClick, modifier = modifier)
+        ChatEmptyState(suggestions = suggestions, onSuggestionClick = onSuggestionClick, modifier = modifier)
     } else {
         LazyColumn(
             state = listState,
@@ -242,13 +251,21 @@ fun ChatMessageList(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { Spacer(Modifier.height(8.dp)) }
-            items(messages) { msg ->
-                MessageBubble(
-                    msg = msg,
-                    showSearchLog = showSearchLog,
-                    statusText = statusText.takeIf { msg.isStreaming },
-                    onOpenCitation = onOpenCitation,
-                )
+            itemsIndexed(messages) { index, msg ->
+                // タブレット・横画面でも読みやすい幅に収め、中央に寄せる
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    MessageBubble(
+                        msg = msg,
+                        showSearchLog = showSearchLog,
+                        statusText = statusText.takeIf { msg.isStreaming },
+                        onOpenCitation = onOpenCitation,
+                        // 再生成できるのは最後の回答だけ
+                        onRegenerate = onRegenerate?.takeIf {
+                            index == messages.lastIndex && msg.role == MessageRole.ASSISTANT
+                        },
+                        modifier = Modifier.widthIn(max = CHAT_CONTENT_MAX_WIDTH),
+                    )
+                }
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
@@ -258,6 +275,7 @@ fun ChatMessageList(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatEmptyState(
+    suggestions: List<String>,
     onSuggestionClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -298,7 +316,7 @@ private fun ChatEmptyState(
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {
-            stringArrayResource(R.array.chat_suggestions).forEach { suggestion ->
+            suggestions.forEach { suggestion ->
                 SuggestionChip(
                     onClick = { onSuggestionClick(suggestion) },
                     label = { Text(suggestion) },
@@ -349,7 +367,11 @@ fun ChatInputArea(
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .wrapContentWidth(Alignment.CenterHorizontally)
+            .widthIn(max = CHAT_CONTENT_MAX_WIDTH)
+            .padding(8.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

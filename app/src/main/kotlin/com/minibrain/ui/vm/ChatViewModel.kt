@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.minibrain.MiniBrainApp
+import com.minibrain.R
 import com.minibrain.ai.agent.AgentResult
 import com.minibrain.ai.agent.AgentTraceEvent
 import com.minibrain.ai.agent.FinalAnswerEvent
@@ -15,6 +16,7 @@ import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.dataStore
 import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import androidx.lifecycle.SavedStateHandle
@@ -26,8 +28,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
 
 private val PREF_TREE_URI = stringPreferencesKey("tree_uri")
 private val PREF_SHOW_SEARCH_LOG = booleanPreferencesKey("show_search_log")
@@ -68,6 +73,12 @@ class ChatViewModel(
     val showSearchLog: StateFlow<Boolean> = app.dataStore.data
         .map { prefs -> prefs[PREF_SHOW_SEARCH_LOG] ?: true }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /** 空のチャットに出す質問例。知識ベースから作れるまでは固定の例文。 */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val suggestions: StateFlow<List<String>> = savedTreeUri
+        .mapLatest { treeUri -> treeUri?.takeIf { it.isNotEmpty() }?.let { loadSuggestions(it) } ?: suggestionTexts().fallback }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, suggestionTexts().fallback)
 
     private val _sessionId = MutableStateFlow<Long>(-1)
 
@@ -228,6 +239,37 @@ class ChatViewModel(
         _messages.value = list
     }
 
+    /** 最後の回答を捨てて、同じ質問をもう一度送る。 */
+    fun regenerate() {
+        if (_isGenerating.value) return
+        viewModelScope.launch {
+            val question = app.container.chatRepository.removeLastExchange(_sessionId.value) ?: return@launch
+            // DB の変更通知を待たずに画面からも消し、sendMessage が末尾に積み直す
+            val lastUser = _messages.value.indexOfLast { it.role == MessageRole.USER }
+            if (lastUser >= 0) _messages.value = _messages.value.subList(0, lastUser)
+            sendMessage(question)
+        }
+    }
+
+    private fun suggestionTexts(): SuggestionTexts = SuggestionTexts(
+        lastMonth = app.getString(R.string.chat_suggestion_last_month),
+        thisMonth = app.getString(R.string.chat_suggestion_this_month),
+        topic = { app.getString(R.string.chat_suggestion_topic, it) },
+        fallback = app.resources.getStringArray(R.array.chat_suggestions).toList(),
+    )
+
+    private suspend fun loadSuggestions(treeUri: String): List<String> = withContext(Dispatchers.IO) {
+        val documentDao = app.container.database.documentDao()
+        runCatchingCancellable {
+            buildChatSuggestions(
+                documentDates = documentDao.getMinimalByTree(treeUri).mapNotNull { it.documentDate },
+                recentFileNames = documentDao.getRecentFiles(treeUri, RECENT_FILES_FOR_SUGGESTIONS).map { it.fileName },
+                today = LocalDate.now(),
+                texts = suggestionTexts(),
+            )
+        }.getOrElse { suggestionTexts().fallback }
+    }
+
     fun newSession() {
         viewModelScope.launch {
             _sessionId.value = app.container.chatRepository.createSession()
@@ -253,6 +295,9 @@ class ChatViewModel(
         }
     }
 }
+
+// 話題の候補を拾うファイル数。日付だけのファイル名が続いても話題が残る程度に多めに取る
+private const val RECENT_FILES_FOR_SUGGESTIONS = 20
 
 // 回答冒頭がこれらの「答えられない」系の表現なら、無関係な引用元を表示しない
 private val NEGATIVE_KEYWORDS = listOf(

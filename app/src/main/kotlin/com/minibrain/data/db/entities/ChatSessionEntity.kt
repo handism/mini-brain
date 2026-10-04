@@ -10,10 +10,15 @@ data class ChatSessionEntity(
     val createdAt: Long = System.currentTimeMillis(),
 )
 
-/** 履歴一覧用。[updatedAt] はセッション内の最新メッセージの日時。 */
+/**
+ * 履歴一覧用。[updatedAt] はセッション内の最新メッセージの日時。
+ * [lastAnswer] は最新の回答（一覧で中身を見分けるため）。回答がまだ無ければ null。
+ */
 data class ChatSessionSummary(
     val id: Long,
     val title: String,
     val createdAt: Long,
     val updatedAt: Long,
+    val messageCount: Int = 0,
+    val lastAnswer: String? = null,
 )

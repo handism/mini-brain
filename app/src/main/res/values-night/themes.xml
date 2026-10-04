@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose が描く前のウィンドウ背景が白く光らないよう、ダーク時は暗いテーマを親にする -->
+    <style name="Theme.MiniBrain" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.MiniBrain.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+        <item name="postSplashScreenTheme">@style/Theme.MiniBrain</item>
+    </style>
+</resources>

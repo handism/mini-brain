@@ -126,10 +126,15 @@
 - 配色は Material 3 の dynamic color が前提です（`Color.kt` は `dynamicColor = false` 時のフォールバックのみ）。色は `MaterialTheme.colorScheme` から取り、固定色を足さないでください。
 - フォルダ名の表示は `folderDisplayName(treeUri)` を使います（ボリューム ID の `primary:` などを落とす処理を画面ごとに書かない）。
 - チャット履歴一覧は `ChatSessionDao.observeSummaries`（最新メッセージ日時順）を使います。削除は `ChatRepository.deleteSession` が返す `DeletedSession` を `restoreSession` に渡すと id を保ったまま戻せます。履歴画面はスワイプで削除し、TalkBack 用に同じ削除を `customActions` にも載せています（ゴミ箱ボタンは置かない）。
-- 起動時、フォルダ選択済みなら Onboarding → Home → Chat と積んでチャットから始めます（`OnboardingViewModel.hasKnowledgeBase`、ADR-034）。再インデックスは Settings に一本化し、Home はフォルダ選択・変更とインデックス状態だけを出します。
+- 起動時、フォルダ選択済みなら Onboarding → Home → Chat と積んでチャットから始めます（`OnboardingViewModel.hasKnowledgeBase`、ADR-034）。再インデックスは Settings に一本化し、Home はフォルダ選択・変更とインデックス状態（ファイル数・最終インデックス日時）、最近のチャットを出します（ADR-035）。
 - チャットの回答は吹き出しにせず全幅で表示し、`SelectionContainer` で部分選択できるようにしています。ユーザー発言だけが `primaryContainer` の吹き出しです。引用元はファイル単位のチップ（`distinctCitationSources`）で常に表示し、スニペットは「引用元 (n)」で展開します。
 - `Scaffold` の中で `imePadding` を使うときは、先に `.consumeWindowInsets(padding)` を挟みます（edge-to-edge でナビゲーションバー分の余白が二重になるため）。
 - タップできるアイコンは `IconButton` の既定サイズ（48dp）を縮めないでください。アイコン自体を小さくするのは構いません。
+- 回答待ちの表示（段階の文言＋3 秒後から経過秒数）、再生成（最後の回答だけ、`ChatRepository.removeLastExchange`）、回答下のアクション 1 行化は ADR-035 を参照。チャットの本文・入力欄の最大幅は `CHAT_CONTENT_MAX_WIDTH`（720dp）です。
+- `MarkdownText` は見出し・リスト・コード・水平線に加え、表（ヘッダー直後に区切り行がある場合のみ）と引用ブロックを描きます。
+- 空のチャットの質問例は `buildChatSuggestions`（`ChatSuggestions.kt`）で知識ベースから作り、作れなければ `R.array.chat_suggestions` を使います。
+- 履歴一覧と Home の「最近のチャット」は同じ `SessionListItem` を使います（`ChatSessionSummary.messageCount` / `lastAnswer`）。Home の最終インデックス日時は `MiniBrainApp` が `IndexingState.Done` を見て DataStore（`PREF_LAST_INDEXED_AT` / `PREF_LAST_INDEXED_TREE`）に記録します。
+- ダークモードのウィンドウ背景は `values-night/themes.xml` で暗くしています。テーマを変えるときは昼夜の両方を直してください。
 
 ### 5.6 DB マイグレーション運用
 - 既存 `documents` レコードの `headings` / `first_para` / `tags` / `documentDate` は、次回の差分インデックス時に自動補完されます。強制的に補完したい場合は Settings → 再インデックスを実行します。

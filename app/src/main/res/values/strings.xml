@@ -33,6 +33,9 @@
     <string name="home_select_folder">フォルダを選択</string>
     <string name="home_knowledge_base">知識ベース</string>
     <string name="home_stat_files">ファイル数</string>
+    <string name="home_stat_last_indexed">最終インデックス</string>
+    <string name="home_stat_none">—</string>
+    <string name="home_recent_chats">最近のチャット</string>
     <string name="home_indexing">インデックス中... %1$d/%2$d %3$s</string>
     <string name="home_indexing_eta_minutes">残り約 %1$d 分</string>
     <string name="home_indexing_eta_soon">まもなく完了</string>
@@ -48,11 +51,17 @@
     <string name="chat_empty_title">質問を入力してください</string>
     <string name="chat_empty_desc">mdファイルの内容をもとに回答します</string>
     <string name="chat_suggestions_label">たとえば</string>
+    <!-- 知識ベースから質問例を作れたときは、先頭の 1 件だけを末尾に添える -->
     <string-array name="chat_suggestions">
-        <item>先月の日記を要約して</item>
         <item>最近書いたメモは？</item>
+        <item>先月の日記を要約して</item>
         <item>〇〇にいつ行ったっけ？</item>
     </string-array>
+    <string name="chat_suggestion_last_month">先月の出来事をまとめて</string>
+    <string name="chat_suggestion_this_month">今月の出来事をまとめて</string>
+    <string name="chat_suggestion_topic">「%1$s」について教えて</string>
+    <string name="chat_regenerate">回答を再生成</string>
+    <string name="chat_elapsed_seconds">%1$d 秒</string>
     <string name="chat_input_placeholder">質問を入力...</string>
     <string name="chat_send">送信</string>
     <string name="chat_stop">停止</string>
@@ -84,6 +93,7 @@
     <string name="history_deleted">チャットを削除しました</string>
     <string name="history_today">今日 %1$s</string>
     <string name="history_yesterday">昨日 %1$s</string>
+    <string name="history_message_count">%1$d 件</string>
     <string name="history_search">履歴を検索</string>
     <string name="history_search_empty">一致するチャットがありません</string>
     <string name="history_group_today">今日</string>

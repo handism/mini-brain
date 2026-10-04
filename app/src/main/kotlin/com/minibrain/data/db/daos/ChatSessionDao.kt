@@ -19,7 +19,11 @@ interface ChatSessionDao {
     @Query(
         """
         SELECT s.id, s.title, s.createdAt,
-               COALESCE(MAX(m.createdAt), s.createdAt) AS updatedAt
+               COALESCE(MAX(m.createdAt), s.createdAt) AS updatedAt,
+               COUNT(m.id) AS messageCount,
+               (SELECT a.content FROM chat_messages a
+                WHERE a.sessionId = s.id AND a.role = 'ASSISTANT'
+                ORDER BY a.createdAt DESC, a.id DESC LIMIT 1) AS lastAnswer
         FROM chat_sessions s
         LEFT JOIN chat_messages m ON m.sessionId = s.id
         GROUP BY s.id

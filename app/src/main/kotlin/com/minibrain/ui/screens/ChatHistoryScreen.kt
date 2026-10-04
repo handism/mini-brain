@@ -221,17 +221,14 @@ private fun SwipeToDeleteSessionItem(
             }
         },
     ) {
-        ListItem(
-            headlineContent = {
-                Text(session.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        SessionListItem(
+            session = session,
+            onClick = onClick,
+            time = formatSessionTime(session.updatedAt),
+            // スワイプできない人向けに、TalkBack の操作メニューから削除できるようにする
+            modifier = Modifier.semantics {
+                customActions = listOf(CustomAccessibilityAction(deleteLabel) { onDelete(); true })
             },
-            supportingContent = { Text(formatSessionTime(session.updatedAt)) },
-            modifier = Modifier
-                .clickable(onClick = onClick)
-                // スワイプできない人向けに、TalkBack の操作メニューから削除できるようにする
-                .semantics {
-                    customActions = listOf(CustomAccessibilityAction(deleteLabel) { onDelete(); true })
-                },
         )
     }
 }

@@ -33,6 +33,22 @@ class ChatRepository(
     suspend fun getRecentHistory(sessionId: Long, limit: Int = 6): List<ChatMessageEntity> =
         messageDao.getRecentBySession(sessionId, limit).reversed()
 
+    /**
+     * 最後の質問と、それへの回答（あれば）を消してその質問文を返す。再生成で同じ質問を送り直すため。
+     * 最後のやり取りが質問で終わっていなければ（回答だけが続くなど）何もせず null。
+     */
+    suspend fun removeLastExchange(sessionId: Long): String? {
+        val recent = messageDao.getRecentBySession(sessionId, 2)
+        val last = recent.firstOrNull() ?: return null
+        val toDelete = when {
+            last.role == MessageRole.USER -> listOf(last)
+            recent.getOrNull(1)?.role == MessageRole.USER -> recent
+            else -> return null
+        }
+        messageDao.deleteByIds(toDelete.map { it.id })
+        return toDelete.last().content
+    }
+
     suspend fun updateSessionTitle(id: Long, title: String) = sessionDao.updateTitle(id, title)
 
     /** 削除したセッションを返す（[restoreSession] で取り消せるように）。存在しなければ null。 */

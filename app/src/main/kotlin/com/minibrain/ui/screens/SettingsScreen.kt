@@ -136,15 +136,16 @@ private fun SettingsScreenContent(
                 onChangeFolder = onChangeFolder
             )
             ChatHistorySection(onClearChat = onClearChat)
-            DeveloperSection(
-                showSearchLog = showSearchLog,
-                onShowSearchLogChange = onShowSearchLogChange
-            )
             ModelInfoSection(
                 llmModelFile = llmModelFile,
                 embedderModelFile = embedderModelFile
             )
             PrivacySection()
+            // 普段は触らない項目なので最後に置く
+            DeveloperSection(
+                showSearchLog = showSearchLog,
+                onShowSearchLogChange = onShowSearchLogChange
+            )
         }
     }
 }
