@@ -49,7 +49,7 @@
 
 ### APK からインストール
 
-[Releases](https://github.com/handism/mini-brain/releases) から最新の `mini-brain-x.y.z.apk` をダウンロードして端末で開きます。初回は「提供元不明のアプリ」のインストールを許可してください。[Obtainium](https://github.com/ImranR98/Obtainium) にこのリポジトリの URL を登録すると、新しいリリースを自動で受け取れます。
+[Releases](https://github.com/handism/mini-brain/releases) から最新の `mini-brain-x.y.z.apk` をダウンロードして端末で開きます（arm64 端末のみ対応）。初回は「提供元不明のアプリ」のインストールを許可してください。[Obtainium](https://github.com/ImranR98/Obtainium) にこのリポジトリの URL を登録すると、新しいリリースを自動で受け取れます。
 
 ### ビルド手順
 

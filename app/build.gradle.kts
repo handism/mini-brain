@@ -36,6 +36,8 @@ android {
             if (releaseKeystore != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            // 配布 APK は実機（arm64）向けのみ。debug はエミュレータ（x86_64）用に全 ABI を残す
+            ndk { abiFilters += "arm64-v8a" }
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
