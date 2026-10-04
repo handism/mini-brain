@@ -69,6 +69,24 @@ class ChatSessionDaoTest {
     }
 
     @Test
+    fun observeSummaries_includesMessageCountAndLastAnswer() = runBlocking {
+        val id = dao.insert(ChatSessionEntity(title = "Q", createdAt = 1000))
+        dao.insert(ChatSessionEntity(title = "Empty", createdAt = 500))
+        val messageDao = db.chatMessageDao()
+        messageDao.insert(ChatMessageEntity(sessionId = id, role = MessageRole.USER, content = "q1", createdAt = 2000))
+        messageDao.insert(ChatMessageEntity(sessionId = id, role = MessageRole.ASSISTANT, content = "a1", createdAt = 3000))
+        messageDao.insert(ChatMessageEntity(sessionId = id, role = MessageRole.USER, content = "q2", createdAt = 4000))
+        messageDao.insert(ChatMessageEntity(sessionId = id, role = MessageRole.ASSISTANT, content = "a2", createdAt = 5000))
+
+        val summaries = dao.observeSummaries().first()
+
+        assertEquals(4, summaries[0].messageCount)
+        assertEquals("a2", summaries[0].lastAnswer)
+        assertEquals(0, summaries[1].messageCount)
+        assertEquals(null, summaries[1].lastAnswer)
+    }
+
+    @Test
     fun getLatest() = runBlocking {
         val session1 = ChatSessionEntity(title = "Test 1", createdAt = 1000)
         val session2 = ChatSessionEntity(title = "Test 2", createdAt = 2000)

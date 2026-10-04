@@ -65,4 +65,11 @@ class ScreenFormattingTest {
         assertEquals(listOf(sessions[0]), filterSessions(sessions, " ai "))
         assertEquals(emptyList<ChatSessionSummary>(), filterSessions(sessions, "日記"))
     }
+
+    @Test
+    fun `sessionPreview strips markdown and joins lines`() {
+        assertEquals("見出し 本文の 強調 です", sessionPreview("## 見出し\n\n本文の **強調** です"))
+        assertEquals(null, sessionPreview("  ** "))
+        assertEquals(null, sessionPreview(null))
+    }
 }

@@ -1,6 +1,7 @@
 package com.minibrain.ui.screens
 
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.assertIsDisplayed
@@ -44,6 +45,7 @@ class ChatScreenTest {
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -97,6 +99,61 @@ class ChatScreenTest {
         composeTestRule.onAllNodesWithText("再ランク中...").assertCountEquals(1)
     }
 
+    @Test
+    fun testElapsedSecondsAppearWhileWaiting() {
+        val vm = relaxedVm(
+            messages = listOf(ChatMessage(role = MessageRole.ASSISTANT, content = "", isStreaming = true)),
+            isGenerating = true,
+            statusText = "検索中...",
+        )
+        composeTestRule.mainClock.autoAdvance = false
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        composeTestRule.onNodeWithText("3 秒").assertDoesNotExist()
+        composeTestRule.mainClock.advanceTimeBy(3_100)
+        composeTestRule.onNodeWithText("3 秒").assertIsDisplayed()
+    }
+
+    @Test
+    fun testRegenerateIsShownOnlyForLastAnswer() {
+        val vm = relaxedVm(
+            messages = listOf(
+                ChatMessage(id = 1, role = MessageRole.USER, content = "q1"),
+                ChatMessage(id = 2, role = MessageRole.ASSISTANT, content = "a1"),
+                ChatMessage(id = 3, role = MessageRole.USER, content = "q2"),
+                ChatMessage(id = 4, role = MessageRole.ASSISTANT, content = "a2"),
+            ),
+        )
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        composeTestRule.onAllNodesWithContentDescription("回答を再生成").assertCountEquals(1)
+        composeTestRule.onNodeWithContentDescription("回答を再生成").performClick()
+        verify { vm.regenerate() }
+    }
+
+    @Test
+    fun testRegenerateIsHiddenWhileGenerating() {
+        val vm = relaxedVm(
+            messages = listOf(
+                ChatMessage(id = 1, role = MessageRole.USER, content = "q1"),
+                ChatMessage(id = 2, role = MessageRole.ASSISTANT, content = "a1"),
+            ),
+            isGenerating = true,
+        )
+
+        composeTestRule.setContent {
+            ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
+        }
+
+        composeTestRule.onNodeWithContentDescription("回答を再生成").assertDoesNotExist()
+    }
+
     private fun relaxedVm(
         messages: List<ChatMessage> = emptyList(),
         isGenerating: Boolean = false,
@@ -109,6 +166,7 @@ class ChatScreenTest {
         every { vm.statusText } returns MutableStateFlow(statusText)
         every { vm.showSearchLog } returns MutableStateFlow(true)
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
         return vm
     }
 
@@ -131,6 +189,7 @@ class ChatScreenTest {
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -155,6 +214,7 @@ class ChatScreenTest {
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -181,6 +241,7 @@ class ChatScreenTest {
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -204,6 +265,7 @@ class ChatScreenTest {
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
@@ -233,6 +295,7 @@ class ChatScreenTest {
         every { vm.statusText } returns statusTextFlow
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
+        every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
             ChatScreen(

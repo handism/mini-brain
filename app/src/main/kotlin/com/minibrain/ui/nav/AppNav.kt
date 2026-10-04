@@ -1,5 +1,10 @@
 package com.minibrain.ui.nav
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -13,6 +18,8 @@ import com.minibrain.ui.screens.HomeScreen
 import com.minibrain.ui.screens.OnboardingScreen
 import com.minibrain.ui.screens.SettingsScreen
 
+private const val NAV_ANIM_MS = 250
+
 object Routes {
     const val ONBOARDING = "onboarding"
     const val HOME = "home"
@@ -25,7 +32,15 @@ object Routes {
 fun AppNav(
     navController: NavHostController = rememberNavController()
 ) {
-    NavHost(navController = navController, startDestination = Routes.ONBOARDING) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.ONBOARDING,
+        // 進むときは右から、戻るときは左から。少しだけずらしてフェードを重ね、動きを控えめにする
+        enterTransition = { slideInHorizontally(tween(NAV_ANIM_MS)) { it / 4 } + fadeIn(tween(NAV_ANIM_MS)) },
+        exitTransition = { slideOutHorizontally(tween(NAV_ANIM_MS)) { -it / 4 } + fadeOut(tween(NAV_ANIM_MS)) },
+        popEnterTransition = { slideInHorizontally(tween(NAV_ANIM_MS)) { -it / 4 } + fadeIn(tween(NAV_ANIM_MS)) },
+        popExitTransition = { slideOutHorizontally(tween(NAV_ANIM_MS)) { it / 4 } + fadeOut(tween(NAV_ANIM_MS)) },
+    ) {
 
         composable(Routes.ONBOARDING) {
             OnboardingScreen(
@@ -43,6 +58,7 @@ fun AppNav(
             HomeScreen(
                 onOpenChat = { navController.navigate(Routes.CHAT) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenSession = { sessionId -> navController.navigate("${Routes.CHAT}?sessionId=$sessionId") },
             )
         }
 

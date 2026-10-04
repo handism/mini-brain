@@ -2,7 +2,11 @@
 package com.minibrain.ui.components
 
 import android.content.ClipData
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -25,6 +29,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
@@ -33,12 +38,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -60,39 +67,49 @@ import kotlinx.coroutines.launch
 
 // 固定 dp だとタブレット・横画面で吹き出しが細長くなるので、画面幅に対する割合で決める
 private const val BUBBLE_WIDTH_FRACTION = 0.85f
-private val BUBBLE_MAX_WIDTH = 720.dp
+
+/** チャットの本文・入力欄の最大幅。タブレットや横画面で行が長くなりすぎないようにする。 */
+internal val CHAT_CONTENT_MAX_WIDTH = 720.dp
+
+// 数秒で終わる処理のたびに秒数がちらつかないよう、少し待ってから出す
+private const val ELAPSED_VISIBLE_AFTER_SECONDS = 3
 
 /**
  * @param statusText 回答の本文が届くまでの間、ストリーミング中の回答欄に出す進行状況
  * @param onOpenCitation 引用元をタップしたとき。null なら引用元は開けない
+ * @param onRegenerate 回答を作り直すとき。null なら再生成ボタンを出さない
  */
 @Composable
 fun MessageBubble(
     msg: ChatMessage,
     showSearchLog: Boolean,
+    modifier: Modifier = Modifier,
     statusText: String? = null,
     onOpenCitation: ((Citation) -> Unit)? = null,
+    onRegenerate: (() -> Unit)? = null,
 ) {
     if (msg.role == MessageRole.USER) {
-        UserMessageBubble(msg = msg)
+        UserMessageBubble(msg = msg, modifier = modifier)
     } else {
         AssistantMessageBubble(
             msg = msg,
             showSearchLog = showSearchLog,
             statusText = statusText,
             onOpenCitation = onOpenCitation,
+            onRegenerate = onRegenerate,
+            modifier = modifier,
         )
     }
 }
 
 @Composable
-fun UserMessageBubble(msg: ChatMessage) {
+fun UserMessageBubble(msg: ChatMessage, modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
     ) {
         Column(
-            modifier = Modifier.widthIn(max = BUBBLE_MAX_WIDTH).fillMaxWidth(BUBBLE_WIDTH_FRACTION),
+            modifier = Modifier.fillMaxWidth(BUBBLE_WIDTH_FRACTION),
             horizontalAlignment = Alignment.End,
         ) {
             Card(
@@ -128,27 +145,30 @@ fun UserMessageBubble(msg: ChatMessage) {
 fun AssistantMessageBubble(
     msg: ChatMessage,
     showSearchLog: Boolean,
+    modifier: Modifier = Modifier,
     statusText: String? = null,
     onOpenCitation: ((Citation) -> Unit)? = null,
+    onRegenerate: (() -> Unit)? = null,
 ) {
     var citationsExpanded by remember { mutableStateOf(false) }
     var traceExpanded by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier.widthIn(max = BUBBLE_MAX_WIDTH).fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start,
     ) {
         AssistantMessageBody(msg = msg, statusText = statusText)
 
-        if (msg.citations.isNotEmpty() && !msg.isStreaming) {
-            CitationChips(citations = msg.citations, onOpen = onOpenCitation)
+        // ストリーミング中は出さない
+        if (!msg.isStreaming && msg.content.isNotEmpty()) {
+            AssistantMessageActions(
+                msg = msg,
+                citationsExpanded = citationsExpanded,
+                onCitationsExpandedChange = { citationsExpanded = it },
+                onOpenCitation = onOpenCitation,
+                onRegenerate = onRegenerate,
+            )
         }
-
-        AssistantMessageActions(
-            msg = msg,
-            citationsExpanded = citationsExpanded,
-            onCitationsExpandedChange = { citationsExpanded = it }
-        )
 
         if (msg.citations.isNotEmpty() && !msg.isStreaming) {
             CitationList(citations = msg.citations, expanded = citationsExpanded, onOpen = onOpenCitation)
@@ -168,15 +188,7 @@ fun AssistantMessageBubble(
 private fun AssistantMessageBody(msg: ChatMessage, statusText: String?) {
     Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
         if (msg.isStreaming && msg.content.isEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = statusText ?: stringResource(R.string.chat_thinking),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            GenerationProgress(statusText = statusText ?: stringResource(R.string.chat_thinking))
         } else {
             SelectionContainer {
                 MarkdownText(
@@ -188,21 +200,85 @@ private fun AssistantMessageBody(msg: ChatMessage, statusText: String?) {
     }
 }
 
+/**
+ * 回答の本文が届くまでの進行状況。ReAct で数十秒かかることがあるので、
+ * 今どの段階かと経過秒数を出して止まっていないことを伝える。
+ */
+@Composable
+private fun GenerationProgress(statusText: String) {
+    val elapsedSeconds by produceState(initialValue = 0) {
+        while (true) {
+            delay(1_000)
+            value += 1
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(12.dp))
+            AnimatedContent(
+                targetState = statusText,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "generationStatus",
+                modifier = Modifier.weight(1f),
+            ) { text ->
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (elapsedSeconds >= ELAPSED_VISIBLE_AFTER_SECONDS) {
+                Text(
+                    text = stringResource(R.string.chat_elapsed_seconds, elapsedSeconds),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * コピー・再生成・引用元を 1 行にまとめる。引用元はファイル単位のチップを横スクロールで並べ、
+ * 先頭の「引用元 (n)」でスニペットの一覧を開閉する。
+ */
 @Composable
 private fun AssistantMessageActions(
     msg: ChatMessage,
     citationsExpanded: Boolean,
     onCitationsExpandedChange: (Boolean) -> Unit,
+    onOpenCitation: ((Citation) -> Unit)?,
+    onRegenerate: (() -> Unit)?,
 ) {
-    // コピーボタン + 引用箇所の展開（ストリーミング中は非表示）
-    if (!msg.isStreaming && msg.content.isNotEmpty()) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MessageCopyButton(content = msg.content)
-
-            if (msg.citations.isNotEmpty()) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        MessageCopyButton(content = msg.content)
+        onRegenerate?.let { regenerate ->
+            IconButton(onClick = regenerate) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.chat_regenerate),
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (msg.citations.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TextButton(onClick = { onCitationsExpandedChange(!citationsExpanded) }) {
                     Icon(
                         if (citationsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -214,6 +290,7 @@ private fun AssistantMessageActions(
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
+                CitationChips(citations = msg.citations, onOpen = onOpenCitation)
             }
         }
     }
@@ -227,43 +304,36 @@ internal fun citationChipLabel(citation: Citation): String =
 internal fun distinctCitationSources(citations: List<Citation>): List<Citation> =
     citations.distinctBy { it.docId ?: citationChipLabel(it) }
 
-/** 回答の根拠をひと目で分かるよう、引用元ファイルは常にチップで並べる。 */
+/** 回答の根拠をひと目で分かるよう、引用元ファイルは常にチップで並べる。並べる Row は呼び出し側が持つ。 */
 @Composable
 private fun CitationChips(citations: List<Citation>, onOpen: ((Citation) -> Unit)?) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        distinctCitationSources(citations).forEach { citation ->
-            // docId の無い引用（フォルダ要約など）は開く先のファイルが無い
-            val open = onOpen?.takeIf { citation.docId != null }
-            AssistChip(
-                onClick = { open?.invoke(citation) },
-                enabled = open != null,
-                label = {
-                    Text(
-                        citationChipLabel(citation),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 200.dp),
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Description,
-                        contentDescription = null,
-                        modifier = Modifier.size(AssistChipDefaults.IconSize),
-                    )
-                },
-                // 開けない引用も「根拠」としては読めるよう、無効時もラベル色を落としすぎない
-                colors = AssistChipDefaults.assistChipColors(
-                    disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    disabledLeadingIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-            )
-        }
+    distinctCitationSources(citations).forEach { citation ->
+        // docId の無い引用（フォルダ要約など）は開く先のファイルが無い
+        val open = onOpen?.takeIf { citation.docId != null }
+        AssistChip(
+            onClick = { open?.invoke(citation) },
+            enabled = open != null,
+            label = {
+                Text(
+                    citationChipLabel(citation),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 200.dp),
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Description,
+                    contentDescription = null,
+                    modifier = Modifier.size(AssistChipDefaults.IconSize),
+                )
+            },
+            // 開けない引用も「根拠」としては読めるよう、無効時もラベル色を落としすぎない
+            colors = AssistChipDefaults.assistChipColors(
+                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                disabledLeadingIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        )
     }
 }
 

@@ -117,4 +117,34 @@ class MarkdownTextTest {
         val result = buildInline("****", Color.Black)
         assertEquals("****", result.text)
     }
+
+    @Test
+    fun testParseTable() {
+        val blocks = parse("前置き\n| 日付 | 場所 |\n| --- | :---: |\n| 1/1 | 熱海 |\n| 2/3 |\n\n後書き")
+        assertEquals(3, blocks.size)
+        assertEquals(MdBlock.Paragraph("前置き"), blocks[0])
+        assertEquals(
+            MdBlock.Table(
+                header = listOf("日付", "場所"),
+                rows = listOf(listOf("1/1", "熱海"), listOf("2/3", "")),
+            ),
+            blocks[1],
+        )
+        assertEquals(MdBlock.Paragraph("後書き"), blocks[2])
+    }
+
+    @Test
+    fun testPipeLineWithoutSeparatorIsParagraph() {
+        val blocks = parse("| これは表ではない")
+        assertEquals(listOf(MdBlock.Paragraph("| これは表ではない")), blocks)
+    }
+
+    @Test
+    fun testParseQuote() {
+        val blocks = parse("本文\n> 引用 1\n>引用 2\n\n次の段落")
+        assertEquals(3, blocks.size)
+        assertEquals(MdBlock.Paragraph("本文"), blocks[0])
+        assertEquals(MdBlock.Quote("引用 1\n引用 2"), blocks[1])
+        assertEquals(MdBlock.Paragraph("次の段落"), blocks[2])
+    }
 }

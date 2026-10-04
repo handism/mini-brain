@@ -81,6 +81,37 @@ class ChatRepositoryTest {
     }
 
     @Test
+    fun removeLastExchange_deletesQuestionAndAnswer() = runTest {
+        val question = ChatMessageEntity(id = 1L, sessionId = 5L, role = MessageRole.USER, content = "q")
+        val answer = ChatMessageEntity(id = 2L, sessionId = 5L, role = MessageRole.ASSISTANT, content = "a")
+        coEvery { messageDao.getRecentBySession(5L, 2) } returns listOf(answer, question)
+        coEvery { messageDao.deleteByIds(any()) } returns Unit
+
+        assertEquals("q", repository.removeLastExchange(5L))
+        coVerify { messageDao.deleteByIds(listOf(2L, 1L)) }
+    }
+
+    @Test
+    fun removeLastExchange_deletesUnansweredQuestion() = runTest {
+        val answer = ChatMessageEntity(id = 1L, sessionId = 5L, role = MessageRole.ASSISTANT, content = "a")
+        val question = ChatMessageEntity(id = 2L, sessionId = 5L, role = MessageRole.USER, content = "q")
+        coEvery { messageDao.getRecentBySession(5L, 2) } returns listOf(question, answer)
+        coEvery { messageDao.deleteByIds(any()) } returns Unit
+
+        assertEquals("q", repository.removeLastExchange(5L))
+        coVerify { messageDao.deleteByIds(listOf(2L)) }
+    }
+
+    @Test
+    fun removeLastExchange_withoutQuestionDoesNothing() = runTest {
+        val answer = ChatMessageEntity(id = 1L, sessionId = 5L, role = MessageRole.ASSISTANT, content = "a")
+        coEvery { messageDao.getRecentBySession(5L, 2) } returns listOf(answer)
+
+        assertEquals(null, repository.removeLastExchange(5L))
+        coVerify(exactly = 0) { messageDao.deleteByIds(any()) }
+    }
+
+    @Test
     fun createSession_insertsAndReturnsId() = runTest {
         coEvery { sessionDao.insert(any()) } returns 30L
 
