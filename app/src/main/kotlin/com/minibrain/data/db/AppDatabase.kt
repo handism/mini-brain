@@ -90,9 +90,17 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+// チャンクの埋め込み入力に「パス > 見出し」を足した（ADR-038）。次回 indexFolder() で全文書を
+// 埋め込み直すため contentHash だけ変える。chunks は消さないので、再インデックスまでは旧ベクトルで検索できる。
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("UPDATE documents SET contentHash = '__REINDEX_REQUIRED_V7__'")
+    }
+}
+
 @Database(
     entities = [DocumentEntity::class, ChunkEntity::class, ChatSessionEntity::class, ChatMessageEntity::class, FolderEmbeddingEntity::class, ChunkFtsEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -113,7 +121,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minibrain.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

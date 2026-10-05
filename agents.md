@@ -99,6 +99,7 @@
 - `indexFolder` / `clearFolder` は `DocumentRepository.indexMutex` で直列化されます（Home / Settings からの同時実行で挿入・削除が競合しないため）。`indexFolder` は失敗時に例外を投げず `IndexingState.Error` を出します（キャンセルのみ再送出）。
 - `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
+- チャンクの埋め込み入力は `Chunk.embeddingText()`（「パス > 見出し」+ 改行 + 本文）です。DB の `text` と FTS には付けません。作り方を変えたら既存ベクトルと混ざらないよう、DB を上げて `contentHash` を書き換えるマイグレーションを足してください（`MIGRATION_6_7`、ADR-038）。
 - `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
 
 **チューニング定数**

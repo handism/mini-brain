@@ -646,7 +646,7 @@ class DocumentRepositoryTest {
             io.mockk.unmockkStatic(android.net.Uri::class)
         }
 
-        io.mockk.coVerify(exactly = 1) { embedder.embedAll(listOf("text0", "text1", "text2"), any()) }
+        io.mockk.coVerify(exactly = 1) { embedder.embedAll(listOf("h0\ntext0", "h1\ntext1", "h2\ntext2"), any()) }
         io.mockk.coVerify(exactly = 0) { embedder.embed(any(), any()) }
         io.mockk.coVerify { chunkDao.insertAll(match<List<com.minibrain.data.db.entities.ChunkEntity>> { it.size == 3 }) }
     }

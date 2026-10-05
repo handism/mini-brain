@@ -296,12 +296,12 @@ class DocumentRepository(
 
     // まとめて embed し、失敗したら 1 件ずつに切り替えて壊れたチャンクだけを捨てる
     private suspend fun embedBatch(batch: List<Chunk>, relativePath: String): List<Pair<Chunk, FloatArray>> {
-        runCatchingCancellable { embedder.embedAll(batch.map { it.text }, EmbedType.PASSAGE) }
+        runCatchingCancellable { embedder.embedAll(batch.map { it.embeddingText() }, EmbedType.PASSAGE) }
             .onSuccess { return batch.zip(it) }
             .onFailure { e -> Timber.tag(TAG).w(e, "batch embed failed, falling back to single: $relativePath") }
 
         return batch.mapNotNull { chunk ->
-            runCatchingCancellable { chunk to embedder.embed(chunk.text, EmbedType.PASSAGE) }
+            runCatchingCancellable { chunk to embedder.embed(chunk.embeddingText(), EmbedType.PASSAGE) }
                 .onFailure { e -> Timber.tag(TAG).e(e, "embed failed: $relativePath / ${chunk.headingPath}") }
                 .getOrNull()
         }

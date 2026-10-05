@@ -3,7 +3,19 @@ package com.minibrain.data.md
 data class Chunk(
     val headingPath: String,
     val text: String,
-)
+) {
+    /**
+     * 埋め込みに渡す文字列。本文の前に「パス > 見出し」を付け、2 つ目以降のチャンクでも
+     * 何の話かがベクトルに残るようにする（ADR-038）。DB の text / FTS には付けない。
+     * 拡張子は意味を持たないので落とす。512 トークンを超えたら末尾が切れるので、文脈は先頭に置く。
+     */
+    fun embeddingText(): String =
+        "${headingPath.replace(MD_EXTENSION_REGEX, "")}\n$text"
+
+    private companion object {
+        val MD_EXTENSION_REGEX = Regex("""\.md(?= > |$)""", RegexOption.IGNORE_CASE)
+    }
+}
 
 object MarkdownChunker {
 
