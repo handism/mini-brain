@@ -208,7 +208,7 @@ class ChunkDaoTest {
         stmt.bindString(3, "Title")
         stmt.executeInsert()
 
-        val results = chunkDao.bm25Search("apple", 10)
+        val results = chunkDao.bm25SearchByTree("apple", "content://tree/1", 10)
         assertEquals(1, results.size)
         assertEquals(ids[0], results[0].id)
 
@@ -237,18 +237,49 @@ class ChunkDaoTest {
         stmt.executeInsert()
 
         // Verify initial FTS search works
-        val initialResults = chunkDao.bm25Search("apple", 10)
+        val initialResults = chunkDao.bm25SearchByTree("apple", "content://tree/1", 10)
         assertEquals(1, initialResults.size)
 
         // Delete FTS for docId1
         chunkDao.deleteFtsByDocIds(listOf(docId1))
 
         // Verify FTS search for apple (docId1) returns no results
-        val afterResults = chunkDao.bm25Search("apple", 10)
+        val afterResults = chunkDao.bm25SearchByTree("apple", "content://tree/1", 10)
         assertEquals(0, afterResults.size)
 
         // Verify FTS search for orange (docId2) still works
-        val otherResults = chunkDao.bm25Search("orange", 10)
+        val otherResults = chunkDao.bm25SearchByTree("orange", "content://tree/1", 10)
         assertEquals(1, otherResults.size)
     }
+
+    @Test
+    fun bm25SearchByTree_ranksByBm25NotByRowid() = runBlocking {
+        val ids = chunkDao.insertAll(listOf(
+            ChunkEntity(docId = docId1, headingPath = "Title", text = "a", embedding = byteArrayOf()),
+            ChunkEntity(docId = docId1, headingPath = "Title", text = "b", embedding = byteArrayOf()),
+            ChunkEntity(docId = docId2, headingPath = "Title", text = "c", embedding = byteArrayOf()),
+        ))
+        val stmt = db.openHelper.writableDatabase.compileStatement("INSERT INTO chunks_fts(rowid, text_bigram, heading_bigram) VALUES (?, ?, ?)")
+        listOf(
+            "apple cherry",
+            "banana apple apple apple apple apple",
+            "banana banana",
+        ).forEachIndexed { i, text ->
+            stmt.bindLong(1, ids[i])
+            stmt.bindString(2, text)
+            stmt.bindString(3, "title")
+            stmt.executeInsert()
+        }
+
+        // 後から入れた短く出現数の多い行が先に来る（rowid 順ではない）
+        val ranked = chunkDao.bm25SearchByTree("\"banana\"", "content://tree/1", 10)
+        assertEquals(listOf(ids[2], ids[1]), ranked.map { it.id })
+
+        val top1 = chunkDao.bm25SearchByTree("\"banana\"", "content://tree/1", 1)
+        assertEquals(listOf(ids[2]), top1.map { it.id })
+
+        // 別の tree の行は返さない
+        assertEquals(emptyList<Long>(), chunkDao.bm25SearchByTree("\"banana\"", "content://tree/other", 10).map { it.id })
+    }
 }
+

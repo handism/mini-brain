@@ -78,8 +78,8 @@ class SearchRequestCacheTest {
         override suspend fun deleteFtsByDocIds(docIds: List<Long>) {}
         override suspend fun deleteAllByTree(treeUri: String) {}
 
-        override suspend fun bm25Search(matchQuery: String, limit: Int): List<ChunkEntity> = emptyList()
-        override suspend fun bm25SearchByTree(matchQuery: String, treeUri: String, limit: Int): List<ChunkEntity> = emptyList()
+        override suspend fun _ftsMatchInfoByTree(matchQuery: String, treeUri: String): List<com.minibrain.data.search.FtsMatchInfo> = emptyList()
+        override suspend fun _getByIds(ids: List<Long>): List<ChunkEntity> = emptyList()
         override fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity> = emptyList()
     }
 

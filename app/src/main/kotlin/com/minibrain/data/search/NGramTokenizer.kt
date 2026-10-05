@@ -93,9 +93,20 @@ object NGramTokenizer {
         }
     }
 
+    /**
+     * 検索用のトークン。インデックスと同じ分割から、2 文字以上の語があるときは日本語の 1 文字トークンを外す。
+     * 「の」「に」のような 1 文字はほぼ全チャンクに当たり、ヒット件数と採点の手間を増やすだけなので（ADR-040）。
+     * 「歯」のような 1 文字だけのクエリでは 1 文字トークンを残す。
+     */
+    internal fun toQueryTokens(text: String): List<String> {
+        val tokens = toBigrams(text).split(" ").filter { it.isNotBlank() }.distinct()
+        val isCjkUnigram = { t: String -> t.length == 1 && t[0].code >= 128 }
+        return if (tokens.any { !isCjkUnigram(it) }) tokens.filterNot(isCjkUnigram) else tokens
+    }
+
     /** FTS4 の MATCH 式を構築する。トークンが空なら null を返す。 */
     fun toFtsMatchQuery(text: String): String? {
-        val tokens = toBigrams(text).split(" ").filter { it.isNotBlank() }
+        val tokens = toQueryTokens(text)
         if (tokens.isEmpty()) return null
         // Limit the number of tokens to prevent SQLite FTS Match Query injection/DoS
         // creating an expression tree that is too large.

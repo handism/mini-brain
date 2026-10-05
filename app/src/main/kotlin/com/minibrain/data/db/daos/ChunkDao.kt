@@ -6,6 +6,8 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.minibrain.data.db.entities.ChunkEntity
+import com.minibrain.data.search.Bm25Scorer
+import com.minibrain.data.search.FtsMatchInfo
 import kotlinx.coroutines.flow.Flow
 
 data class DocChunkCount(
@@ -81,19 +83,28 @@ interface ChunkDao {
     """)
     suspend fun deleteFtsByTree(treeUri: String)
 
+    // matchinfo は FTS の MATCH を直接引くクエリでしか使えないので、サブクエリ側で取る
     @Query("""
-        SELECT chunks.* FROM chunks
-        JOIN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH :matchQuery) AS fts ON chunks.id = fts.rowid
-        LIMIT :limit
-    """)
-    suspend fun bm25Search(matchQuery: String, limit: Int): List<ChunkEntity>
-
-    @Query("""
-        SELECT chunks.* FROM chunks
-        JOIN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH :matchQuery) AS fts ON chunks.id = fts.rowid
+        SELECT fts.rowid AS chunkId, fts.info AS info FROM (
+            SELECT rowid, matchinfo(chunks_fts, 'pcnalx') AS info FROM chunks_fts WHERE chunks_fts MATCH :matchQuery
+        ) AS fts
+        JOIN chunks ON chunks.id = fts.rowid
         JOIN documents ON chunks.docId = documents.id
         WHERE documents.treeUri = :treeUri
-        LIMIT :limit
     """)
-    suspend fun bm25SearchByTree(matchQuery: String, treeUri: String, limit: Int): List<ChunkEntity>
+    suspend fun _ftsMatchInfoByTree(matchQuery: String, treeUri: String): List<FtsMatchInfo>
+
+    @Query("SELECT * FROM chunks WHERE id IN (:ids)")
+    suspend fun _getByIds(ids: List<Long>): List<ChunkEntity>
+
+    /**
+     * MATCH した chunk を BM25 の高い順に最大 limit 件返す（ADR-040）。
+     * FTS4 は順位を付けないため、全ヒットの matchinfo を取って Kotlin 側で採点する。個人用途の規模（数千チャンク）が前提。
+     */
+    suspend fun bm25SearchByTree(matchQuery: String, treeUri: String, limit: Int): List<ChunkEntity> {
+        val ids = Bm25Scorer.rank(_ftsMatchInfoByTree(matchQuery, treeUri), limit)
+        if (ids.isEmpty()) return emptyList()
+        val byId = _getByIds(ids).associateBy { it.id }
+        return ids.mapNotNull { byId[it] }
+    }
 }
