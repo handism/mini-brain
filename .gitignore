@@ -30,3 +30,6 @@ local.properties
 
 # Kotlin コンパイラキャッシュ
 .kotlin/
+
+# 検索評価セット（個人ノートのパスを含むため）
+/eval/
