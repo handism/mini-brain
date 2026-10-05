@@ -39,7 +39,7 @@ class NGramTokenizerTest {
 
         assertTrue(tokens.contains("hello"))
         assertTrue(tokens.contains("歯"))
-        assertTrue(tokens.contains("袋"))
+        assertTrue(tokens.contains("車"))
         assertTrue(tokens.contains("歯車"))
     }
     @Test
@@ -56,7 +56,7 @@ class NGramTokenizerTest {
     @Test
     fun `検索トークンは 2 文字以上があれば日本語の 1 文字を外す`() {
         val tokens = NGramTokenizer.toQueryTokens("カレーの記録")
-        assertTrue(tokens.contains("サウ"))
+        assertTrue(tokens.contains("カレ"))
         assertTrue(tokens.none { it.length == 1 })
     }
 

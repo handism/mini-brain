@@ -1,27 +1,10 @@
 [
-  {
-    "id": "sample-1",
-    "query": "ソラリスについて教えて",
-    "expected": ["companies/ソラリス.md"]
-  },
-  {
-    "id": "sample-2",
-    "query": "スパイス堂にいつ行ったっけ？",
-    "expected": ["food/スパイス堂.md"]
-  },
-  {
-    "id": "sample-3",
-    "query": "5年前の3月何してた？",
-    "expected": ["journal/2021-03.md"]
-  },
-  {
-    "id": "sample-4",
-    "query": "去年の冬何してたっけ？",
-    "expected": ["journal/2024-12.md", "journal/2025-01.md", "journal/2025-02.md"]
-  },
-  {
-    "id": "sample-5",
-    "query": "去年の夏に何かイベントあったっけ？",
-    "expected": ["journal/2024-07.md", "journal/2024-08.md"]
-  }
+  { "id": "topic-07", "note": "店名（ファイル名に【地名】の接頭辞）", "query": "スパイス堂ってどんな店？", "expected": ["food/店/【神保町】スパイス堂.md"] },
+  { "id": "when-02", "note": "固有名詞 + いつ（本文の「初回訪問日:」）", "query": "スパイス堂に初めて行ったのはいつ？", "expected": ["food/店/【神保町】スパイス堂.md"] },
+  { "id": "date-01", "note": "YYYY-MM-DD", "query": "2026-09-15 に何があった？", "expected": ["daily/2026-09-15.md"] },
+  { "id": "period-02", "note": "四半期", "query": "2025年Q3を振り返りたい", "expected": ["journal/2025-07.md", "journal/2025-08.md", "journal/2025-09.md"] },
+  { "id": "sem-04", "note": "長いノートの後半の節", "query": "オフライン中の編集がサーバー側の変更とぶつかったらどうする？", "expected": ["work/projects/オフライン同期.md"] },
+  { "id": "kw-01", "note": "エラーコード（BM25 向き）", "query": "INSTALL_FAILED_UPDATE_INCOMPATIBLE の対処法", "expected": ["tech/トラブルシュート/adb.md"] },
+  { "id": "neg-01", "note": "紛らわしい隣接ノート（Flow ↔ コルーチン）", "query": "stateIn と shareIn の使い分け", "expected": ["tech/Kotlin/Flow.md"] },
+  { "id": "multi-03", "note": "比較", "query": "北海道旅行と沖縄旅行の違い", "expected": ["travel/北海道.md", "travel/沖縄.md"] }
 ]

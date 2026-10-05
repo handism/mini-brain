@@ -225,9 +225,9 @@ finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECA
 
 `app/src/main/kotlin/com/minibrain/eval/` に Precision@K / Recall@K / MRR / 候補 Recall を計測する評価フレームを同梱。チューニング（VECTOR_MIN_SCORE、RRF 重み、チャンクの作り方など）の前後で同じ評価セットを流し、数字で比べる。
 
-1. 「質問 → 正解ファイル（フォルダからの相対パス）」の JSON を作る（`assets/eval/queries.sample.json` が書式見本。個人ノートのパスを含むのでリポジトリには入れない）。
+1. 「質問 → 正解ファイル（フォルダからの相対パス）」の JSON を作る（`assets/eval/queries.sample.json` が書式見本。評価用の架空ノート群から抜き出した 8 件。`note` は意図のメモでアプリは読まない。個人ノートのパスを含む評価セットはリポジトリに入れない）。
    ```json
-   [{ "id": "q1", "query": "スパイス堂にいつ行ったっけ？", "expected": ["food/スパイス堂.md"] }]
+   [{ "id": "when-02", "query": "スパイス堂に初めて行ったのはいつ？", "expected": ["food/店/【神保町】スパイス堂.md"] }]
    ```
 2. 端末に置き、設定 → 開発者 →「検索精度の評価」で選んで実行する（1 件 10〜20 秒ほど）。
 3. 結果をコピーし、施策の前後で並べる。取りこぼしは「候補に無い」（検索で拾えていない）と「絞り込みで落ちた」（Reranker が落とした）に分けて出る。
