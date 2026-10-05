@@ -1,5 +1,6 @@
 package com.minibrain.ai.agent
 
+import com.minibrain.util.DateValidator
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -21,6 +22,14 @@ object DateResolver {
     private val N_YEARS_AGO_MONTH_RE = Regex("""(\d+)\s*年[前まえ]の(\d{1,2})月""")
     private val N_YEARS_AGO_SEASON_RE = Regex("""(\d+)\s*年[前まえ](?:の)?(春|夏|秋|冬)""")
     private val RELATIVE_SEASON_RE = Regex("""(去年|昨年|一昨年|今年)(?:の)?(春|夏|秋|冬)""")
+    private val YEAR_SEASON_RE = Regex("""(\d{4})年(?:の)?(春|夏|秋|冬)""")
+
+    // 年まで入った特定の日付。1 日だけの期間として扱い、日付ヒットを先頭に固定させる（ADR-042）
+    private val FULL_DATE_RES = listOf(
+        Regex("""(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)"""),
+        Regex("""(?<!\d)(\d{4})年(\d{1,2})月(\d{1,2})日"""),
+        Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
+    )
 
     // 曜日指定: 先週の月/火/水/木/金/土/日（曜日?）
     private val LAST_WEEK_DOW_RE = Regex("""先週(?:の)?(月|火|水|木|金|土|日)(?:曜日?)?""")
@@ -202,13 +211,27 @@ object DateResolver {
     }
 
     fun resolveDateRange(question: String, today: LocalDate = LocalDate.now()): DateRange? {
-        return resolveEraRange(question, today)
+        return resolveFullDateRange(question)
+            ?: resolveEraRange(question, today)
             ?: resolveQuarterRange(question, today)
             ?: resolveNYearsAgoRange(question, today)
             ?: resolveYearMonthRange(question, today)
             ?: resolveRelativeSeasonRange(question, today)
+            ?: resolveYearSeasonRange(question, today)
             ?: resolveRelativeDateRange(question, today)
             ?: resolveYearOnlyRange(question, today)
+    }
+
+    private fun resolveFullDateRange(question: String): DateRange? {
+        for (re in FULL_DATE_RES) {
+            for (match in re.findAll(question)) {
+                val (y, m, d) = match.destructured
+                // 8 桁の注文番号などを日付と取り違えないよう、実在する日付かつ年の範囲内だけ採る
+                val date = DateValidator.parseDay(y, m, d)?.let(LocalDate::parse) ?: continue
+                return DateRange(date, date)
+            }
+        }
+        return null
     }
 
     private fun resolveEraRange(question: String, today: LocalDate): DateRange? {
@@ -298,6 +321,13 @@ object DateResolver {
                 else -> today.year - 1
             }
             return seasonRange(match.groupValues[2], year, today)
+        }
+        return null
+    }
+
+    private fun resolveYearSeasonRange(question: String, today: LocalDate): DateRange? {
+        YEAR_SEASON_RE.find(question)?.let { match ->
+            return seasonRange(match.groupValues[2], match.groupValues[1].toInt(), today)
         }
         return null
     }

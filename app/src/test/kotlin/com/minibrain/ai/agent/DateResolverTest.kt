@@ -252,6 +252,41 @@ class DateResolverTest {
     }
 
     @Test
+    fun `resolveDateRange full date resolves to a single day`() {
+        val day = LocalDate.of(2024, 9, 23)
+        for (q in listOf("20240923 のメモ", "2024-09-23 に何があった？", "2024/9/23 の記録", "2024年9月23日の日記")) {
+            assertEquals(q, DateRange(day, day), DateResolver.resolveDateRange(q, today))
+        }
+    }
+
+    @Test
+    fun `resolveDateRange ignores 8 digits that are not a valid date`() {
+        // 13 月・年の範囲外は日付として扱わない（注文番号などの取り違え防止）
+        assertNull(DateResolver.resolveDateRange("注文 20241323 の件", today))
+        assertNull(DateResolver.resolveDateRange("12345678 の件", today))
+    }
+
+    @Test
+    fun `resolveDateRange year with season`() {
+        assertEquals(
+            DateRange(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 8, 31)),
+            DateResolver.resolveDateRange("2024年の夏は何をしてた？", today),
+        )
+        assertEquals(
+            DateRange(LocalDate.of(2024, 12, 1), LocalDate.of(2025, 2, 28)),
+            DateResolver.resolveDateRange("2024年冬", today),
+        )
+    }
+
+    @Test
+    fun `resolveDateRange year with season is clipped to today`() {
+        assertEquals(
+            DateRange(LocalDate.of(2025, 6, 1), today),
+            DateResolver.resolveDateRange("2025年の夏", today),
+        )
+    }
+
+    @Test
     fun `resolveDateRange unknown expression returns null`() {
         val range = DateResolver.resolveDateRange("ランダムな文章", today)
         assertNull(range)
