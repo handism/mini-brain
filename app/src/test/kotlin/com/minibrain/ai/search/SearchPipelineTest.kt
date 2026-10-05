@@ -282,4 +282,29 @@ class SearchPipelineTest {
 
         coVerify(exactly = 1) { ragPipeline.prefetchQueryEmbeddings(listOf("original", "a", "b", "hyde"), cache) }
     }
+
+    @Test
+    fun `BM25 候補にも relativePath が付き、Reranker 前の候補が結果に残る`() = runTest {
+        val query = "ビーフカレー"
+        val treeUri = "tree/uri"
+
+        coEvery { queryExpander.expand(query) } returns listOf(query)
+        coEvery { hyde.generateHypothetical(query) } returns null
+        coEvery { cache.documents() } returns listOf(
+            DocumentEntity(id = 9, treeUri = treeUri, fileUri = "uri9", fileName = "note.md", relativePath = "food/note.md", lastModified = 0L, contentHash = "", firstParagraph = "", documentDate = null)
+        )
+        coEvery { cache.firstChunkOf(any()) } returns null
+        coEvery { cache.treeUri } returns treeUri
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns listOf(
+            ChunkEntity(id = 1, docId = 9, text = "ビーフカレーが最高", embedding = ByteArray(0), headingPath = "food/note.md > 感想")
+        )
+        coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
+        coEvery { llmReranker.rerank(query, any(), any()) } returns emptyList()
+
+        val result = searchPipeline.search(query, treeUri, cache = cache)
+
+        val bm25 = result.candidates.single { it.source == SourceType.BM25 }
+        assertEquals("food/note.md", bm25.relativePath)
+    }
 }
+

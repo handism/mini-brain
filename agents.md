@@ -103,6 +103,7 @@
 - `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
 
 **チューニング定数**
+- `LlmReranker` は RRF 上位 `CANDIDATE_LIMIT = 20` 件を、本文 `SNIPPET_MAX_CHARS = 300` 字ずつで判定します。件数と字数はプロンプト量（約 2,500 トークン）とのトレードオフなので、片方を増やすなら片方を減らしてください。BM25 のスニペット長（`SearchPipeline.SNIPPET_CHARS`）もこれに揃えています（ADR-039）。
 - `mergeCandidatesRrf(weights=...)` の重みは `[meta=1.5, vector=1.0, bm25=1.2]`。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新すること。
 - `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新すること。
 - `SearchPipeline.search` は `dateRange != null` かつ `dateRangeSearch` ヒットありのとき、上位 `DATE_RANGE_PIN_COUNT = 5` 件を Reranker 結果の先頭に強制マージします（ADR-025）。`docId::headingPath` で dedupe し、後段は Reranker 順を維持、最終的に `RERANK_TOP_K = 10` で切ります。`RRF_WEIGHTS` は変更しません（他クエリの順位を壊さないため）。

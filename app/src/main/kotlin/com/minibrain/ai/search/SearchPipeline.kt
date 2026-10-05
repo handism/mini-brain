@@ -55,7 +55,8 @@ class SearchPipeline(
         // ベクトル候補の最低類似度スコア。E5（L2 正規化済）のコサインで概ね 0.40〜0.50 が境界。
         // 低スコアは Reranker のノイズ源になるため、ここで除外する（ADR-023）。
         private const val VECTOR_MIN_SCORE = 0.45f
-        private const val SNIPPET_CHARS = 200
+        // BM25 候補のスニペット長。Reranker が読む長さ（LlmReranker.SNIPPET_MAX_CHARS）に揃える（ADR-039）
+        private const val SNIPPET_CHARS = 300
         private const val RRF_K = 60
         // RRF 重み（[meta, vector, bm25]）。Metadata 完全一致 > BM25 > Vector の順。
         private val RRF_WEIGHTS = listOf(1.5f, 1.0f, 1.2f)
@@ -175,7 +176,7 @@ class SearchPipeline(
         return coroutineScope {
             // 展開クエリごとに BM25 を並行実行（SQLite の読み取りは並列可）。awaitAll は順序を保つ
             val bm25Job = async(Dispatchers.IO) {
-                expanded.map { q -> async { bm25Search(q, treeUri) } }.awaitAll().flatten()
+                expanded.map { q -> async { bm25Search(q, treeUri, ctx) } }.awaitAll().flatten()
             }
             // 日付範囲検索（DateResolver 経由）とメタデータ検索。
             // dateRangeHits は Reranker 後段の pin 注入でも再利用するため別々に返す
@@ -258,13 +259,17 @@ class SearchPipeline(
         } else reranked
     }
 
-    private suspend fun bm25Search(query: String, treeUri: String): List<Citation> {
+    private suspend fun bm25Search(query: String, treeUri: String, ctx: SearchRequestCache): List<Citation> {
         val chunks = chunkDao.bm25SearchOrEmpty(query, treeUri, BM25_PER_QUERY_LIMIT)
+        if (chunks.isEmpty()) return emptyList()
+        // relativePath が無いと、BM25 だけで拾えた候補が評価で取りこぼし扱いになる（ADR-039）
+        val pathsByDocId = ctx.documents().associate { it.id to it.relativePath }
         return chunks.map { chunk ->
             Citation(
                 headingPath = chunk.headingPath,
                 snippet = chunk.text.take(SNIPPET_CHARS),
                 docId = chunk.docId,
+                relativePath = pathsByDocId[chunk.docId],
                 source = SourceType.BM25,
             )
         }

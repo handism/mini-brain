@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import timber.log.Timber
@@ -191,4 +193,51 @@ class LlmRerankerTest {
         assertEquals(2, result.size)
         assertEquals(candidates.take(2), result)
     }
+
+    private fun capturePrompt(candidates: List<Citation>, query: String = "query"): String {
+        val prompt = io.mockk.slot<String>()
+        every { llmService.isReady() } returns true
+        coEvery { llmService.generateStream(capture(prompt)) } returns flowOf("[0]")
+        kotlinx.coroutines.runBlocking { reranker.rerank(query, candidates, topK = 3) }
+        return prompt.captured
+    }
+
+    @Test
+    fun `プロンプトに載せる候補は CANDIDATE_LIMIT 件まで`() {
+        val prompt = capturePrompt(createCandidates(LlmReranker.CANDIDATE_LIMIT + 5))
+        val last = LlmReranker.CANDIDATE_LIMIT - 1
+        assertTrue(prompt.contains("[$last] "))
+        assertFalse(prompt.contains("[${last + 1}] "))
+    }
+
+    @Test
+    fun `スニペットは SNIPPET_MAX_CHARS 字まで載る`() {
+        val long = "あ".repeat(LlmReranker.SNIPPET_MAX_CHARS + 50)
+        val candidates = createCandidates(5).map { it.copy(snippet = long) }
+        val prompt = capturePrompt(candidates)
+        assertTrue(prompt.contains("snippet=" + "あ".repeat(LlmReranker.SNIPPET_MAX_CHARS) + "\n"))
+    }
+
+    @Test
+    fun `見出しにパスが含まれるときは path を重ねて出さない`() {
+        val candidates = listOf(
+            Citation(headingPath = "food/a.md > 感想", snippet = "s", relativePath = "food/a.md"),
+            Citation(headingPath = "（フォルダ）", snippet = "s", relativePath = "food"),
+        ) + createCandidates(3)
+        val prompt = capturePrompt(candidates)
+        assertTrue(prompt.contains("[0] heading=\"food/a.md > 感想\""))
+        assertTrue(prompt.contains("[1] path=food heading="))
+    }
+
+    @Test
+    fun `LLM が同じインデックスを重ねて返しても重複しない`() = runTest {
+        val candidates = createCandidates(5)
+        every { llmService.isReady() } returns true
+        coEvery { llmService.generateStream(any()) } returns flowOf("[2, 2, 0]")
+
+        val result = reranker.rerank("query", candidates, topK = 3)
+
+        assertEquals(listOf(candidates[2], candidates[0], candidates[1]), result)
+    }
 }
+

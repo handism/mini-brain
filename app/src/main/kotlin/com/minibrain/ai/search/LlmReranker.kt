@@ -13,8 +13,10 @@ class LlmReranker(private val llmService: LlmService) {
 
     companion object {
         private const val TAG = "LlmReranker"
-        private const val SNIPPET_MAX_CHARS = 140
-        private const val CANDIDATE_LIMIT = 30
+        // 候補を 30 → 20 件に減らし、その分スニペットを 140 → 300 字に広げた（ADR-039）。
+        // 見出しに含まれるパスを重ねて出さないこともあわせ、プロンプトの総量は従来とほぼ同じ（約 2,500 トークン）
+        internal const val SNIPPET_MAX_CHARS = 300
+        internal const val CANDIDATE_LIMIT = 20
         private const val DEFAULT_TOP_K = 10
         private val DIGITS_REGEX = Regex("""\d+""")
     }
@@ -43,6 +45,7 @@ class LlmReranker(private val llmService: LlmService) {
         if (indices.isEmpty()) return candidates.take(topK)
 
         val reranked = indices
+            .distinct()
             .mapNotNull { limited.getOrNull(it) }
             .take(topK)
 
@@ -60,7 +63,7 @@ class LlmReranker(private val llmService: LlmService) {
         val sb = StringBuilder()
         sb.appendLine("以下の検索候補から、クエリに最も関連する上位${topK}件のインデックスを関連度の高い順にJSON配列で出力してください。")
         sb.appendLine("説明やコメントは不要で、JSON配列のみ出力してください。")
-        sb.appendLine("判断材料: path（ファイル位置）/ heading（見出し階層）/ date（文書日付があれば）/ topic（ファイル名がクエリと一致したか）/ source（METADATA は完全一致、VECTOR は意味類似）/ snippet（本文抜粋）を総合して関連度を採点してください。")
+        sb.appendLine("判断材料: heading（ファイルパス > 見出し階層）/ date（文書日付があれば）/ topic（ファイル名がクエリと一致したか）/ source（METADATA は完全一致、VECTOR は意味類似）/ snippet（本文抜粋）を総合して関連度を採点してください。")
         if (DateResolver.isDateQuery(query)) {
             // date フィールドを優先しつつ、topic=match の候補は本文中に日付表記があるケースを
             // 想定して同等以上に扱う（ADR-026）。「スパイス堂にいつ行ったっけ」のような固有名詞 +
@@ -73,11 +76,13 @@ class LlmReranker(private val llmService: LlmService) {
         candidates.forEachIndexed { i, c ->
             val (date, rest) = DatePrefix.split(c.snippet)
             val body = rest.take(SNIPPET_MAX_CHARS).replace('\n', ' ')
-            val path = c.relativePath ?: "?"
+            // headingPath は通常「相対パス > 見出し」なので、パスが見出しに含まれないときだけ別に出す
+            val path = c.relativePath
+            val pathPart = if (path != null && !c.headingPath.startsWith(path)) " path=$path" else ""
             val source = c.source.name
             val datePart = if (date != null) " date=$date" else ""
             val topicPart = if (c.topicMatch) " topic=match" else ""
-            sb.appendLine("[$i] path=$path heading=\"${c.headingPath}\"$datePart$topicPart source=$source snippet=$body")
+            sb.appendLine("[$i]$pathPart heading=\"${c.headingPath}\"$datePart$topicPart source=$source snippet=$body")
         }
         sb.appendLine()
         sb.appendLine("出力（JSON配列のみ、例: [3, 0, 7, ...]）:")
