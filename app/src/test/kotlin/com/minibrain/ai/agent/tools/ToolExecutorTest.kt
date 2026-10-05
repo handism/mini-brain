@@ -220,7 +220,7 @@ class ToolExecutorTest {
 
         assertEquals(1, result.citations.size)
         assertEquals("notes/a.md", result.citations[0].relativePath)
-        io.mockk.coVerify(exactly = 0) { chunkDao.bm25Search(any(), any()) }
+        io.mockk.coVerify(exactly = 1) { chunkDao.bm25SearchByTree(any(), treeUri, any()) }
     }
 
     @Test

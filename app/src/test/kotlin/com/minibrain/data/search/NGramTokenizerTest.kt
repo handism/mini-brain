@@ -52,4 +52,22 @@ class NGramTokenizerTest {
         val result = NGramTokenizer.toFtsMatchQuery("hello\"world")
         assertEquals("\"hello\" OR \"world\"", result!!)
     }
+
+    @Test
+    fun `検索トークンは 2 文字以上があれば日本語の 1 文字を外す`() {
+        val tokens = NGramTokenizer.toQueryTokens("カレーの記録")
+        assertTrue(tokens.contains("サウ"))
+        assertTrue(tokens.none { it.length == 1 })
+    }
+
+    @Test
+    fun `1 文字だけのクエリは 1 文字トークンを残す`() {
+        assertEquals(listOf("歯"), NGramTokenizer.toQueryTokens("歯"))
+    }
+
+    @Test
+    fun `英単語は 1 文字でも残す`() {
+        assertEquals(listOf("c", "言語"), NGramTokenizer.toQueryTokens("C 言語"))
+    }
 }
+

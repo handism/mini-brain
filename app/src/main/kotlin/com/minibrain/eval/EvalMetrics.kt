@@ -39,6 +39,10 @@ data class PerCaseResult(
     val retrievedPaths: List<String> = emptyList(),
     val durationMs: Long = 0L,
     val error: String? = null,
+    /** ベクトル検索で正解ファイルのチャンクが取った最高類似度。ベクトルで拾えていなければ null */
+    val expectedVectorScore: Double? = null,
+    /** ベクトル検索で正解以外のチャンクが取った最高類似度。VECTOR_MIN_SCORE の見直しに使う（ADR-040） */
+    val otherVectorScore: Double? = null,
 )
 
 /** 1 ケース分の検索結果。candidates が null なら citations を候補とみなす。 */
@@ -48,6 +52,8 @@ data class EvalObservation(
     val candidates: List<Citation>? = null,
     val durationMs: Long = 0L,
     val error: String? = null,
+    /** しきい値を通ったベクトル検索の結果（score は類似度） */
+    val vectorHits: List<Citation> = emptyList(),
 )
 
 object EvalMetrics {
@@ -108,6 +114,8 @@ object EvalMetrics {
         val candidateHits = expected.filter { it in candidatePaths }
         val candidateRecall = if (expected.isEmpty()) 1.0 else candidateHits.size.toDouble() / expected.size
 
+        val (expectedVec, otherVec) = obs.vectorHits.partition { it.relativePath?.lowercase() in expected }
+
         val missed = expected - hits
         return PerCaseResult(
             id = case.id,
@@ -122,6 +130,8 @@ object EvalMetrics {
             retrievedPaths = retrievedPaths.distinct(),
             durationMs = obs.durationMs,
             error = obs.error,
+            expectedVectorScore = expectedVec.maxOfOrNull { it.score.toDouble() },
+            otherVectorScore = otherVec.maxOfOrNull { it.score.toDouble() },
         )
     }
 }

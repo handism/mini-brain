@@ -161,4 +161,30 @@ class EvalMetricsTest {
         val unknown = EvalMetrics.findUnknownPaths(cases, listOf("notes/a.md", "b.md"))
         assertEquals(listOf("typo.md"), unknown)
     }
+
+    @Test
+    fun `ベクトル検索の類似度を正解と正解以外に分けて最高値を取る`() {
+        val obs = EvalObservation(
+            case = EvalCase("v", "q", listOf("a.md")),
+            citations = emptyList(),
+            vectorHits = listOf(
+                cit("a.md").copy(score = 0.81f),
+                cit("A.md").copy(score = 0.84f),
+                cit("x.md").copy(score = 0.86f),
+                cit("y.md").copy(score = 0.79f),
+            ),
+        )
+        val c = EvalMetrics.computeObservations(listOf(obs), k = 10).perCase.single()
+        assertEquals(0.84, c.expectedVectorScore!!, 1e-6)
+        assertEquals(0.86, c.otherVectorScore!!, 1e-6)
+    }
+
+    @Test
+    fun `ベクトルで拾えていなければ類似度は null`() {
+        val obs = EvalObservation(EvalCase("v", "q", listOf("a.md")), emptyList(), vectorHits = listOf(cit("x.md").copy(score = 0.8f)))
+        val c = EvalMetrics.computeObservations(listOf(obs), k = 10).perCase.single()
+        assertEquals(null, c.expectedVectorScore)
+        assertEquals(0.8, c.otherVectorScore!!, 1e-6)
+    }
 }
+

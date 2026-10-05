@@ -34,6 +34,8 @@ data class SearchPipelineResult(
     val traceEvents: List<AgentTraceEvent>,
     // RRF 融合後・Reranker 前の候補。評価で「候補に無い」と「絞り込みで落ちた」を分けるため
     val candidates: List<Citation> = emptyList(),
+    // しきい値を通ったベクトル検索の結果（類似度つき）。評価で VECTOR_MIN_SCORE を見直すため（ADR-040）
+    val vectorHits: List<Citation> = emptyList(),
 )
 
 class SearchPipeline(
@@ -123,7 +125,9 @@ class SearchPipeline(
             query, merged, dateRange, retrievalResult.dateRangeHits, onStatus, traceEvents
         )
 
-        return SearchPipelineResult(final, traceEvents, candidates = merged)
+        return SearchPipelineResult(
+            final, traceEvents, candidates = merged, vectorHits = retrievalResult.vectorCandidates,
+        )
     }
 
     private data class QueryExpansionResult(
@@ -198,7 +202,11 @@ class SearchPipeline(
 
             traceEvents += BM25SearchHitEvent(query, bm25Candidates.size)
             traceEvents += MetadataSearchHitEvent(metaCandidates.size)
-            traceEvents += VectorSearchHitEvent(query, vectorCandidates.size)
+            traceEvents += VectorSearchHitEvent(
+                query, vectorCandidates.size,
+                minScore = vectorCandidates.minOfOrNull { it.score },
+                maxScore = vectorCandidates.maxOfOrNull { it.score },
+            )
             Timber.tag(TAG).d("bm25=${bm25Candidates.size} meta=${metaCandidates.size} vector=${vectorCandidates.size}")
 
             RetrievalResult(bm25Candidates, metaCandidates, vectorCandidates, dateRangeHits)

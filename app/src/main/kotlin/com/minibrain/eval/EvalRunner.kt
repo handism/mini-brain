@@ -96,7 +96,10 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
             runCatchingCancellable { searchPipeline.search(case.query, treeUri) }
                 .fold(
                     onSuccess = {
-                        EvalObservation(case, it.citations, it.candidates, System.currentTimeMillis() - startedAt)
+                        EvalObservation(
+                            case, it.citations, it.candidates, System.currentTimeMillis() - startedAt,
+                            vectorHits = it.vectorHits,
+                        )
                     },
                     onFailure = {
                         Timber.tag(TAG).w(it, "eval case '${case.id}' failed")

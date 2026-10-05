@@ -60,7 +60,7 @@ private fun AgentTraceEventItem(event: AgentTraceEvent) {
         is BM25SearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_bm25), event.hitCount)
         is MetadataSearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_metadata), event.hitCount)
         is GrepSearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_grep), event.hitCount)
-        is VectorSearchHitEvent -> SearchHitItem(stringResource(R.string.trace_source_vector), event.hitCount)
+        is VectorSearchHitEvent -> VectorSearchHitItem(event)
         is CandidateMergeEvent -> CandidateMergeItem(event)
         is RerankEvent -> RerankItem(event)
         is CoverageCheckEvent -> CoverageCheckItem(event)
@@ -150,6 +150,26 @@ private fun HyDeGeneratedItem(event: HyDeGeneratedEvent) {
 private fun SearchHitItem(source: String, hitCount: Int) {
     Text(
         stringResource(R.string.trace_search_hits, source, hitCount),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun VectorSearchHitItem(event: VectorSearchHitEvent) {
+    val min = event.minScore
+    val max = event.maxScore
+    if (min == null || max == null) {
+        SearchHitItem(stringResource(R.string.trace_source_vector), event.hitCount)
+        return
+    }
+    Text(
+        stringResource(
+            R.string.trace_vector_hits,
+            event.hitCount,
+            String.format(java.util.Locale.US, "%.2f", min),
+            String.format(java.util.Locale.US, "%.2f", max),
+        ),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

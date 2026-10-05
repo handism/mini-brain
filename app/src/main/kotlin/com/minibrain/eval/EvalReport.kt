@@ -46,17 +46,35 @@ object EvalReport {
             }
         }
 
+        val expectedScores = result.perCase.mapNotNull { it.expectedVectorScore }
+        val otherScores = result.perCase.mapNotNull { it.otherVectorScore }
+        if (expectedScores.isNotEmpty() || otherScores.isNotEmpty()) {
+            appendLine()
+            appendLine("## ベクトル類似度")
+            appendLine("- 正解チャンクの最高類似度: ${scoreSummary(expectedScores)}")
+            appendLine("- 正解以外の最高類似度: ${scoreSummary(otherScores)}")
+        }
+
         appendLine()
         appendLine("## ケース別")
-        appendLine("| id | Recall | RR | 候補R | 秒 |")
-        appendLine("|---|---|---|---|---|")
+        appendLine("| id | Recall | RR | 候補R | 秒 | 正解類似度 | 他類似度 |")
+        appendLine("|---|---|---|---|---|---|---|")
         result.perCase.forEach { c ->
             appendLine(
                 "| ${c.id} | ${fmt(c.recallAtK)} | ${fmt(c.reciprocalRank)} | " +
-                    "${fmt(c.candidateRecall)} | ${formatSeconds(c.durationMs)} |"
+                    "${fmt(c.candidateRecall)} | ${formatSeconds(c.durationMs)} | " +
+                    "${c.expectedVectorScore?.let(::fmt) ?: "-"} | ${c.otherVectorScore?.let(::fmt) ?: "-"} |"
             )
         }
     }.trimEnd()
+
+    // 最小 / 中央値 / 最大（件数）
+    private fun scoreSummary(scores: List<Double>): String {
+        if (scores.isEmpty()) return "-"
+        val sorted = scores.sorted()
+        val median = sorted[sorted.size / 2]
+        return "最小 ${fmt(sorted.first())} / 中央値 ${fmt(median)} / 最大 ${fmt(sorted.last())}（${sorted.size} 件）"
+    }
 
     fun fmt(value: Double): String = String.format(Locale.US, "%.2f", value)
 

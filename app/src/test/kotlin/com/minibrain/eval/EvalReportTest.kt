@@ -43,4 +43,24 @@ class EvalReportTest {
         assertTrue(EvalReport.toMarkdown(result, "t", listOf("typo.md")).contains("## インデックスに無い正解パス\n- typo.md"))
         assertFalse(EvalReport.toMarkdown(result, "t").contains("インデックスに無い正解パス"))
     }
+
+    @Test
+    fun `ベクトル類似度の欄は類似度があるときだけ出す`() {
+        assertFalse(EvalReport.toMarkdown(result, "t").contains("## ベクトル類似度"))
+
+        val withVector = EvalMetrics.computeObservations(
+            listOf(
+                EvalObservation(
+                    EvalCase("v", "q", listOf("a.md")), listOf(cit("a.md")),
+                    vectorHits = listOf(cit("a.md").copy(score = 0.82f), cit("x.md").copy(score = 0.88f)),
+                ),
+            ),
+            k = 10,
+        )
+        val md = EvalReport.toMarkdown(withVector, "t")
+        assertTrue(md.contains("- 正解チャンクの最高類似度: 最小 0.82 / 中央値 0.82 / 最大 0.82（1 件）"))
+        assertTrue(md.contains("- 正解以外の最高類似度: 最小 0.88"))
+        assertTrue(md.contains("| v | 1.00 | 1.00 | 1.00 | 0.0 | 0.82 | 0.88 |"))
+    }
 }
+

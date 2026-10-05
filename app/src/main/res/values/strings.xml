@@ -87,6 +87,7 @@
     <string name="trace_source_metadata">メタデータ</string>
     <string name="trace_source_grep">Grep</string>
     <string name="trace_source_vector">ベクトル</string>
+    <string name="trace_vector_hits">ベクトル 検索: %1$d 件（類似度 %2$s〜%3$s）</string>
     <string name="trace_search_hits">%1$s 検索: %2$d 件</string>
     <string name="trace_merge">候補を統合: %1$d 件</string>
     <string name="trace_rerank">再ランク: %1$d → %2$d 件</string>
