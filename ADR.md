@@ -1516,3 +1516,26 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - 1 クエリごとに全ヒットの matchinfo を読む。1 文字トークンを外したのでヒット数は減るが、チャンク数が数万規模になったら見直す。
 - 端末の SQLite での動作は未確認。JVM テスト（Robolectric の SQLite）で並び順を確認している。
 
+
+## ADR-041: フォルダの列挙を DocumentsContract で行い、失敗を黙って捨てない
+
+**日付:** 2026-10-06  
+**ステータス:** 採用
+
+### 背景
+
+- 評価セット（`eval/notes`、85 件）を端末でインデックスすると、2 段目（`tech/Git.md` など）の 64 件は入る一方、3 段目（`tech/Android/R8とProGuard.md` など）の 21 件が全部欠けていた。評価の失敗 24 件はこれが原因で、検索の問題ではなかった。
+- `MdFileReader` は `DocumentFile`（`TreeDocumentFile`）で再帰していた。`listFiles()` / `isDirectory` / `isFile` / `length()` は内部の query が失敗しても例外を握りつぶし、空配列や false を返す。さらに、全ファイルの読み込みとサブフォルダの列挙を `async` で一度に投げていた。
+- 列挙が失敗すると、そのフォルダのノートは黙って欠ける。`indexFolder` はそれを「フォルダから消えた」と判断し、既存の document まで削除する。
+
+### 決定
+
+- `DocumentsContract.buildChildDocumentsUriUsingTree` に対して、1 フォルダ 1 回の query で ID・名前・MIME・更新日時・サイズを取る。`DocumentFile` では 1 ファイルにつき 4〜5 回 query していた。
+- フォルダの列挙は順番に行い、ファイルの読み込みだけ `Semaphore(4)` で並列にする。
+- フォルダを列挙できなければ `IOException("フォルダを読み込めませんでした: <パス>")` を投げる。`indexFolder` は既存どおり `IndexingState.Error` にして、document を消さない。個々のファイルの読み込み失敗は、パス付きで警告ログを出してスキップする（従来どおり）。
+- ファイル URI は `buildDocumentUriUsingTree(treeUri, documentId)` で作る。`DocumentFile.listFiles()` と同じ形なので、既存の `documents.fileUri` と一致し、全件の再インデックスは起きない。
+- provider へのアクセスは `DocumentTree` interface に切り出し、JVM テストでは偽物に差し替える。`androidx.documentfile` 依存は削除する。
+
+### 影響
+
+- 端末では未確認（実機・エミュレータが無い環境で修正した）。原因が `DocumentFile` の握りつぶしではなく端末へのコピー漏れだった場合は、インデックスの数は変わらない。ただし、列挙の失敗は今後エラーとして見えるようになる。

@@ -95,7 +95,6 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.documentfile)
     implementation(libs.google.litertlm.android)
     implementation(libs.onnxruntime.android)
     implementation(libs.moshi)

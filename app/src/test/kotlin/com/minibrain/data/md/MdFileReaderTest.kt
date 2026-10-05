@@ -1,35 +1,18 @@
 package com.minibrain.data.md
 
-import android.content.ContentResolver
-import android.content.Context
 import android.net.Uri
-import androidx.documentfile.provider.DocumentFile
-import io.mockk.MockKAnnotations
-import io.mockk.every
-import io.mockk.impl.annotations.MockK
 import io.mockk.mockk
-import io.mockk.mockkStatic
-import io.mockk.unmockkStatic
-import java.io.ByteArrayInputStream
 import java.io.IOException
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import timber.log.Timber
 
 class MdFileReaderTest {
-
-    @MockK
-    private lateinit var context: Context
-
-    @MockK
-    private lateinit var contentResolver: ContentResolver
-
-    @MockK
-    private lateinit var treeUri: Uri
 
     private val loggedMessages = mutableListOf<String>()
     private val fakeTree = object : Timber.Tree() {
@@ -38,187 +21,153 @@ class MdFileReaderTest {
         }
     }
 
+    /** documentId をパスとして扱う簡易ツリー。 */
+    private class FakeDocumentTree : DocumentTree {
+        override val rootDocumentId = "root"
+        val children = mutableMapOf<String, List<DocumentEntry>>()
+        val contents = mutableMapOf<String, String>()
+        val failingDirs = mutableSetOf<String>()
+        val throwingFiles = mutableSetOf<String>()
+        private val uris = mutableMapOf<String, Uri>()
+        private val idsByUri = mutableMapOf<Uri, String>()
+
+        fun dir(parent: String, name: String): String {
+            val id = "$parent/$name"
+            add(parent, DocumentEntry(id, name, isDirectory = true, lastModified = 0L, size = null))
+            return id
+        }
+
+        fun file(parent: String, name: String, content: String, lastModified: Long = 0L, size: Long? = null) {
+            val id = "$parent/$name"
+            add(parent, DocumentEntry(id, name, isDirectory = false, lastModified, size ?: content.length.toLong()))
+            contents[id] = content
+        }
+
+        private fun add(parent: String, entry: DocumentEntry) {
+            children[parent] = children[parent].orEmpty() + entry
+        }
+
+        override fun listChildren(parentDocumentId: String): List<DocumentEntry> {
+            if (parentDocumentId in failingDirs) throw IllegalStateException("query failed")
+            return children[parentDocumentId].orEmpty()
+        }
+
+        override fun documentUri(documentId: String): Uri = uris.getOrPut(documentId) {
+            mockk<Uri>().also { idsByUri[it] = documentId }
+        }
+
+        override fun readText(uri: Uri): String? {
+            val id = idsByUri.getValue(uri)
+            if (id in throwingFiles) throw IOException("Disk read error")
+            return contents[id]
+        }
+    }
+
+    private val tree = FakeDocumentTree()
+
     @Before
     fun setUp() {
-        MockKAnnotations.init(this)
         Timber.plant(fakeTree)
-        mockkStatic(DocumentFile::class)
-
-        every { context.contentResolver } returns contentResolver
     }
 
     @After
     fun tearDown() {
         Timber.uproot(fakeTree)
         loggedMessages.clear()
-        unmockkStatic(DocumentFile::class)
     }
 
     @Test
-    fun `listMdFiles returns empty list when root is null`() = runTest {
-        every { DocumentFile.fromTreeUri(context, treeUri) } returns null
-
-        val result = MdFileReader.listMdFiles(context, treeUri)
-        assertTrue(result.isEmpty())
+    fun `listMdFiles returns empty list for empty folder`() = runTest {
+        assertTrue(MdFileReader.listMdFiles(tree).isEmpty())
     }
 
     @Test
     fun `listMdFiles collects md files and traverses directories`() = runTest {
-        val rootDir = mockk<DocumentFile>()
-        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
+        val sub = tree.dir("root", "SubFolder")
+        tree.file("root", "file1.md", "Hello World", lastModified = 12345L)
+        tree.file(sub, "file2.MD", "Markdown Content", lastModified = 67890L)
 
-        val subDir = mockk<DocumentFile>()
-        every { subDir.isDirectory } returns true
-        every { subDir.isFile } returns false
-        every { subDir.name } returns "SubFolder"
-
-        val mdFile1 = mockk<DocumentFile>()
-        every { mdFile1.isDirectory } returns false
-        every { mdFile1.isFile } returns true
-        every { mdFile1.name } returns "file1.md"
-        every { mdFile1.length() } returns 1024L
-        val uri1 = mockk<Uri>()
-        every { mdFile1.uri } returns uri1
-        every { mdFile1.lastModified() } returns 12345L
-
-        val mdFile2 = mockk<DocumentFile>()
-        every { mdFile2.isDirectory } returns false
-        every { mdFile2.isFile } returns true
-        every { mdFile2.name } returns "file2.MD"
-        every { mdFile2.length() } returns 2048L
-        val uri2 = mockk<Uri>()
-        every { mdFile2.uri } returns uri2
-        every { mdFile2.lastModified() } returns 67890L
-
-        every { rootDir.listFiles() } returns arrayOf(subDir, mdFile1)
-        every { subDir.listFiles() } returns arrayOf(mdFile2)
-
-        val content1 = "Hello World"
-        val content2 = "Markdown Content"
-        every { contentResolver.openInputStream(uri1) } returns ByteArrayInputStream(content1.toByteArray())
-        every { contentResolver.openInputStream(uri2) } returns ByteArrayInputStream(content2.toByteArray())
-
-        val result = MdFileReader.listMdFiles(context, treeUri)
+        val result = MdFileReader.listMdFiles(tree).sortedBy { it.name }
 
         assertEquals(2, result.size)
+        assertEquals("file1.md", result[0].relativePath)
+        assertEquals("Hello World", result[0].content)
+        assertEquals(12345L, result[0].lastModified)
+        assertEquals("a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e", result[0].contentHash) // sha256("Hello World")
+        assertEquals("file2.MD", result[1].name)
+        assertEquals("SubFolder/file2.MD", result[1].relativePath)
+        assertEquals("Markdown Content", result[1].content)
+        assertEquals(67890L, result[1].lastModified)
+    }
 
-        // Sort results to ensure deterministic ordering since listFiles order might vary depending on MockK behavior
-        val sortedResult = result.sortedBy { it.name }
+    @Test
+    fun `listMdFiles reaches notes nested several levels deep`() = runTest {
+        val tech = tree.dir("root", "tech")
+        val android = tree.dir(tech, "Android")
+        val deep = tree.dir(android, "深い")
+        tree.file(tech, "Git.md", "git")
+        tree.file(android, "R8とProGuard.md", "r8")
+        tree.file(deep, "メモ.md", "deep")
 
-        // file1.md (Root)
-        assertEquals("file1.md", sortedResult[0].name)
-        assertEquals("file1.md", sortedResult[0].relativePath)
-        assertEquals(content1, sortedResult[0].content)
-        assertEquals(12345L, sortedResult[0].lastModified)
-        assertEquals("a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e", sortedResult[0].contentHash) // sha256("Hello World")
+        val paths = MdFileReader.listMdFiles(tree).map { it.relativePath }.sorted()
 
-        // file2.MD (SubFolder)
-        assertEquals("file2.MD", sortedResult[1].name)
-        assertEquals("SubFolder/file2.MD", sortedResult[1].relativePath)
-        assertEquals(content2, sortedResult[1].content)
-        assertEquals(67890L, sortedResult[1].lastModified)
+        assertEquals(listOf("tech/Android/R8とProGuard.md", "tech/Android/深い/メモ.md", "tech/Git.md"), paths)
+    }
+
+    @Test
+    fun `listMdFiles fails instead of silently dropping an unreadable folder`() = runTest {
+        val tech = tree.dir("root", "tech")
+        val android = tree.dir(tech, "Android")
+        tree.file(tech, "Git.md", "git")
+        tree.failingDirs.add(android)
+
+        try {
+            MdFileReader.listMdFiles(tree)
+            fail("expected IOException")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("tech/Android"))
+        }
     }
 
     @Test
     fun `listMdFiles ignores non-md files`() = runTest {
-        val rootDir = mockk<DocumentFile>()
-        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
+        tree.file("root", "note.txt", "txt")
+        tree.file("root", "README", "readme")
 
-        val txtFile = mockk<DocumentFile>()
-        every { txtFile.isDirectory } returns false
-        every { txtFile.isFile } returns true
-        every { txtFile.name } returns "note.txt"
-
-        val noExtFile = mockk<DocumentFile>()
-        every { noExtFile.isDirectory } returns false
-        every { noExtFile.isFile } returns true
-        every { noExtFile.name } returns "README"
-
-        every { rootDir.listFiles() } returns arrayOf(txtFile, noExtFile)
-
-        val result = MdFileReader.listMdFiles(context, treeUri)
-
-        assertTrue(result.isEmpty())
+        assertTrue(MdFileReader.listMdFiles(tree).isEmpty())
     }
 
     @Test
     fun `listMdFiles skips files larger than 10MB`() = runTest {
-        val rootDir = mockk<DocumentFile>()
-        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
+        tree.file("root", "huge.md", "x", size = 10 * 1024 * 1024L + 1)
 
-        val largeFile = mockk<DocumentFile>()
-        every { largeFile.isDirectory } returns false
-        every { largeFile.isFile } returns true
-        every { largeFile.name } returns "huge.md"
-        // > 10MB
-        every { largeFile.length() } returns 10 * 1024 * 1024L + 1
-
-        every { rootDir.listFiles() } returns arrayOf(largeFile)
-
-        val result = MdFileReader.listMdFiles(context, treeUri)
-
-        assertTrue(result.isEmpty())
+        assertTrue(MdFileReader.listMdFiles(tree).isEmpty())
         assertTrue(loggedMessages.any { it.contains("Skipping huge.md: file too large") })
     }
 
     @Test
-    fun `listMdFiles skips file if readText fails`() = runTest {
-        val rootDir = mockk<DocumentFile>()
-        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
+    fun `listMdFiles reads file when size is unknown`() = runTest {
+        tree.file("root", "a.md", "body")
+        tree.children["root"] = tree.children.getValue("root").map { it.copy(size = null) }
 
-        val mdFile = mockk<DocumentFile>()
-        every { mdFile.isDirectory } returns false
-        every { mdFile.isFile } returns true
-        every { mdFile.name } returns "error.md"
-        every { mdFile.length() } returns 100L
-        val uri = mockk<Uri>()
-        every { mdFile.uri } returns uri
+        assertEquals(listOf("body"), MdFileReader.listMdFiles(tree).map { it.content })
+    }
 
-        every { rootDir.listFiles() } returns arrayOf(mdFile)
+    @Test
+    fun `listMdFiles skips file if readText returns null`() = runTest {
+        tree.file("root", "error.md", "x")
+        tree.contents.remove("root/error.md")
 
-        // Simulate read failure by returning null
-        every { contentResolver.openInputStream(uri) } returns null
-
-        val result = MdFileReader.listMdFiles(context, treeUri)
-
-        assertTrue(result.isEmpty())
+        assertTrue(MdFileReader.listMdFiles(tree).isEmpty())
     }
 
     @Test
     fun `listMdFiles skips file if readText throws exception`() = runTest {
-        val rootDir = mockk<DocumentFile>()
-        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
+        tree.file("root", "error.md", "x")
+        tree.file("root", "ok.md", "ok")
+        tree.throwingFiles.add("root/error.md")
 
-        val mdFile = mockk<DocumentFile>()
-        every { mdFile.isDirectory } returns false
-        every { mdFile.isFile } returns true
-        every { mdFile.name } returns "error.md"
-        every { mdFile.length() } returns 100L
-        val uri = mockk<Uri>()
-        every { mdFile.uri } returns uri
-
-        every { rootDir.listFiles() } returns arrayOf(mdFile)
-
-        // Simulate read failure by throwing IOException
-        every { contentResolver.openInputStream(uri) } throws IOException("Disk read error")
-
-        val result = MdFileReader.listMdFiles(context, treeUri)
-
-        assertTrue(result.isEmpty())
-    }
-
-    @Test
-    fun `listMdFiles skips file if name is null`() = runTest {
-        val rootDir = mockk<DocumentFile>()
-        every { DocumentFile.fromTreeUri(context, treeUri) } returns rootDir
-
-        val nullNameFile = mockk<DocumentFile>()
-        every { nullNameFile.name } returns null
-
-        every { rootDir.listFiles() } returns arrayOf(nullNameFile)
-
-        val result = MdFileReader.listMdFiles(context, treeUri)
-
-        assertTrue(result.isEmpty())
+        assertEquals(listOf("ok.md"), MdFileReader.listMdFiles(tree).map { it.name })
+        assertTrue(loggedMessages.any { it.contains("read failed: error.md") })
     }
 }

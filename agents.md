@@ -45,6 +45,7 @@
 
 ### 2.4 Storage Access Framework (SAF)
 - フォルダの選択には `ActivityResultContracts.OpenDocumentTree()` を使用し、`takePersistableUriPermission` で永続アクセス権を取得してファイルを読み込みます。
+- フォルダの列挙（`MdFileReader`）は `DocumentsContract` を直接 query します。`DocumentFile` は query の失敗を握りつぶして空を返し、深い階層のノートが黙って欠けたため使いません。列挙の失敗は例外にして、インデックスを Error にします（ADR-041）。
 
 ---
 
