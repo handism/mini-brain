@@ -2,6 +2,7 @@ package com.minibrain.ai.search
 
 import com.minibrain.ai.agent.DateResolver
 import com.minibrain.ai.llm.LlmService
+import com.minibrain.ai.llm.generateJsonArray
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.dedupeKey
 import com.minibrain.util.DatePrefix
@@ -18,6 +19,8 @@ class LlmReranker(private val llmService: LlmService) {
         internal const val SNIPPET_MAX_CHARS = 300
         internal const val CANDIDATE_LIMIT = 20
         private const val DEFAULT_TOP_K = 10
+        // プロンプトが約 2,500 トークンあるので展開より長めに取る。打ち切ったら RRF の順位のまま返す（ADR-044）
+        private const val GENERATE_TIMEOUT_MS = 30_000L
         private val DIGITS_REGEX = Regex("""\d+""")
     }
 
@@ -31,15 +34,18 @@ class LlmReranker(private val llmService: LlmService) {
 
         val limited = candidates.take(CANDIDATE_LIMIT)
         val prompt = buildPrompt(query, limited, topK)
-        val sb = StringBuilder()
-        runCatchingCancellable {
-            llmService.generateStream(prompt).collect { token -> sb.append(token) }
+        val raw = runCatchingCancellable {
+            llmService.generateJsonArray(prompt, GENERATE_TIMEOUT_MS)
         }.onFailure {
             Timber.tag(TAG).w(it, "LLM rerank failed")
             return candidates.take(topK)
+        }.getOrNull()
+        if (raw == null) {
+            Timber.tag(TAG).w("rerank timed out")
+            return candidates.take(topK)
         }
 
-        val indices = parseIndices(sb.toString())
+        val indices = parseIndices(raw)
         Timber.tag(TAG).d("rerank indices=$indices from ${limited.size} candidates")
 
         if (indices.isEmpty()) return candidates.take(topK)

@@ -3,6 +3,7 @@ package com.minibrain.ai.search
 import com.minibrain.ai.llm.LlmService
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -47,6 +48,17 @@ class QueryExpanderTest {
 
         val result = expander.expand("test query")
         assertEquals(listOf("test query"), result)
+    }
+
+    @Test
+    fun `expand returns original query when generation does not finish in time`() = runTest {
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } returns flow {
+            emit("[\"test query\", \"a\"")
+            awaitCancellation()
+        }
+
+        assertEquals(listOf("test query"), expander.expand("test query"))
     }
 
     @Test

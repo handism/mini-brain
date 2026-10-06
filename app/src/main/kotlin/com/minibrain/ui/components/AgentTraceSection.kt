@@ -29,8 +29,10 @@ import com.minibrain.ai.agent.ObservationEvent
 import com.minibrain.ai.agent.PlannerDecisionEvent
 import com.minibrain.ai.agent.QueryExpansionEvent
 import com.minibrain.ai.agent.RerankEvent
+import com.minibrain.ai.agent.SearchTimingEvent
 import com.minibrain.ai.agent.ToolCallEvent
 import com.minibrain.ai.agent.VectorSearchHitEvent
+import java.util.Locale
 
 @Composable
 fun AgentTraceSection(events: List<AgentTraceEvent>) {
@@ -63,6 +65,7 @@ private fun AgentTraceEventItem(event: AgentTraceEvent) {
         is VectorSearchHitEvent -> VectorSearchHitItem(event)
         is CandidateMergeEvent -> CandidateMergeItem(event)
         is RerankEvent -> RerankItem(event)
+        is SearchTimingEvent -> SearchTimingItem(event)
         is CoverageCheckEvent -> CoverageCheckItem(event)
         is ExplorerStrategyEvent -> ExplorerStrategyItem(event)
     }
@@ -192,6 +195,20 @@ private fun RerankItem(event: RerankEvent) {
         color = MaterialTheme.colorScheme.secondary,
     )
 }
+
+@Composable
+private fun SearchTimingItem(event: SearchTimingEvent) {
+    Text(
+        stringResource(
+            R.string.trace_search_timing,
+            seconds(event.expansionMs), seconds(event.hydeMs), seconds(event.retrievalMs), seconds(event.rerankMs),
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+private fun seconds(ms: Long): String = String.format(Locale.US, "%.1f", ms / 1000.0)
 
 @Composable
 private fun CoverageCheckItem(event: CoverageCheckEvent) {

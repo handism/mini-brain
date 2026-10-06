@@ -6,6 +6,7 @@ import com.minibrain.ai.rag.SourceType
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -144,6 +145,18 @@ class LlmRerankerTest {
 
         assertEquals(2, result.size)
         assertEquals(candidates.take(2), result)
+    }
+
+    @Test
+    fun `rerank keeps original order when generation does not finish in time`() = runTest {
+        val candidates = createCandidates(4)
+        every { llmService.isReady() } returns true
+        coEvery { llmService.generateStream(any()) } returns flow {
+            emit("[3, 1, 3, 1")
+            awaitCancellation()
+        }
+
+        assertEquals(candidates.take(2), reranker.rerank("query", candidates, topK = 2))
     }
 
     @Test

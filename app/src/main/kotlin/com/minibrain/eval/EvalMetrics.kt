@@ -1,5 +1,6 @@
 package com.minibrain.eval
 
+import com.minibrain.ai.agent.SearchTimingEvent
 import com.minibrain.ai.rag.Citation
 
 /**
@@ -43,6 +44,8 @@ data class PerCaseResult(
     val expectedVectorScore: Double? = null,
     /** ベクトル検索で正解以外のチャンクが取った最高類似度。VECTOR_MIN_SCORE の見直しに使う（ADR-040） */
     val otherVectorScore: Double? = null,
+    /** 段階ごとの所要時間。遅いケースの原因を切り分けるため（ADR-044） */
+    val timing: SearchTimingEvent? = null,
 )
 
 /** 1 ケース分の検索結果。candidates が null なら citations を候補とみなす。 */
@@ -54,6 +57,7 @@ data class EvalObservation(
     val error: String? = null,
     /** しきい値を通ったベクトル検索の結果（score は類似度） */
     val vectorHits: List<Citation> = emptyList(),
+    val timing: SearchTimingEvent? = null,
 )
 
 object EvalMetrics {
@@ -132,6 +136,7 @@ object EvalMetrics {
             error = obs.error,
             expectedVectorScore = expectedVec.maxOfOrNull { it.score.toDouble() },
             otherVectorScore = otherVec.maxOfOrNull { it.score.toDouble() },
+            timing = obs.timing,
         )
     }
 }

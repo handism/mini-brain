@@ -33,7 +33,7 @@
   <uses-native-library android:name="libvndksupport.so" android:required="false"/>
   <uses-native-library android:name="libOpenCL.so" android:required="false"/>
   ```
-- **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。
+- **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。JSON 配列だけを返させる呼び出し（`QueryExpander` / `LlmReranker`）は `generateJsonArray` を使い、`]` が出たら生成を打ち切り、タイムアウト（展開 15 秒 / Reranker 30 秒）なら元のクエリ・RRF 順に戻します。最後まで collect すると同じ語の繰り返しで `maxNumTokens` まで止まらず、1 件 100 秒かかったことがあります（ADR-044）。
 
 ### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
 - **クエリ・文章プレフィックス**: クエリには `query: `、文書（チャンク）には `passage: ` のプレフィックス付与が必須。`EmbedType` enum を使用します。
@@ -142,7 +142,7 @@
 - インデックスの進み具合は Home だけでなく Chat（バナー）と Settings（再インデックス行）にも出します。Settings はインデックス中に再インデックス・フォルダ変更を押せません。
 - チャットの失敗は `ChatViewModel.error`（`ChatError(kind, detail)`）で渡し、見出しは `kind` から strings.xml で決め、例外の中身は「詳細を表示」で折りたたみます。「再試行」は `regenerate` です。
 - 検索ログ表示の既定値は `SHOW_SEARCH_LOG_DEFAULT = false`（開発者向けのため）。コピーボタンは回答側だけに付けます。
-- 検索精度の評価（設定 → 開発者、`EvalScreen`）は SAF で選んだ評価セット JSON を `EvalRunner` に流します。検索まわりを変えたら前後で流して Recall / MRR / 候補 Recall を比べてください。`SearchPipelineResult.candidates`（RRF 後・Reranker 前）は評価で「候補に無い / 絞り込みで落ちた」を分けるのに使うので外さないこと（ADR-037）。
+- 検索精度の評価（設定 → 開発者、`EvalScreen`）は SAF で選んだ評価セット JSON を `EvalRunner` に流します。検索まわりを変えたら前後で流して Recall / MRR / 候補 Recall を比べてください。`SearchPipelineResult.candidates`（RRF 後・Reranker 前）は評価で「候補に無い / 絞り込みで落ちた」を分けるのに使うので外さないこと（ADR-037）。段階ごとの所要時間は `SearchTimingEvent` で検索ログと評価レポートの「内訳」列に出ます（ADR-044）。
 - アプリ内のロゴは `R.drawable.ic_logo`（ランチャーアイコンと同じ意匠の単色版）を `Icon` の tint で塗ります。Typography は title / label 系も日本語向けに字間を詰めています（`Type.kt`）。
 
 ### 5.6 DB マイグレーション運用

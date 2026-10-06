@@ -9,6 +9,7 @@ import com.minibrain.ai.agent.DateRange
 import com.minibrain.ai.agent.DateResolver
 import com.minibrain.ai.agent.HyDeGeneratedEvent
 import com.minibrain.ai.agent.RerankEvent
+import com.minibrain.ai.agent.SearchTimingEvent
 import com.minibrain.ai.agent.VectorSearchHitEvent
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
@@ -109,10 +110,12 @@ class SearchPipeline(
 
         val expansionResult = performQueryExpansion(query, onStatus, traceEvents)
 
+        val retrievalStartedAt = System.currentTimeMillis()
         val retrievalResult = performParallelRetrieval(
             query, treeUri, expansionResult.expanded, expansionResult.hypothetical,
             dateRange, ctx, onStatus, traceEvents
         )
+        val rerankStartedAt = System.currentTimeMillis()
 
         val merged = performCandidateMerge(
             retrievalResult.bm25Candidates,
@@ -124,6 +127,15 @@ class SearchPipeline(
         val final = performRerankingAndPinning(
             query, merged, dateRange, retrievalResult.dateRangeHits, onStatus, traceEvents
         )
+        val finishedAt = System.currentTimeMillis()
+        traceEvents += SearchTimingEvent(
+            expansionMs = expansionResult.expansionMs,
+            hydeMs = expansionResult.hydeMs,
+            retrievalMs = rerankStartedAt - retrievalStartedAt,
+            rerankMs = finishedAt - rerankStartedAt,
+        )
+        Timber.tag(TAG).d("timing expand=${expansionResult.expansionMs} hyde=${expansionResult.hydeMs} " +
+            "retrieve=${rerankStartedAt - retrievalStartedAt} rerank=${finishedAt - rerankStartedAt}")
 
         return SearchPipelineResult(
             final, traceEvents, candidates = merged, vectorHits = retrievalResult.vectorCandidates,
@@ -132,7 +144,9 @@ class SearchPipeline(
 
     private data class QueryExpansionResult(
         val expanded: List<String>,
-        val hypothetical: String?
+        val hypothetical: String?,
+        val expansionMs: Long,
+        val hydeMs: Long,
     )
 
     private suspend fun performQueryExpansion(
@@ -142,7 +156,9 @@ class SearchPipeline(
     ): QueryExpansionResult {
         // 1. Query Expansion (LLM 呼び出し — 単一スレッドのため逐次)
         onStatus?.invoke("クエリ展開中...")
+        val expansionStartedAt = System.currentTimeMillis()
         val expanded = queryExpander.expand(query)
+        val hydeStartedAt = System.currentTimeMillis()
         traceEvents += QueryExpansionEvent(expanded)
         Timber.tag(TAG).d("expanded=${expanded.size} queries")
 
@@ -150,12 +166,17 @@ class SearchPipeline(
         // LiteRT-LM は単一スレッドのため Query Expansion の直後に逐次実行する。
         // HyDE が無効 / 失敗した場合は null （元クエリのみ）にフォールバック。
         val hypothetical = hyde?.generateHypothetical(query)
+        val hydeFinishedAt = System.currentTimeMillis()
         if (hypothetical != null) {
             traceEvents += HyDeGeneratedEvent(hypothetical.take(120))
             Timber.tag(TAG).d("hyde=${hypothetical.take(80)}")
         }
 
-        return QueryExpansionResult(expanded, hypothetical)
+        return QueryExpansionResult(
+            expanded, hypothetical,
+            expansionMs = hydeStartedAt - expansionStartedAt,
+            hydeMs = hydeFinishedAt - hydeStartedAt,
+        )
     }
 
     private data class RetrievalResult(

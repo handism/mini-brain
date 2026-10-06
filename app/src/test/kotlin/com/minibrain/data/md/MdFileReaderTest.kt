@@ -52,10 +52,13 @@ class MdFileReaderTest {
             return children[parentDocumentId].orEmpty()
         }
 
+        // 読み込みは並列に呼ばれるので、Map への出し入れは同期する
+        @Synchronized
         override fun documentUri(documentId: String): Uri = uris.getOrPut(documentId) {
             mockk<Uri>().also { idsByUri[it] = documentId }
         }
 
+        @Synchronized
         override fun readText(uri: Uri): String? {
             val id = idsByUri.getValue(uri)
             if (id in throwingFiles) throw IOException("Disk read error")

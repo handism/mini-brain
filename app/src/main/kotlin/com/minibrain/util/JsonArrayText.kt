@@ -13,4 +13,10 @@ object JsonArrayText {
         if (start < 0 || end <= start) return null
         return raw.substring(start, end + 1)
     }
+
+    /** `[` の後に `]` が出たか。生成をそこで打ち切るために使う（ADR-044）。 */
+    fun isClosed(raw: CharSequence): Boolean {
+        val start = raw.indexOf('[')
+        return start >= 0 && raw.indexOf(']', start + 1) > start
+    }
 }

@@ -1,5 +1,6 @@
 package com.minibrain.eval
 
+import com.minibrain.ai.agent.SearchTimingEvent
 import java.util.Locale
 
 /**
@@ -57,13 +58,14 @@ object EvalReport {
 
         appendLine()
         appendLine("## ケース別")
-        appendLine("| id | Recall | RR | 候補R | 秒 | 正解類似度 | 他類似度 |")
-        appendLine("|---|---|---|---|---|---|---|")
+        appendLine("| id | Recall | RR | 候補R | 秒 | 正解類似度 | 他類似度 | 内訳（展開/HyDE/検索/絞込） |")
+        appendLine("|---|---|---|---|---|---|---|---|")
         result.perCase.forEach { c ->
             appendLine(
                 "| ${c.id} | ${fmt(c.recallAtK)} | ${fmt(c.reciprocalRank)} | " +
                     "${fmt(c.candidateRecall)} | ${formatSeconds(c.durationMs)} | " +
-                    "${c.expectedVectorScore?.let(::fmt) ?: "-"} | ${c.otherVectorScore?.let(::fmt) ?: "-"} |"
+                    "${c.expectedVectorScore?.let(::fmt) ?: "-"} | ${c.otherVectorScore?.let(::fmt) ?: "-"} | " +
+                    "${c.timing?.let(::formatTiming) ?: "-"} |"
             )
         }
     }.trimEnd()
@@ -75,6 +77,9 @@ object EvalReport {
         val median = sorted[sorted.size / 2]
         return "最小 ${fmt(sorted.first())} / 中央値 ${fmt(median)} / 最大 ${fmt(sorted.last())}（${sorted.size} 件）"
     }
+
+    private fun formatTiming(t: SearchTimingEvent): String =
+        listOf(t.expansionMs, t.hydeMs, t.retrievalMs, t.rerankMs).joinToString("/", transform = ::formatSeconds)
 
     fun fmt(value: Double): String = String.format(Locale.US, "%.2f", value)
 

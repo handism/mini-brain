@@ -1,6 +1,7 @@
 package com.minibrain.eval
 
 import android.content.Context
+import com.minibrain.ai.agent.SearchTimingEvent
 import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.util.runCatchingCancellable
 import com.squareup.moshi.JsonReader
@@ -99,6 +100,7 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
                         EvalObservation(
                             case, it.citations, it.candidates, System.currentTimeMillis() - startedAt,
                             vectorHits = it.vectorHits,
+                            timing = it.traceEvents.filterIsInstance<SearchTimingEvent>().firstOrNull(),
                         )
                     },
                     onFailure = {

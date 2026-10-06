@@ -37,5 +37,12 @@ data class VectorSearchHitEvent(
 ) : AgentTraceEvent
 data class CandidateMergeEvent(val totalCount: Int) : AgentTraceEvent
 data class RerankEvent(val before: Int, val after: Int) : AgentTraceEvent
+// SearchPipeline の段階ごとの所要時間（ADR-044）。HyDE を使わないときは hydeMs = 0。rerankMs は候補統合を含む
+data class SearchTimingEvent(
+    val expansionMs: Long,
+    val hydeMs: Long,
+    val retrievalMs: Long,
+    val rerankMs: Long,
+) : AgentTraceEvent
 data class CoverageCheckEvent(val canAnswer: Boolean, val missingInformation: List<String>) : AgentTraceEvent
 data class ExplorerStrategyEvent(val strategy: String, val reason: String) : AgentTraceEvent

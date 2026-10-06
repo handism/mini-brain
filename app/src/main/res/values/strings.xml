@@ -91,6 +91,7 @@
     <string name="trace_search_hits">%1$s 検索: %2$d 件</string>
     <string name="trace_merge">候補を統合: %1$d 件</string>
     <string name="trace_rerank">再ランク: %1$d → %2$d 件</string>
+    <string name="trace_search_timing">所要時間（秒）: 展開 %1$s / HyDE %2$s / 検索 %3$s / 絞り込み %4$s</string>
     <string name="trace_coverage_ok">回答可能性: OK</string>
     <string name="trace_coverage_missing">回答可能性: 不足（%1$s）</string>
     <string name="trace_explorer">探索戦略: %1$s</string>

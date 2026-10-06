@@ -1,7 +1,9 @@
 package com.minibrain.ai.search
 
 import com.minibrain.ai.llm.LlmService
+import com.minibrain.ai.llm.generateJsonArray
 import com.minibrain.util.JsonArrayText
+import com.minibrain.util.runCatchingCancellable
 import timber.log.Timber
 
 class QueryExpander(private val llmService: LlmService) {
@@ -9,6 +11,8 @@ class QueryExpander(private val llmService: LlmService) {
     companion object {
         private const val TAG = "QueryExpander"
         private const val MAX_QUERIES = 8
+        // 通常は数秒で `]` まで出る。同じ語を繰り返し始めたときの安全網（ADR-044）
+        private const val GENERATE_TIMEOUT_MS = 15_000L
         private val QUOTED_ELEMENT_REGEX = Regex(""""([^"]*)"|'([^']*)'""")
 
         // 簡易 JSON 配列パーサ。LLM 出力に前置きやコードフェンスが混ざる前提で、
@@ -33,15 +37,18 @@ class QueryExpander(private val llmService: LlmService) {
         if (!llmService.isReady()) return listOf(query)
 
         val prompt = buildPrompt(query)
-        val sb = StringBuilder()
-        runCatching {
-            llmService.generateStream(prompt).collect { token -> sb.append(token) }
+        val raw = runCatchingCancellable {
+            llmService.generateJsonArray(prompt, GENERATE_TIMEOUT_MS)
         }.onFailure {
             Timber.tag(TAG).w(it, "LLM failed during expansion")
             return listOf(query)
+        }.getOrNull()
+        if (raw == null) {
+            Timber.tag(TAG).w("expansion timed out")
+            return listOf(query)
         }
 
-        val parsed = parseJsonArray(sb.toString())
+        val parsed = parseJsonArray(raw)
             .mapNotNull { it.trim().ifBlank { null } }
             .distinct()
 
