@@ -104,6 +104,7 @@
 - `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
 
 **チューニング定数**
+- RRF 後の候補は `SearchPipeline.collapseByDoc` で 1 ファイル 1 件にまとめてから Reranker に渡します。代表は最上位のチャンクで、ファイル名一致（`topicMatch`）があればそちらを残し、日付ヒットの日付は代表のスニペットに `[日付:]` として付けます。Reranker の後、RRF 上位 `RRF_KEEP_COUNT = 3` 件のうち落とされたものを末尾に戻します（`keepRrfTop`、ADR-047）。
 - `LlmReranker` は RRF 上位 `CANDIDATE_LIMIT = 20` 件を、本文 `SNIPPET_MAX_CHARS = 300` 字ずつで判定します。件数と字数はプロンプト量（約 2,500 トークン）とのトレードオフなので、片方を増やすなら片方を減らしてください。BM25 のスニペット長（`SearchPipeline.SNIPPET_CHARS`）もこれに揃えています（ADR-039）。
 - `mergeCandidatesRrf(weights=...)` の重みは `[meta=1.5, vector=1.0, bm25=1.2]`。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新すること。
 - `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新すること。
@@ -144,8 +145,8 @@
 - インデックスの進み具合は Home だけでなく Chat（バナー）と Settings（再インデックス行）にも出します。Settings はインデックス中に再インデックス・フォルダ変更を押せません。
 - チャットの失敗は `ChatViewModel.error`（`ChatError(kind, detail)`）で渡し、見出しは `kind` から strings.xml で決め、例外の中身は「詳細を表示」で折りたたみます。「再試行」は `regenerate` です。
 - 検索ログ表示の既定値は `SHOW_SEARCH_LOG_DEFAULT = false`（開発者向けのため）。コピーボタンは回答側だけに付けます。
-- 検索精度の評価（設定 → 開発者、`EvalScreen`）は SAF で選んだ評価セット JSON を `EvalRunner` に流します。検索まわりを変えたら前後で流して Recall / MRR / 候補 Recall を比べてください。`SearchPipelineResult.candidates`（RRF 後・Reranker 前）は評価で「候補に無い / 絞り込みで落ちた」を分けるのに使うので外さないこと（ADR-037）。段階ごとの所要時間は `SearchTimingEvent` で検索ログと評価レポートの「内訳」列に出ます（ADR-044）。
-- 評価はエミュレータでも回せます: `scripts/eval-emulator.sh [queries.json]`。AVD `minibrain-eval`（API 35 arm64、RAM 8GB）を起動し、debug APK と androidTest を入れ、`eval/models/` のモデルと `eval/notes/` を送って `EmulatorEvalTest` を実行し、レポートを `eval/reports/` に保存します。フォルダの権限は debug 専用の `GrantFolderActivity` を UiAutomator で操作して取ります。LLM は既定で CPU（`EVAL_GPU=true` で GPU を試す）なので、所要時間は目安です（1 回約 12 分）。検索まわりを変えたら、エージェントはこれを流して前後を比べてください（ADR-045）。
+- 検索精度の評価（設定 → 開発者、`EvalScreen`）は SAF で選んだ評価セット JSON を `EvalRunner` に流します。検索まわりを変えたら前後で流して Recall / MRR / 候補 Recall を比べてください。`SearchPipelineResult.candidates`（RRF 後・Reranker 前）は評価で「候補に無い / 絞り込みで落ちた」を分けるのに使うので外さないこと（ADR-037）。評価レポートは「絞り込みで落ちた」を、候補の順位から「Reranker に渡らず（21 位以下）」と「Reranker が落とした」に分けて出します（ADR-047）。LLM の出力は実行ごとに揺れるので、1 回の評価で 1〜2 件動いただけでは判断しないこと。段階ごとの所要時間は `SearchTimingEvent` で検索ログと評価レポートの「内訳」列に出ます（ADR-044）。
+- 評価はエミュレータでも回せます: `scripts/eval-emulator.sh [queries.json]`。AVD `minibrain-eval`（API 35 arm64、RAM 8GB）を起動し、debug APK と androidTest を入れ、`eval/models/` のモデルと `eval/notes/` を送って `EmulatorEvalTest` を実行し、レポートを `eval/reports/` に保存します。フォルダの権限は debug 専用の `GrantFolderActivity` を UiAutomator で操作して取ります。LLM は既定で CPU（`EVAL_GPU=true` で GPU を試す）なので、所要時間は目安です（1 回約 12 分）。検索まわりを変えたら、エージェントはこれを流して前後を比べてください（ADR-045）。 `EVAL_CASES=id1,id2` で一部のケースだけ、`EVAL_DUMP=true` で各ケースの候補の並び（`eval/reports/*-dump.md`）を出せます。
 - アプリ内のロゴは `R.drawable.ic_logo`（ランチャーアイコンと同じ意匠の単色版）を `Icon` の tint で塗ります。Typography は title / label 系も日本語向けに字間を詰めています（`Type.kt`）。
 
 ### 5.6 DB マイグレーション運用

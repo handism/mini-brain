@@ -33,6 +33,8 @@ import org.junit.runner.RunWith
  * 引数（am instrument -e）:
  * - folder: ノートのフォルダ（/sdcard からの相対。既定 Documents/minibrain-eval）
  * - gpu   : true なら LLM を GPU で試す（既定は CPU。エミュレータの GPU では意味がなく、落ちることもある）
+ * - cases : カンマ区切りの id。指定したケースだけ流す
+ * - dump  : true なら各ケースの候補（RRF 後・Reranker 前）と最終結果を filesDir/eval/dump.md に書く
  *
  * 結果は filesDir/eval/report.md に書き、進み具合は logcat の EmulatorEval タグに出す。
  */
@@ -51,7 +53,8 @@ class EmulatorEvalTest {
         val evalDir = File(app.filesDir, "eval")
         val queries = File(evalDir, "queries.json")
         assertTrue("評価セットがありません: $queries", queries.exists())
-        val cases = queries.inputStream().use(EvalRunner::load)
+        val only = args.getString("cases")?.split(',')?.map { it.trim() }?.toSet()
+        val cases = queries.inputStream().use(EvalRunner::load).filter { only == null || it.id in only }
 
         val container = app.container
         val models = container.modelDownloader
@@ -69,6 +72,10 @@ class EmulatorEvalTest {
         val tree = treeUri.toString()
         val indexedPaths = container.database.documentDao().getMinimalByTree(tree).map { it.relativePath }
         val unknownPaths = EvalMetrics.findUnknownPaths(cases, indexedPaths)
+        if (args.getString("dump") == "true") {
+            File(evalDir, "dump.md").writeText(dump(cases, tree))
+            log("dumped ${cases.size} cases")
+        }
         val result = EvalRunner(container.searchPipeline).run(tree, cases) { current, total ->
             cases.getOrNull(current)?.let { log("[${current + 1}/$total] ${it.id} ${it.query}") }
         }
@@ -77,6 +84,25 @@ class EmulatorEvalTest {
         File(evalDir, "report.md").writeText(report)
         log("done recall=${EvalReport.fmt(result.recallAtK)} mrr=${EvalReport.fmt(result.mrr)}")
         container.llmService.close()
+    }
+
+    // Reranker で落ちた理由を調べるため、候補の順位・出どころ・チャンクの重なりを書き出す
+    private suspend fun dump(cases: List<EvalCase>, tree: String): String = buildString {
+        for (case in cases) {
+            val expected = case.expectedRelativePaths.map { it.lowercase() }.toSet()
+            val r = app.container.searchPipeline.search(case.query, tree)
+            fun mark(path: String?) = if (path?.lowercase() in expected) "★" else " "
+            appendLine("## ${case.id} ${case.query}")
+            appendLine("候補 ${r.candidates.size} 件（Reranker に渡るのは先頭 20 件）")
+            r.candidates.forEachIndexed { i, c ->
+                appendLine("  ${mark(c.relativePath)} [$i] ${c.source} ${c.relativePath} > ${c.headingPath.takeLast(40)}")
+            }
+            appendLine("最終 ${r.citations.size} 件（ファイル ${r.citations.mapNotNull { it.relativePath }.distinct().size} 種類）")
+            r.citations.forEachIndexed { i, c ->
+                appendLine("  ${mark(c.relativePath)} ($i) ${c.source} ${c.relativePath} > ${c.headingPath.takeLast(40)}")
+            }
+            appendLine()
+        }
     }
 
     private fun persistedTree(folder: String): Uri? = app.contentResolver.persistedUriPermissions

@@ -74,6 +74,8 @@ class SearchPipeline(
         private const val TOPIC_MATCH_SNIPPET_CHARS = 500
         // 列挙の質問（「旅行を全部」「レシピ一覧」など）。近いフォルダの文書をまとめて先頭に置く（ADR-046）
         private val ENUMERATION_QUERY_REGEX = Regex("""全部|全て|すべて|一覧|これまで[にの]""")
+        // Reranker が落としても最終結果に残す RRF 上位の件数（ADR-047）
+        internal const val RRF_KEEP_COUNT = 3
         // 列挙で固定する文書の上限。上位フォルダがこれを超えるなら、選んだフォルダだけにする
         internal const val ENUMERATION_MAX_DOCS = 8
         private val METADATA_SPLIT_REGEX = Regex("""[\s　、。・]+""")
@@ -90,6 +92,42 @@ class SearchPipeline(
             return listOf(top, folder).distinct().firstOrNull { prefix ->
                 paths.count { it.startsWith("$prefix/") } in 1..ENUMERATION_MAX_DOCS
             }
+        }
+
+        /**
+         * RRF 後の候補を 1 ファイル 1 件にまとめる。位置はそのファイルの最上位のチャンクの位置。
+         * 残すのは最上位のチャンク（質問に一番近い本文）。ただしファイル名一致（topicMatch）があればそちらを残す
+         * （先頭チャンクの「初回訪問日:」などを回答に渡すため、ADR-026）。日付ヒット（[日付:] 付き）は本文が
+         * 冒頭だけなので代表にはせず、日付だけを代表のスニペットに付ける。docId の無い Citation はそのまま残す。
+         */
+        internal fun collapseByDoc(candidates: List<Citation>): List<Citation> {
+            val byDoc = candidates.filter { it.docId != null }.groupBy { it.docId }
+            val emitted = HashSet<Long>()
+            return candidates.mapNotNull { c ->
+                val docId = c.docId ?: return@mapNotNull c
+                if (!emitted.add(docId)) return@mapNotNull null
+                val group = byDoc.getValue(docId)
+                val chosen = group.firstOrNull { it.topicMatch } ?: c
+                val date = group.firstNotNullOfOrNull { DatePrefix.split(it.snippet).first }
+                if (date != null && !DatePrefix.hasPrefix(chosen.snippet)) {
+                    chosen.copy(snippet = DatePrefix.build(date, chosen.snippet))
+                } else chosen
+            }
+        }
+
+        /**
+         * RRF の上位 RRF_KEEP_COUNT 件のうち Reranker が落としたものを、最終結果の末尾に戻す。
+         * 小さい LLM は話題が混ざった日記などを関連が薄いと判断して落とすことがあるが、RRF の上位は
+         * 検索の段階で根拠が強いので捨てない。Reranker の並びは保ち、末尾の枠だけを入れ替える（ADR-047）。
+         */
+        internal fun keepRrfTop(reranked: List<Citation>, merged: List<Citation>, topK: Int = RERANK_TOP_K): List<Citation> {
+            val keptDocs = reranked.mapNotNullTo(HashSet()) { it.docId }
+            val keptKeys = reranked.mapTo(HashSet()) { it.dedupeKey }
+            val missing = merged.take(RRF_KEEP_COUNT).filterNot { c ->
+                c.dedupeKey in keptKeys || (c.docId != null && c.docId in keptDocs)
+            }
+            if (missing.isEmpty()) return reranked
+            return reranked.take(maxOf(0, topK - missing.size)) + missing
         }
 
         internal fun shouldSkipRerank(query: String, merged: List<Citation>): Boolean =
@@ -262,11 +300,15 @@ class SearchPipeline(
     ): List<Citation> {
         // 3. Candidate Merge (RRF rank 融合 + ソース別重み付け)
         // meta を先頭に置き、同キー衝突時に [日付:] snippet 付き Citation を残す
-        val merged = mergeCandidatesRrf(
-            listOf(metaCandidates, vectorCandidates, bm25Candidates),
-            CANDIDATE_LIMIT,
-            RRF_K,
-            weights = RRF_WEIGHTS,
+        // Reranker が見るのは先頭 CANDIDATE_LIMIT 件だけなので、同じファイルのチャンクで枠を埋めないよう
+        // ファイル単位にまとめる（ADR-047）
+        val merged = collapseByDoc(
+            mergeCandidatesRrf(
+                listOf(metaCandidates, vectorCandidates, bm25Candidates),
+                CANDIDATE_LIMIT,
+                RRF_K,
+                weights = RRF_WEIGHTS,
+            )
         )
         traceEvents += CandidateMergeEvent(merged.size)
         Timber.tag(TAG).d("merged=${merged.size} candidates")
@@ -291,7 +333,7 @@ class SearchPipeline(
             }
         } else {
             onStatus?.invoke("候補を絞り込み中...")
-            llmReranker.rerank(query, merged, RERANK_TOP_K)
+            keepRrfTop(llmReranker.rerank(query, merged, RERANK_TOP_K), merged)
         }
         traceEvents += RerankEvent(before = merged.size, after = reranked.size)
         Timber.tag(TAG).d("reranked=${reranked.size}")
@@ -301,7 +343,8 @@ class SearchPipeline(
         return if (dateRange != null && dateRangeHits.isNotEmpty()) {
             val pinned = selectDateRangePins(dateRangeHits, reranked, merged)
             val pinnedKeys = pinned.map { it.dedupeKey }.toHashSet()
-            val rest = reranked.filterNot { it.dedupeKey in pinnedKeys }
+            val pinnedDocs = pinned.mapNotNullTo(HashSet()) { it.docId }
+            val rest = reranked.filterNot { it.dedupeKey in pinnedKeys || it.docId in pinnedDocs }
             (pinned + rest).take(RERANK_TOP_K).also {
                 Timber.tag(TAG).d("dateRange pin: pinned=${pinned.size} final=${it.size}")
             }

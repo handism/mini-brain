@@ -36,6 +36,8 @@ data class PerCaseResult(
     val candidateRecall: Double = recallAtK,
     /** missedPaths のうち、候補には入っていたが上位 K 件に残らなかったもの */
     val droppedByRerank: List<String> = emptyList(),
+    /** droppedByRerank の各パスが候補（ファイル単位）の何番目にあったか（0 始まり）。Reranker に渡ったかを見る（ADR-047） */
+    val candidateRanks: Map<String, Int> = emptyMap(),
     /** 上位 K 件の relativePath（順位順、重複なし）。取りこぼしの原因を眺めるため */
     val retrievedPaths: List<String> = emptyList(),
     val durationMs: Long = 0L,
@@ -112,9 +114,10 @@ object EvalMetrics {
 
         // Reranker が上位 K 件に無い候補を足すことはない（日付 pin も候補由来）が、
         // 念のため上位 K 件の hit も候補側に含めて「候補 Recall >= Recall@K」を保つ
-        val candidatePaths = (obs.candidates ?: obs.citations)
+        val candidateOrder = (obs.candidates ?: obs.citations)
             .mapNotNull { it.relativePath?.lowercase() }
-            .toSet() + hits
+            .distinct()
+        val candidatePaths = candidateOrder.toSet() + hits
         val candidateHits = expected.filter { it in candidatePaths }
         val candidateRecall = if (expected.isEmpty()) 1.0 else candidateHits.size.toDouble() / expected.size
 
@@ -131,6 +134,7 @@ object EvalMetrics {
             missedPaths = missed.toList(),
             candidateRecall = candidateRecall,
             droppedByRerank = missed.filter { it in candidatePaths },
+            candidateRanks = missed.associateWith { candidateOrder.indexOf(it) }.filterValues { it >= 0 },
             retrievedPaths = retrievedPaths.distinct(),
             durationMs = obs.durationMs,
             error = obs.error,

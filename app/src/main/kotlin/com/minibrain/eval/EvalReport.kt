@@ -1,6 +1,7 @@
 package com.minibrain.eval
 
 import com.minibrain.ai.agent.SearchTimingEvent
+import com.minibrain.ai.search.LlmReranker
 import java.util.Locale
 
 /**
@@ -38,7 +39,13 @@ object EvalReport {
                 appendLine("- [${c.id}] ${c.query}（R=${fmt(c.recallAtK)} RR=${fmt(c.reciprocalRank)}）")
                 c.error?.let { appendLine("  - エラー: $it") }
                 c.missedPaths.forEach { path ->
-                    val reason = if (path in c.droppedByRerank) "絞り込みで落ちた" else "候補に無い"
+                    val rank = c.candidateRanks[path]
+                    val reason = when {
+                        path !in c.droppedByRerank -> "候補に無い"
+                        rank == null -> "絞り込みで落ちた"
+                        rank >= LlmReranker.CANDIDATE_LIMIT -> "Reranker に渡らず（候補 ${rank + 1} 位）"
+                        else -> "Reranker が落とした（候補 ${rank + 1} 位）"
+                    }
                     appendLine("  - $path: $reason")
                 }
                 if (c.retrievedPaths.isNotEmpty()) {

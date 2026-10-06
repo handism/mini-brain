@@ -176,6 +176,43 @@ class SearchPipelineTest {
     }
 
     @Test
+    fun `collapseByDoc keeps one citation per doc at its best position`() {
+        val merged = listOf(
+            citation(1, "a#2", SourceType.VECTOR),
+            citation(2, "b#1", SourceType.BM25),
+            citation(1, "a#1", SourceType.METADATA, topicMatch = true),
+            Citation(headingPath = "フォルダ: x", snippet = "", source = SourceType.FOLDER),
+            citation(3, "c#1", SourceType.VECTOR).copy(snippet = "関係する本文"),
+            citation(3, "c#2", SourceType.METADATA).copy(snippet = "[日付: 2026-09-01] 冒頭"),
+            citation(2, "b#2", SourceType.VECTOR),
+        )
+
+        val collapsed = SearchPipeline.collapseByDoc(merged)
+
+        assertEquals(listOf(1L, 2L, null, 3L), collapsed.map { it.docId })
+        // ファイル名一致は、順位が低くてもそのファイルの代表として残す
+        assertEquals("a#1", collapsed[0].headingPath)
+        assertTrue(collapsed[0].topicMatch)
+        assertEquals("b#1", collapsed[1].headingPath)
+        // 日付ヒットは本文の近いチャンクを代表にしたまま、日付だけを引き継ぐ
+        assertEquals("c#1", collapsed[3].headingPath)
+        assertEquals("[日付: 2026-09-01] 関係する本文", collapsed[3].snippet)
+    }
+
+    @Test
+    fun `keepRrfTop puts back RRF top docs the reranker dropped`() {
+        val merged = (0L until 12L).map { citation(it, "h$it", SourceType.VECTOR) }
+        // Reranker は RRF の 2 位（docId=1）を落とし、下位から 10 件を選んだ
+        val reranked = listOf(0L, 4, 6, 7, 9, 11, 2, 3, 8, 10).map { id -> merged[id.toInt()] }
+
+        val result = SearchPipeline.keepRrfTop(reranked, merged, topK = 10)
+
+        assertEquals(listOf(0L, 4, 6, 7, 9, 11, 2, 3, 8, 1), result.map { it.docId })
+        // 上位 3 件が全部残っていれば何もしない
+        assertEquals(merged.take(10), SearchPipeline.keepRrfTop(merged.take(10), merged, topK = 10))
+    }
+
+    @Test
     fun `enumeration scope widens to the top folder only when it is small`() {
         val paths = listOf(
             "travel/京都.md", "travel/北海道.md", "travel/キャンプ/長野.md", "travel-plan/欧州.md",

@@ -19,6 +19,12 @@ class EvalReportTest {
                 durationMs = 62_000,
             ),
             EvalObservation(EvalCase("err", "落ちる質問", listOf("d.md")), emptyList(), error = "timeout"),
+            // 正解が候補の 21 位にあり、Reranker（先頭 20 件）に渡っていない
+            EvalObservation(
+                EvalCase("deep", "深い質問", listOf("deep.md")),
+                citations = listOf(cit("x.md")),
+                candidates = (0 until 20).map { cit("n$it.md") } + cit("deep.md"),
+            ),
         ),
         k = 10,
     )
@@ -28,7 +34,8 @@ class EvalReportTest {
         val md = EvalReport.toMarkdown(result, "検索評価")
 
         assertTrue(md.startsWith("# 検索評価"))
-        assertTrue(md.contains("- b.md: 絞り込みで落ちた"))
+        assertTrue(md.contains("- b.md: Reranker が落とした（候補 2 位）"))
+        assertTrue(md.contains("- deep.md: Reranker に渡らず（候補 21 位）"))
         assertTrue(md.contains("- c.md: 候補に無い"))
         assertTrue(md.contains("- エラー: timeout"))
         assertTrue(md.contains("- 上位: x.md"))
