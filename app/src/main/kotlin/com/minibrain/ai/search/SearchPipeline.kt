@@ -258,13 +258,38 @@ class SearchPipeline(
         // 4.5 dateRange 検出時は dateRangeSearch 上位 N 件を Reranker 結果の先頭に強制マージする（ADR-025）。
         // Reranker が日付ヒットを下位に圧縮するケースを救う最小介入。後段は Reranker 順を維持する。
         return if (dateRange != null && dateRangeHits.isNotEmpty()) {
-            val pinned = dateRangeHits.take(DATE_RANGE_PIN_COUNT)
+            val pinned = selectDateRangePins(dateRangeHits, reranked, merged)
             val pinnedKeys = pinned.map { it.dedupeKey }.toHashSet()
             val rest = reranked.filterNot { it.dedupeKey in pinnedKeys }
             (pinned + rest).take(RERANK_TOP_K).also {
                 Timber.tag(TAG).d("dateRange pin: pinned=${pinned.size} final=${it.size}")
             }
         } else reranked
+    }
+
+    // dateRangeHits は documentDate の昇順なので、先頭から取ると「先月の振り返り」で月初の日記ばかり固定され、
+    // 話題の合う文書が押し出される。Reranker の順位 → RRF の順位 → 日付順で doc 単位に並べ替えて上位を固定する（ADR-043）。
+    private fun selectDateRangePins(
+        dateRangeHits: List<Citation>,
+        reranked: List<Citation>,
+        merged: List<Citation>,
+    ): List<Citation> {
+        fun firstIndexByDoc(list: List<Citation>): Map<Long, Int> =
+            list.withIndex().filter { it.value.docId != null }
+                .groupBy({ it.value.docId!! }, { it.index })
+                .mapValues { (_, indices) -> indices.min() }
+        val rerankRank = firstIndexByDoc(reranked)
+        val mergedRank = firstIndexByDoc(merged)
+        return dateRangeHits.withIndex()
+            .sortedWith(
+                compareBy(
+                    { it.value.docId?.let(rerankRank::get) ?: Int.MAX_VALUE },
+                    { it.value.docId?.let(mergedRank::get) ?: Int.MAX_VALUE },
+                    { it.index },
+                )
+            )
+            .map { it.value }
+            .take(DATE_RANGE_PIN_COUNT)
     }
 
     private suspend fun bm25Search(query: String, treeUri: String, ctx: SearchRequestCache): List<Citation> {

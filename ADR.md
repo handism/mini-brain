@@ -1564,3 +1564,26 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - 特定日付のクエリは `QueryClassifier` で `TEMPORAL_SUMMARIZATION` になる。分岐で使っているのは `GENERAL_KNOWLEDGE` だけなので、挙動は変わらない。
 - `PlannerHintBuilder` は、特定日付でも「期間クエリ検出」の hint（`timeline_search` 推奨）を出す。以前の「検出された日付」とパス一致の hint は出なくなる。
 - 回答プロンプトには「◯〜◯（同じ日）の期間に解釈済み」の指示が入る。
+
+## ADR-043: 期間クエリで固定する文書を、日付順ではなく関連度で選ぶ
+
+**日付:** 2026-10-06  
+**ステータス:** 採用
+
+### 背景
+
+- 期間クエリでは、`dateRangeSearch` のヒットの先頭 `DATE_RANGE_PIN_COUNT = 5` 件を Reranker 結果の先頭に固定している（ADR-025）。
+- `SearchRequestCache.documentsInDateRange` は `documentDate` の昇順で返すため、固定されるのは「期間の最初の 5 件」だった。
+- 「先月の振り返りミーティングで出た改善策は？」では 9 月 1〜15 日の日記が固定され、正解の `work/meetings/2026-09-24 振り返り.md` は 7 位に押し出されていた（RR 0.14）。期間 + 話題のクエリで、期間内の文書が 6 件以上あると同じことが起きる。
+
+### 決定
+
+- 固定する 5 件は、期間内のヒットを次の順で doc 単位に並べ替えて選ぶ（`SearchPipeline.selectDateRangePins`）。
+  1. Reranker の結果での順位
+  2. RRF 融合後（`merged`）での順位
+  3. 元の日付順
+- 固定の件数、`RRF_WEIGHTS`、`documentsInDateRange` の並びは変えない。
+
+### 影響
+
+- 「2025年8月にあったこと」のような話題の無い期間クエリでも、Reranker が選んだ文書から固定されるようになる。期間内の文書が 5 件以下なら、全件が固定されるのは変わらない。

@@ -150,6 +150,32 @@ class SearchPipelineTest {
     }
 
     @Test
+    fun `date range pins prefer docs the reranker ranked high over earlier dates`() = runTest {
+        val query = "先月の振り返りミーティング"
+        val treeUri = "tree/uri"
+        val dateRange = DateRange(LocalDate.parse("2026-09-01"), LocalDate.parse("2026-09-30"))
+
+        // 9 月の日記 6 件（1〜6 日）と、月末の振り返り議事録（id=24）
+        val dailies = (1L..6L).map { day ->
+            DocumentEntity(id = day, treeUri = treeUri, fileUri = "d$day", fileName = "2026-09-0$day.md", relativePath = "daily/2026-09-0$day.md", lastModified = 0L, contentHash = "", firstParagraph = "日記", documentDate = "2026-09-0$day")
+        }
+        val meeting = DocumentEntity(id = 24, treeUri = treeUri, fileUri = "m", fileName = "2026-09-24 振り返り.md", relativePath = "work/meetings/2026-09-24 振り返り.md", lastModified = 0L, contentHash = "", firstParagraph = "振り返り", documentDate = "2026-09-24")
+
+        coEvery { queryExpander.expand(query) } returns listOf(query)
+        coEvery { hyde.generateHypothetical(query) } returns null
+        coEvery { cache.documents() } returns dailies + meeting
+        coEvery { cache.firstChunkOf(any()) } returns null
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
+        coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
+        coEvery { llmReranker.rerank(query, any(), any()) } returns listOf(citation(24, "振り返り", SourceType.VECTOR))
+
+        val result = searchPipeline.search(query, treeUri, dateRange = dateRange, cache = cache)
+
+        // 日付順の先頭 5 件（1〜5 日）ではなく、Reranker が選んだ議事録を先頭に固定する
+        assertEquals(24L, result.citations[0].docId)
+    }
+
+    @Test
     fun `search matches single character filename for metadata topicMatch`() = runTest {
         val query = "歯についての記録"
         val treeUri = "tree/uri"
