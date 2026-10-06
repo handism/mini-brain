@@ -1,6 +1,7 @@
 package com.minibrain.ai.agent
 
 import com.minibrain.ai.rag.Citation
+import com.minibrain.ai.search.SearchPipelineResult
 import kotlinx.coroutines.flow.Flow
 
 sealed class AgentTool {
@@ -90,4 +91,6 @@ data class AgentResult(
     val citations: List<Citation>,
     val answerFlow: Flow<String>,
     val traceEvents: List<AgentTraceEvent> = emptyList(),
+    // CoverageCheck / ReAct を通る前の SearchPipeline の結果。回答の評価で検索の指標も同時に取るため（ADR-048）
+    val search: SearchPipelineResult? = null,
 )

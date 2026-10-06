@@ -9,6 +9,7 @@
 #
 # 環境変数: AVD（既定 minibrain-eval）/ ANDROID_HOME / JAVA_HOME / EVAL_GPU=true で LLM を GPU で試す
 #           EVAL_CASES=id1,id2 で一部のケースだけ / EVAL_DUMP=true で候補の並びを eval/reports/*-dump.md に出す
+#           EVAL_ANSWER=true で回答まで生成して facts と照合し、全文を eval/reports/*-answers.md に出す（ADR-048）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,7 +66,7 @@ $ADB push "$NOTES/." "/sdcard/$DEVICE_NOTES/" >/dev/null
 # .claude などの隠しフォルダは手元の作業用なので消す
 $ADB shell "find /sdcard/$DEVICE_NOTES -mindepth 1 -name '.*' -prune -exec rm -rf {} +"
 $ADB shell "run-as $PKG sh -c 'cat > files/eval/queries.json'" < "$QUERIES"
-$ADB shell run-as $PKG rm -f files/eval/report.md files/eval/dump.md
+$ADB shell run-as $PKG rm -f files/eval/report.md files/eval/dump.md files/eval/answers.md
 
 # 5. 評価（進み具合は logcat の EmulatorEval タグ）
 log "評価を始めます（logcat -s EmulatorEval で進み具合を見られます）"
@@ -76,6 +77,7 @@ trap 'kill $LOGCAT_PID 2>/dev/null || true' EXIT
 started=$(date +%s)
 out=$($ADB shell am instrument -w -e class com.minibrain.eval.EmulatorEvalTest \
   -e gpu "${EVAL_GPU:-false}" ${EVAL_CASES:+-e cases "$EVAL_CASES"} -e dump "${EVAL_DUMP:-false}" \
+  -e answer "${EVAL_ANSWER:-false}" \
   $PKG.test/androidx.test.runner.AndroidJUnitRunner)
 if ! grep -q '^OK (1 test)' <<<"$(tr -d '\r' <<<"$out")"; then
   echo "$out" >&2
@@ -90,6 +92,10 @@ $ADB shell run-as $PKG cat files/eval/report.md > "$report"
 if [[ "${EVAL_DUMP:-false}" == true ]]; then
   $ADB shell run-as $PKG cat files/eval/dump.md > "${report%.md}-dump.md"
   log "候補の並び: ${report%.md}-dump.md"
+fi
+if [[ "${EVAL_ANSWER:-false}" == true ]]; then
+  $ADB shell run-as $PKG cat files/eval/answers.md > "${report%.md}-answers.md"
+  log "回答の全文: ${report%.md}-answers.md"
 fi
 log "完了（$(( ($(date +%s) - started) / 60 )) 分）: $report"
 head -8 "$report"

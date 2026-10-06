@@ -2,6 +2,8 @@ package com.minibrain.eval
 
 import android.content.Context
 import android.content.res.AssetManager
+import com.minibrain.ai.agent.AgentPipeline
+import com.minibrain.ai.agent.AgentResult
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.SourceType
 import com.minibrain.ai.search.SearchPipeline
@@ -9,6 +11,7 @@ import com.minibrain.ai.search.SearchPipelineResult
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -226,5 +229,33 @@ class EvalRunnerTest {
         val json = """[{"id": "c1", "query": "q", "expected": ["a.md"], "note": "無視される"}]"""
         val cases = EvalRunner.load(ByteArrayInputStream(json.toByteArray()))
         assertEquals(listOf(EvalCase("c1", "q", listOf("a.md"))), cases)
+    }
+
+    @Test
+    fun `agentPipeline を渡すと回答を生成し、検索の指標は SearchPipeline の結果から取る`() = runTest {
+        val treeUri = "content://dummy"
+        val agentPipeline: AgentPipeline = mockk()
+        val search = SearchPipelineResult(citations = listOf(cit("a.md")), traceEvents = emptyList())
+        coEvery { agentPipeline.run("q1", treeUri) } returns AgentResult(
+            citations = listOf(cit("other.md")),
+            answerFlow = flowOf("2025年", "4月です"),
+            search = search,
+        )
+        val case = EvalCase("c1", "q1", listOf("a.md"), facts = listOf("2025年4月|2025-04", "清澄白河"))
+
+        val result = EvalRunner(searchPipeline, agentPipeline).run(treeUri, listOf(case))
+
+        val c = result.perCase.single()
+        assertEquals(1.0, c.recallAtK, 1e-9)
+        assertEquals("2025年4月です", c.answer)
+        assertEquals(listOf("清澄白河"), c.missedFacts)
+        assertEquals(0.5, result.factRecall, 1e-9)
+    }
+
+    @Test
+    fun `facts を読む`() {
+        val json = """[{"id": "c1", "query": "q", "expected": ["a.md"], "facts": ["A|a", "B"]}]"""
+        val cases = EvalRunner.load(ByteArrayInputStream(json.toByteArray()))
+        assertEquals(listOf("A|a", "B"), cases.single().facts)
     }
 }

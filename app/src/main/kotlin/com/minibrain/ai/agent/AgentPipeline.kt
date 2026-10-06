@@ -93,7 +93,7 @@ class AgentPipeline(
         onStatus?.invoke("")
         val answerContext = AnswerContext(question, citations, recentHistory, dateRange)
         val answerFlow = llmService.generateStream(AnswerPromptBuilder.buildAnswerPrompt(answerContext))
-        AgentResult(citations, answerFlow, traceEvents)
+        AgentResult(citations, answerFlow, traceEvents, searchResult)
     }
 
     private data class ExplorerStrategy(val name: String, val reason: String, val hint: String)

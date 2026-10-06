@@ -3,6 +3,8 @@ package com.minibrain.eval
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.SourceType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -186,5 +188,36 @@ class EvalMetricsTest {
         assertEquals(null, c.expectedVectorScore)
         assertEquals(0.8, c.otherVectorScore!!, 1e-6)
     }
-}
 
+    @Test
+    fun `事実は表記ゆれ・全角半角・空白・桁区切りを無視して照合する`() {
+        assertTrue(EvalMetrics.answerContainsFact("初回は 2024/11/03 です", "11月3日|11/03"))
+        assertTrue(EvalMetrics.answerContainsFact("費用は１２０，０００円でした", "120000円"))
+        assertTrue(EvalMetrics.answerContainsFact("Alex さん", "alex"))
+        assertFalse(EvalMetrics.answerContainsFact("11月4日", "11月3日|11/3"))
+        // 空の表記ゆれは何にでも一致しないようにする
+        assertFalse(EvalMetrics.answerContainsFact("何か", "|"))
+    }
+
+    @Test
+    fun `回答の指標は facts のあるケースだけで集計する`() {
+        val obs = listOf(
+            EvalObservation(EvalCase("all", "q", listOf("a.md"), listOf("A", "B")), listOf(cit("a.md")), answer = "A と B"),
+            EvalObservation(EvalCase("half", "q", listOf("a.md"), listOf("A", "C")), listOf(cit("a.md")), answer = "A だけ"),
+            EvalObservation(EvalCase("nofacts", "q", listOf("a.md")), listOf(cit("a.md")), answer = "何でも"),
+            EvalObservation(EvalCase("search", "q", listOf("a.md"), listOf("A")), listOf(cit("a.md"))),
+        )
+        val r = EvalMetrics.computeObservations(obs, k = 10)
+        assertEquals(2, r.answeredCases)
+        assertEquals(0.75, r.factRecall, 1e-9)
+        assertEquals(0.5, r.answerAccuracy, 1e-9)
+        assertEquals(listOf("C"), r.perCase.single { it.id == "half" }.missedFacts)
+    }
+
+    @Test
+    fun `見つからないという回答を数える`() {
+        assertTrue(EvalMetrics.isAbstention("提供された情報には記載されていません。"))
+        assertTrue(EvalMetrics.isAbstention("その情報は見つかりませんでした"))
+        assertFalse(EvalMetrics.isAbstention("2025年4月に引っ越しました。"))
+    }
+}

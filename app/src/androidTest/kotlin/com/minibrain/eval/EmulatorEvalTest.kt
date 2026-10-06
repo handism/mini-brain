@@ -35,6 +35,7 @@ import org.junit.runner.RunWith
  * - gpu   : true なら LLM を GPU で試す（既定は CPU。エミュレータの GPU では意味がなく、落ちることもある）
  * - cases : カンマ区切りの id。指定したケースだけ流す
  * - dump  : true なら各ケースの候補（RRF 後・Reranker 前）と最終結果を filesDir/eval/dump.md に書く
+ * - answer: true なら AgentPipeline で回答まで生成し、facts と照合する。回答の全文は filesDir/eval/answers.md（ADR-048）
  *
  * 結果は filesDir/eval/report.md に書き、進み具合は logcat の EmulatorEval タグに出す。
  */
@@ -76,12 +77,19 @@ class EmulatorEvalTest {
             File(evalDir, "dump.md").writeText(dump(cases, tree))
             log("dumped ${cases.size} cases")
         }
-        val result = EvalRunner(container.searchPipeline).run(tree, cases) { current, total ->
+        val withAnswer = args.getString("answer") == "true"
+        val agent = if (withAnswer) container.agentPipeline else null
+        val result = EvalRunner(container.searchPipeline, agent).run(tree, cases) { current, total ->
             cases.getOrNull(current)?.let { log("[${current + 1}/$total] ${it.id} ${it.query}") }
         }
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.JAPAN).format(Date())
-        val report = EvalReport.toMarkdown(result, "検索評価 $stamp（${queries.name}・エミュレータ）", unknownPaths)
+        val kind = if (withAnswer) "回答評価" else "検索評価"
+        val report = EvalReport.toMarkdown(result, "$kind $stamp（${queries.name}・エミュレータ）", unknownPaths)
         File(evalDir, "report.md").writeText(report)
+        if (withAnswer) {
+            File(evalDir, "answers.md").writeText(EvalReport.answersToMarkdown(result, "回答 $stamp（${queries.name}）"))
+            log("facts=${EvalReport.fmt(result.factRecall)} accuracy=${EvalReport.fmt(result.answerAccuracy)}")
+        }
         log("done recall=${EvalReport.fmt(result.recallAtK)} mrr=${EvalReport.fmt(result.mrr)}")
         container.llmService.close()
     }

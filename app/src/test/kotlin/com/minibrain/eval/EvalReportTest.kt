@@ -69,5 +69,26 @@ class EvalReportTest {
         assertTrue(md.contains("- 正解以外の最高類似度: 最小 0.88"))
         assertTrue(md.contains("| v | 1.00 | 1.00 | 1.00 | 0.0 | 0.82 | 0.88 |"))
     }
-}
 
+    @Test
+    fun `回答を生成したときだけ回答の指標と取りこぼしが載る`() {
+        assertFalse(EvalReport.toMarkdown(result, "検索評価").contains("回答の事実 Recall"))
+
+        val answered = EvalMetrics.computeObservations(
+            listOf(
+                EvalObservation(EvalCase("ok", "q1", listOf("a.md"), listOf("A")), listOf(cit("a.md")), answer = "A です"),
+                EvalObservation(EvalCase("ng", "q2", listOf("a.md"), listOf("B")), listOf(cit("a.md")), answer = "記載されていません"),
+            ),
+            k = 10,
+        )
+        val md = EvalReport.toMarkdown(answered, "回答評価")
+        assertTrue(md.contains("- 回答の事実 Recall: 0.50（2 件）"))
+        assertTrue(md.contains("- 答えられず: 1 件"))
+        assertTrue(md.contains("- [ng] q2（検索は正解・答えられず）"))
+        assertTrue(md.contains("  - 無い事実: B"))
+
+        val answers = EvalReport.answersToMarkdown(answered, "回答")
+        assertTrue(answers.contains("- 事実: ✗ B"))
+        assertTrue(answers.contains("> 記載されていません"))
+    }
+}

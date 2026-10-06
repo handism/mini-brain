@@ -2,6 +2,7 @@ package com.minibrain.eval
 
 import com.minibrain.ai.agent.SearchTimingEvent
 import com.minibrain.ai.rag.Citation
+import java.text.Normalizer
 
 /**
  * 検索評価指標の純 Kotlin 実装。JVM ユニットテストで数値検証する。
@@ -13,6 +14,11 @@ import com.minibrain.ai.rag.Citation
  *                Recall@K との差が「絞り込みで落ちた」分になる
  *
  * ケース全体の集計は単純な算術平均（マイクロではなくマクロ平均）。
+ *
+ * 回答の指標（ADR-048。facts のあるケースで回答を生成したときだけ）:
+ * - 事実 Recall : facts のうち回答に含まれていたものの割合
+ * - 完全正答率  : facts をすべて含んでいたケースの割合
+ * - 答えられず  : 「見つかりません」などと答えたケースの数
  */
 data class EvalResult(
     val cases: Int,
@@ -23,6 +29,11 @@ data class EvalResult(
     val perCase: List<PerCaseResult>,
     val candidateRecall: Double = recallAtK,
     val totalDurationMs: Long = 0L,
+    /** 回答を採点したケースの数。0 なら以下の回答の指標は意味を持たない */
+    val answeredCases: Int = 0,
+    val factRecall: Double = 0.0,
+    val answerAccuracy: Double = 0.0,
+    val abstentions: Int = 0,
 )
 
 data class PerCaseResult(
@@ -48,7 +59,18 @@ data class PerCaseResult(
     val otherVectorScore: Double? = null,
     /** 段階ごとの所要時間。遅いケースの原因を切り分けるため（ADR-044） */
     val timing: SearchTimingEvent? = null,
-)
+    /** 生成した回答。回答を生成しなかったときは null */
+    val answer: String? = null,
+    /** facts のうち回答に含まれていたもの / 無かったもの */
+    val hitFacts: List<String> = emptyList(),
+    val missedFacts: List<String> = emptyList(),
+    /** 「見つかりません」などと答えたか */
+    val abstained: Boolean = false,
+) {
+    /** 回答の採点対象か（回答があり、facts がある） */
+    val answerScored: Boolean get() = answer != null && (hitFacts.size + missedFacts.size) > 0
+    val factRecall: Double get() = if (answerScored) hitFacts.size.toDouble() / (hitFacts.size + missedFacts.size) else 0.0
+}
 
 /** 1 ケース分の検索結果。candidates が null なら citations を候補とみなす。 */
 data class EvalObservation(
@@ -60,9 +82,27 @@ data class EvalObservation(
     /** しきい値を通ったベクトル検索の結果（score は類似度） */
     val vectorHits: List<Citation> = emptyList(),
     val timing: SearchTimingEvent? = null,
+    val answer: String? = null,
 )
 
 object EvalMetrics {
+
+    // 回答が根拠を見つけられなかったときの言い回し（AnswerPromptBuilder の指示とモデルの癖から）
+    private val ABSTAIN_REGEX = Regex(
+        "(情報|記載|記述|記録)(が|は)?(見つかり|含まれてい|ありませ|され(てい)?ませ)|わかりません|分かりません|特定できません"
+    )
+
+    // 照合の前に全角半角・大文字小文字・空白・桁区切りをそろえる
+    internal fun normalizeForFact(text: String): String =
+        Normalizer.normalize(text, Normalizer.Form.NFKC).lowercase().replace(Regex("[\\s,，]"), "")
+
+    /** fact（`|` 区切りの表記ゆれ）のどれかが回答に含まれるか */
+    fun answerContainsFact(answer: String, fact: String): Boolean {
+        val normalized = normalizeForFact(answer)
+        return fact.split('|').map(::normalizeForFact).any { it.isNotEmpty() && it in normalized }
+    }
+
+    fun isAbstention(answer: String): Boolean = ABSTAIN_REGEX.containsMatchIn(answer)
 
     fun compute(
         cases: List<Pair<EvalCase, List<Citation>>>,
@@ -75,6 +115,7 @@ object EvalMetrics {
 
         val perCase = observations.map { computeOne(it, k) }
         val avg = { sel: (PerCaseResult) -> Double -> perCase.sumOf(sel) / perCase.size }
+        val scored = perCase.filter { it.answerScored }
         return EvalResult(
             cases = perCase.size,
             k = k,
@@ -84,6 +125,10 @@ object EvalMetrics {
             perCase = perCase,
             candidateRecall = avg { it.candidateRecall },
             totalDurationMs = perCase.sumOf { it.durationMs },
+            answeredCases = scored.size,
+            factRecall = if (scored.isEmpty()) 0.0 else scored.sumOf { it.factRecall } / scored.size,
+            answerAccuracy = if (scored.isEmpty()) 0.0 else scored.count { it.missedFacts.isEmpty() }.toDouble() / scored.size,
+            abstentions = perCase.count { it.abstained },
         )
     }
 
@@ -124,6 +169,12 @@ object EvalMetrics {
         val (expectedVec, otherVec) = obs.vectorHits.partition { it.relativePath?.lowercase() in expected }
 
         val missed = expected - hits
+        val answer = obs.answer
+        val (hitFacts, missedFacts) = if (answer == null) {
+            emptyList<String>() to emptyList()
+        } else {
+            case.facts.partition { answerContainsFact(answer, it) }
+        }
         return PerCaseResult(
             id = case.id,
             query = case.query,
@@ -141,6 +192,10 @@ object EvalMetrics {
             expectedVectorScore = expectedVec.maxOfOrNull { it.score.toDouble() },
             otherVectorScore = otherVec.maxOfOrNull { it.score.toDouble() },
             timing = obs.timing,
+            answer = answer,
+            hitFacts = hitFacts,
+            missedFacts = missedFacts,
+            abstained = answer != null && isAbstention(answer),
         )
     }
 }

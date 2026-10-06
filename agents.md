@@ -147,6 +147,7 @@
 - 検索ログ表示の既定値は `SHOW_SEARCH_LOG_DEFAULT = false`（開発者向けのため）。コピーボタンは回答側だけに付けます。
 - 検索精度の評価（設定 → 開発者、`EvalScreen`）は SAF で選んだ評価セット JSON を `EvalRunner` に流します。検索まわりを変えたら前後で流して Recall / MRR / 候補 Recall を比べてください。`SearchPipelineResult.candidates`（RRF 後・Reranker 前）は評価で「候補に無い / 絞り込みで落ちた」を分けるのに使うので外さないこと（ADR-037）。評価レポートは「絞り込みで落ちた」を、候補の順位から「Reranker に渡らず（21 位以下）」と「Reranker が落とした」に分けて出します（ADR-047）。LLM の出力は実行ごとに揺れるので、1 回の評価で 1〜2 件動いただけでは判断しないこと。段階ごとの所要時間は `SearchTimingEvent` で検索ログと評価レポートの「内訳」列に出ます（ADR-044）。
 - 評価はエミュレータでも回せます: `scripts/eval-emulator.sh [queries.json]`。AVD `minibrain-eval`（API 35 arm64、RAM 8GB）を起動し、debug APK と androidTest を入れ、`eval/models/` のモデルと `eval/notes/` を送って `EmulatorEvalTest` を実行し、レポートを `eval/reports/` に保存します。フォルダの権限は debug 専用の `GrantFolderActivity` を UiAutomator で操作して取ります。LLM は既定で CPU（`EVAL_GPU=true` で GPU を試す）なので、所要時間は目安です（1 回約 12 分）。検索まわりを変えたら、エージェントはこれを流して前後を比べてください（ADR-045）。 `EVAL_CASES=id1,id2` で一部のケースだけ、`EVAL_DUMP=true` で各ケースの候補の並び（`eval/reports/*-dump.md`）を出せます。
+- `EVAL_ANSWER=true` で `AgentPipeline` を通して回答まで生成し、評価セットの `facts`（回答に含まれるべき事実。`|` で表記ゆれ）と照合して「事実 Recall / 完全正答率 / 答えられず」を出します。回答の全文は `eval/reports/*-answers.md` です。照合は文字列の包含なので、根拠に無いことを書いていないかはエージェントが全文を読んで確かめてください。回答を生成するので 1 回 45 分ほどかかります。プロンプト・Reranker・埋め込みなど回答に効く変更の前後で流してください（ADR-048）。
 - アプリ内のロゴは `R.drawable.ic_logo`（ランチャーアイコンと同じ意匠の単色版）を `Icon` の tint で塗ります。Typography は title / label 系も日本語向けに字間を詰めています（`Type.kt`）。
 
 ### 5.6 DB マイグレーション運用

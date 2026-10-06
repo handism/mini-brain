@@ -1,10 +1,13 @@
 package com.minibrain.eval
 
 import android.content.Context
+import com.minibrain.ai.agent.AgentPipeline
 import com.minibrain.ai.agent.SearchTimingEvent
 import com.minibrain.ai.search.SearchPipeline
+import com.minibrain.ai.search.SearchPipelineResult
 import com.minibrain.util.runCatchingCancellable
 import com.squareup.moshi.JsonReader
+import kotlinx.coroutines.withTimeoutOrNull
 import okio.buffer
 import okio.source
 import timber.log.Timber
@@ -21,12 +24,21 @@ import java.io.InputStream
  *
  * 評価セットは個人ノートの実 path を含むためリポジトリには sample のみ置く。
  * 実運用ではユーザーが自分の質問〜正解 path の JSON を作り、設定 → 開発者 →「検索精度の評価」で選ぶ。
- * 測るのは SearchPipeline（展開〜Reranker）までで、CoverageCheck / ReAct は通らない。
+ * 既定で測るのは SearchPipeline（展開〜Reranker）までで、CoverageCheck / ReAct は通らない。
+ * agentPipeline を渡すと AgentPipeline で回答まで生成し、facts との照合も行う（ADR-048）。
+ * このとき検索の指標は AgentPipeline 内の SearchPipeline の結果から取る。
  */
-class EvalRunner(private val searchPipeline: SearchPipeline) {
+class EvalRunner(
+    private val searchPipeline: SearchPipeline,
+    private val agentPipeline: AgentPipeline? = null,
+) {
 
     companion object {
         private const val TAG = "EvalRunner"
+
+        // 回答 1 件の上限。CPU の LLM で maxNumTokens まで回り続けても評価全体を止めない
+        private const val ANSWER_TIMEOUT_MS = 300_000L
+        const val ANSWER_TIMEOUT_MARK = "\n（評価: 回答がタイムアウトしました）"
 
         /**
          * assets から JSON 配列形式の評価ケースを読む。
@@ -34,7 +46,7 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
          * フォーマット:
          * ```json
          * [
-         *   { "id": "case1", "query": "...", "expected": ["folder/note.md", ...] },
+         *   { "id": "case1", "query": "...", "expected": ["folder/note.md", ...], "facts": ["11月3日|11/3", ...] },
          *   ...
          * ]
          * ```
@@ -60,12 +72,14 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
             var id: String? = null
             var query: String? = null
             var expected: List<String> = emptyList()
+            var facts: List<String> = emptyList()
             reader.beginObject()
             while (reader.hasNext()) {
                 when (reader.nextName()) {
                     "id" -> id = reader.nextString()
                     "query" -> query = reader.nextString()
                     "expected" -> expected = parseStringArray(reader)
+                    "facts" -> facts = parseStringArray(reader)
                     else -> reader.skipValue()
                 }
             }
@@ -73,7 +87,7 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
             require(!id.isNullOrBlank() && !query.isNullOrBlank()) {
                 "eval case missing id/query"
             }
-            return EvalCase(id, query, expected)
+            return EvalCase(id, query, expected, facts)
         }
 
         private fun parseStringArray(reader: JsonReader): List<String> {
@@ -94,13 +108,14 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
         val observations = cases.mapIndexed { idx, case ->
             onProgress(idx, cases.size)
             val startedAt = System.currentTimeMillis()
-            runCatchingCancellable { searchPipeline.search(case.query, treeUri) }
+            runCatchingCancellable { evaluate(case, treeUri) }
                 .fold(
-                    onSuccess = {
+                    onSuccess = { (search, answer) ->
                         EvalObservation(
-                            case, it.citations, it.candidates, System.currentTimeMillis() - startedAt,
-                            vectorHits = it.vectorHits,
-                            timing = it.traceEvents.filterIsInstance<SearchTimingEvent>().firstOrNull(),
+                            case, search.citations, search.candidates, System.currentTimeMillis() - startedAt,
+                            vectorHits = search.vectorHits,
+                            timing = search.traceEvents.filterIsInstance<SearchTimingEvent>().firstOrNull(),
+                            answer = answer,
                         )
                     },
                     onFailure = {
@@ -114,5 +129,17 @@ class EvalRunner(private val searchPipeline: SearchPipeline) {
         }
         onProgress(cases.size, cases.size)
         return EvalMetrics.computeObservations(observations, k)
+    }
+
+    private suspend fun evaluate(case: EvalCase, treeUri: String): Pair<SearchPipelineResult, String?> {
+        val agent = agentPipeline ?: return searchPipeline.search(case.query, treeUri) to null
+        val result = agent.run(case.query, treeUri)
+        val answer = StringBuilder()
+        // タイムアウトは評価全体を止めず、そこまでの回答で採点する
+        withTimeoutOrNull(ANSWER_TIMEOUT_MS) { result.answerFlow.collect { answer.append(it) } }
+            ?: answer.append(ANSWER_TIMEOUT_MARK)
+        // 一般知識と判定されると検索を通らない。検索の指標では「何も拾えなかった」として数える
+        val search = result.search ?: SearchPipelineResult(emptyList(), emptyList())
+        return search to answer.toString()
     }
 }

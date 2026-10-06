@@ -24,6 +24,12 @@ object EvalReport {
         appendLine("- Precision@$k: ${fmt(result.precisionAtK)}")
         appendLine("- 候補 Recall（絞り込み前）: ${fmt(result.candidateRecall)}")
         appendLine("- 所要時間: ${formatDuration(result.totalDurationMs)}（平均 ${formatSeconds(averageMs(result))} 秒/件）")
+        // 回答を生成したときだけ（ADR-048）。検索だけの評価のレポートは変えない
+        if (result.answeredCases > 0) {
+            appendLine("- 回答の事実 Recall: ${fmt(result.factRecall)}（${result.answeredCases} 件）")
+            appendLine("- 回答の完全正答率: ${fmt(result.answerAccuracy)}")
+            appendLine("- 答えられず: ${result.abstentions} 件")
+        }
 
         if (unknownPaths.isNotEmpty()) {
             appendLine()
@@ -74,6 +80,32 @@ object EvalReport {
                     "${c.expectedVectorScore?.let(::fmt) ?: "-"} | ${c.otherVectorScore?.let(::fmt) ?: "-"} | " +
                     "${c.timing?.let(::formatTiming) ?: "-"} |"
             )
+        }
+
+        val answerMisses = result.perCase.filter { it.missedFacts.isNotEmpty() || it.abstained }
+        if (answerMisses.isNotEmpty()) {
+            appendLine()
+            appendLine("## 回答の取りこぼし")
+            answerMisses.forEach { c ->
+                val searchNote = if (c.missedPaths.isEmpty()) "検索は正解" else "検索で ${c.missedPaths.size} 件取りこぼし"
+                val abstainNote = if (c.abstained) "・答えられず" else ""
+                appendLine("- [${c.id}] ${c.query}（$searchNote$abstainNote）")
+                if (c.missedFacts.isNotEmpty()) appendLine("  - 無い事実: ${c.missedFacts.joinToString(" / ")}")
+            }
+        }
+    }.trimEnd()
+
+    /** 回答の全文。事実の照合では分からない誤り（根拠に無いことを書いた等）を人やエージェントが読んで確かめる用 */
+    fun answersToMarkdown(result: EvalResult, title: String): String = buildString {
+        appendLine("# $title")
+        result.perCase.filter { it.answer != null }.forEach { c ->
+            appendLine()
+            appendLine("## ${c.id} ${c.query}")
+            val facts = c.hitFacts.map { "✓ $it" } + c.missedFacts.map { "✗ $it" }
+            if (facts.isNotEmpty()) appendLine("- 事実: ${facts.joinToString(" / ")}")
+            appendLine("- 上位: ${c.retrievedPaths.take(5).joinToString(", ")}")
+            appendLine()
+            c.answer!!.trim().lines().forEach { appendLine("> $it") }
         }
     }.trimEnd()
 
