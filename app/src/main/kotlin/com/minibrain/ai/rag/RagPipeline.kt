@@ -136,6 +136,14 @@ class RagPipeline(
         }
     }
 
+    /** クエリの埋め込みに最も近いフォルダの相対パス。フォルダ埋め込みが無ければ null（ADR-046） */
+    suspend fun nearestFolder(question: String, treeUri: String, cache: SearchRequestCache? = null): String? {
+        val ctx = cacheFor(treeUri, cache)
+        return withTimeoutOrNull(SEARCH_TIMEOUT_MS) {
+            folderSearch(embedQuery(question, ctx), treeUri, k = 1).firstOrNull()?.second?.path
+        } ?: run { Timber.tag(TAG).w("nearestFolder timed out or empty"); null }
+    }
+
     // AgentPipeline 経由なら共有キャッシュを使い、単独呼び出し（EvalRunner・テスト）では
     // この呼び出し内だけのキャッシュを作る。doc / chunk の参照はすべてキャッシュ経由に統一する
     private fun cacheFor(treeUri: String, cache: SearchRequestCache?): SearchRequestCache =

@@ -176,6 +176,56 @@ class SearchPipelineTest {
     }
 
     @Test
+    fun `enumeration scope widens to the top folder only when it is small`() {
+        val paths = listOf(
+            "travel/京都.md", "travel/北海道.md", "travel/キャンプ/長野.md", "travel-plan/欧州.md",
+        ) + (1..9).map { "journal/2025-0$it.md" } + listOf("journal/old/2024.md")
+
+        // travel/キャンプ が近くても、travel 全体（3 件）を対象にする。travel-plan は含めない
+        assertEquals("travel", SearchPipeline.enumerationScope("travel/キャンプ", paths))
+        // journal は 10 件で多すぎるので、近いフォルダ自身にする
+        assertEquals("journal/old", SearchPipeline.enumerationScope("journal/old", paths))
+        assertEquals(null, SearchPipeline.enumerationScope("journal", paths))
+    }
+
+    @Test
+    fun `isEnumerationQuery detects listing questions`() {
+        assertTrue(SearchPipeline.isEnumerationQuery("これまでに行った旅行を全部教えて"))
+        assertTrue(SearchPipeline.isEnumerationQuery("作ったことのある料理のレシピ一覧"))
+        assertEquals(false, SearchPipeline.isEnumerationQuery("スパイス堂ってどんな店？"))
+    }
+
+    @Test
+    fun `enumeration query pins every doc of the nearest folder`() = runTest {
+        val query = "これまでに行った旅行を全部教えて"
+        val treeUri = "tree/uri"
+        fun doc(id: Long, path: String) = DocumentEntity(id = id, treeUri = treeUri, fileUri = "u$id", fileName = path.substringAfterLast('/'), relativePath = path, lastModified = 0L, contentHash = "", firstParagraph = "本文$id")
+        val docs = listOf(
+            doc(1, "travel/京都.md"), doc(2, "travel/沖縄.md"), doc(3, "travel/キャンプ/長野.md"),
+            doc(4, "journal/2025-07.md"), doc(5, "travel-plan/欧州.md"),
+        )
+
+        coEvery { queryExpander.expand(query) } returns listOf(query)
+        coEvery { hyde.generateHypothetical(query) } returns null
+        coEvery { cache.documents() } returns docs
+        coEvery { cache.firstChunkOf(any()) } returns null
+        coEvery { chunkDao.bm25SearchByTree(any(), eq(treeUri), any()) } returns emptyList()
+        coEvery { ragPipeline.vectorOnlyTopK(any(), treeUri, any(), cache) } returns emptyList()
+        coEvery { ragPipeline.nearestFolder(query, treeUri, cache) } returns "travel/キャンプ"
+        // Reranker は日記と京都だけを残した
+        coEvery { llmReranker.rerank(query, any(), any()) } returns listOf(
+            citation(4, "journal", SourceType.VECTOR).copy(relativePath = "journal/2025-07.md"),
+            citation(1, "京都", SourceType.VECTOR).copy(relativePath = "travel/京都.md"),
+        )
+
+        val result = searchPipeline.search(query, treeUri, cache = cache)
+        val paths = result.citations.map { it.relativePath }
+
+        // travel 配下の 3 件を、Reranker が上げた京都 → パス順で先頭に置き、日記はその後ろに残す
+        assertEquals(listOf("travel/京都.md", "travel/キャンプ/長野.md", "travel/沖縄.md", "journal/2025-07.md"), paths)
+    }
+
+    @Test
     fun `search matches single character filename for metadata topicMatch`() = runTest {
         val query = "歯についての記録"
         val treeUri = "tree/uri"

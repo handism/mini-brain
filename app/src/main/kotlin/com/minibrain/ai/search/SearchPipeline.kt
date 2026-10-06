@@ -72,8 +72,25 @@ class SearchPipeline(
         // 「初回訪問日: YYYY/MM/DD」のようなラベル行が firstParagraph (200) からこぼれていても
         // 拾えるよう、先頭 chunk テキストから長めに採る。
         private const val TOPIC_MATCH_SNIPPET_CHARS = 500
+        // 列挙の質問（「旅行を全部」「レシピ一覧」など）。近いフォルダの文書をまとめて先頭に置く（ADR-046）
+        private val ENUMERATION_QUERY_REGEX = Regex("""全部|全て|すべて|一覧|これまで[にの]""")
+        // 列挙で固定する文書の上限。上位フォルダがこれを超えるなら、選んだフォルダだけにする
+        internal const val ENUMERATION_MAX_DOCS = 8
         private val METADATA_SPLIT_REGEX = Regex("""[\s　、。・]+""")
         private val WHITESPACE_NORMALIZE_REGEX = Regex("""\s+""")
+
+        internal fun isEnumerationQuery(query: String): Boolean = ENUMERATION_QUERY_REGEX.containsMatchIn(query)
+
+        /**
+         * 列挙で固定するフォルダ。近いフォルダの上位フォルダ（`travel/キャンプ` なら `travel`）が
+         * ENUMERATION_MAX_DOCS 件以下ならそれを、多すぎれば近いフォルダ自身を返す。どちらも多すぎれば null。
+         */
+        internal fun enumerationScope(folder: String, paths: List<String>): String? {
+            val top = folder.substringBefore('/')
+            return listOf(top, folder).distinct().firstOrNull { prefix ->
+                paths.count { it.startsWith("$prefix/") } in 1..ENUMERATION_MAX_DOCS
+            }
+        }
 
         internal fun shouldSkipRerank(query: String, merged: List<Citation>): Boolean =
             DateResolver.isDateQuery(query) && merged.any { it.topicMatch }
@@ -127,6 +144,9 @@ class SearchPipeline(
         val final = performRerankingAndPinning(
             query, merged, dateRange, retrievalResult.dateRangeHits, onStatus, traceEvents
         )
+        val withFolder = if (dateRange == null && isEnumerationQuery(query)) {
+            pinEnumerationFolder(query, treeUri, final, merged, ctx)
+        } else final
         val finishedAt = System.currentTimeMillis()
         traceEvents += SearchTimingEvent(
             expansionMs = expansionResult.expansionMs,
@@ -138,7 +158,7 @@ class SearchPipeline(
             "retrieve=${rerankStartedAt - retrievalStartedAt} rerank=${finishedAt - rerankStartedAt}")
 
         return SearchPipelineResult(
-            final, traceEvents, candidates = merged, vectorHits = retrievalResult.vectorCandidates,
+            withFolder, traceEvents, candidates = merged, vectorHits = retrievalResult.vectorCandidates,
         )
     }
 
@@ -311,6 +331,56 @@ class SearchPipeline(
             )
             .map { it.value }
             .take(DATE_RANGE_PIN_COUNT)
+    }
+
+    // 列挙の質問では、Reranker が 10 件に絞る前に同じフォルダの文書が落ちやすい
+    // （「旅行を全部」で travel/ の 5 件のうち 2 件が漏れていた）。近いフォルダの文書を全部先頭に置き、
+    // 並びは Reranker の順位 → RRF の順位 → パス順にする（ADR-046）。
+    private suspend fun pinEnumerationFolder(
+        query: String,
+        treeUri: String,
+        reranked: List<Citation>,
+        merged: List<Citation>,
+        ctx: SearchRequestCache,
+    ): List<Citation> {
+        val folder = ragPipeline.nearestFolder(query, treeUri, ctx) ?: return reranked
+        val docs = ctx.documents()
+        val scope = enumerationScope(folder, docs.map { it.relativePath }) ?: run {
+            Timber.tag(TAG).d("enumeration: folder=$folder too large, skip")
+            return reranked
+        }
+        val inScope = docs.filter { it.relativePath.startsWith("$scope/") }
+
+        fun firstByDoc(list: List<Citation>): Map<Long, IndexedValue<Citation>> =
+            list.withIndex().filter { it.value.docId != null }
+                .groupBy { it.value.docId!! }
+                .mapValues { (_, hits) -> hits.minBy { it.index } }
+        val rerankHit = firstByDoc(reranked)
+        val mergedHit = firstByDoc(merged)
+
+        val pinned = inScope
+            .sortedWith(
+                compareBy(
+                    { rerankHit[it.id]?.index ?: Int.MAX_VALUE },
+                    { mergedHit[it.id]?.index ?: Int.MAX_VALUE },
+                    { it.relativePath },
+                )
+            )
+            .map { doc -> rerankHit[doc.id]?.value ?: mergedHit[doc.id]?.value ?: folderDocCitation(doc, ctx) }
+        val pinnedIds = inScope.mapTo(HashSet()) { it.id }
+        Timber.tag(TAG).d("enumeration: folder=$folder scope=$scope pinned=${pinned.size}")
+        return (pinned + reranked.filterNot { it.docId in pinnedIds }).take(RERANK_TOP_K)
+    }
+
+    private suspend fun folderDocCitation(doc: DocumentEntity, ctx: SearchRequestCache): Citation {
+        val firstChunk = ctx.firstChunkOf(doc.id)
+        return Citation(
+            headingPath = firstChunk?.headingPath ?: doc.relativePath,
+            snippet = firstChunk?.text?.take(SNIPPET_CHARS) ?: doc.firstParagraph.orEmpty(),
+            docId = doc.id,
+            relativePath = doc.relativePath,
+            source = SourceType.FOLDER,
+        )
     }
 
     private suspend fun bm25Search(query: String, treeUri: String, ctx: SearchRequestCache): List<Citation> {
