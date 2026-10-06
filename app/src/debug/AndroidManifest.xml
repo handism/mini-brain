@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- エミュレータでの評価（scripts/eval-emulator.sh）がフォルダの読み取り権限を取るためだけの画面。debug ビルドにのみ入る -->
+        <activity
+            android:name=".debug.GrantFolderActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    </application>
+</manifest>

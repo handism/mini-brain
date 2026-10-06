@@ -1612,3 +1612,33 @@ ADR-005 では `MiniBrainApp` クラスにおいて Kotlin の `by lazy` を用�
 - 正常なケースでも、配列の後に続いていた余計な出力の分だけ速くなる。
 - 低速な端末（CPU フォールバック）では、タイムアウトに引っかかって展開や Reranker が効かなくなる可能性がある。評価の「内訳」列で 15 秒・30 秒に張り付いていないか確認する。
 - 生成途中での打ち切りは、HyDE のタイムアウトと同じくキャンセルで行う。
+
+## ADR-045: 検索評価をエミュレータで自動実行する
+
+**日付:** 2026-10-06  
+**ステータス:** 採用
+
+### 背景
+
+- 検索の評価は、実機でフォルダを選び、再インデックスし、評価セット JSON を選んで流す手作業だった。施策ごとに「リリース → 実機に入れる → 評価 → 結果を貼る」が必要で、1 回の確認が重い。
+- 評価で測るのは SearchPipeline（展開〜Reranker）までで、画面は要らない。必要なのは、フォルダの SAF 権限・モデル・ノート・評価セットだけ。
+
+### 決定
+
+- `scripts/eval-emulator.sh` 1 本で、次を順に行う。
+  1. AVD `minibrain-eval`（`system-images;android-35;google_apis;arm64-v8a`、RAM 8GB・6 コア）が動いていなければヘッドレスで起動する。
+  2. debug APK と androidTest APK をビルドして入れる。
+  3. `eval/models/` のモデル 3 点を、サイズが違うときだけ `run-as` で `filesDir/models` に送る。
+  4. `eval/notes/` を `/sdcard/Documents/minibrain-eval` に入れ替えで送り、評価セットを `filesDir/eval/queries.json` に置く。
+  5. `EmulatorEvalTest`（androidTest）を `am instrument` で実行し、`filesDir/eval/report.md` を `eval/reports/<日時>-emulator.md` に回収する。
+- `EmulatorEvalTest` は、埋め込みと LLM を初期化し、`indexFolder` → `EvalRunner` → `EvalReport` を画面なしで実行する。進み具合は logcat の `EmulatorEval` タグに出す。
+- SAF のフォルダ権限は、debug ビルドにだけ入る `GrantFolderActivity` でフォルダ選択を開き、UiAutomator で「このフォルダを使用」「許可」を押して取る。権限はアプリを入れ直しても残るので、操作は初回だけ。
+- LLM は既定で CPU を使う。エミュレータには LiteRT-LM が使える GPU が無く、GPU の初期化がネイティブで落ちることもあるため。`EVAL_GPU=true` で GPU を試せる。
+- androidTest の依存（`androidx.test:runner`、`uiautomator`）と `testInstrumentationRunner` を追加する。release APK には何も入らない。
+
+### 影響
+
+- 1 回の評価は約 12 分（ビルドとモデル転送を含む。M1 Max・CPU 推論で平均 11.5 秒/件、実機は約 10 秒/件）。所要時間と「内訳」列は目安で、実機の値とは一致しない。極端に遅いケースの検出には使える。
+- 初回の実行（v1.2.4 相当のコード）では Recall@10 0.98 / MRR 0.95 で、multi-06 は 12.8 秒（実機 v1.2.3 では 105 秒）。ADR-044 の打ち切りが効き、タイムアウトに張り付いたケースは無かった。
+- LLM の出力は GPU と CPU で少し変わるので、Recall / MRR も実機と完全には一致しない。施策の前後比較はエミュレータ同士で行い、リリース前の最終確認は実機で行う。
+- モデル（約 2.7GB）・ノート・レポートは git 管理外の `eval/` に置く。

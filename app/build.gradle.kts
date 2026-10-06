@@ -16,6 +16,8 @@ android {
         // リリース時は -PversionCode=... -PversionName=... で上書きする（未指定ならローカル開発用の値）
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = (findProperty("versionName") as String?) ?: "1.0"
+        // エミュレータでの検索評価（scripts/eval-emulator.sh、ADR-045）用
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // 署名鍵は環境変数で渡す（Release ワークフロー用）。未設定なら未署名の release APK になる
@@ -110,6 +112,9 @@ dependencies {
     testImplementation(libs.androidx.navigation.testing)
     testImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    androidTestImplementation(libs.androidx.test.ext)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.uiautomator)
     // E5Tokenizer parity テスト用の参照実装（JVM のみ、APK には含まれない）
     testImplementation("ai.djl.huggingface:tokenizers:0.33.0")
     debugImplementation(libs.androidx.compose.ui.tooling)
