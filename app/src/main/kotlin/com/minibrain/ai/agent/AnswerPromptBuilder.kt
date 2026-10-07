@@ -1,6 +1,7 @@
 package com.minibrain.ai.agent
 
 import com.minibrain.ai.rag.Citation
+import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.util.DatePrefix
 import com.minibrain.util.PromptUtils
 import com.minibrain.util.TokenEstimator
@@ -121,10 +122,27 @@ $body
         val historyBlock = PromptUtils.renderHistoryBlock(context.history)
 
         val temporalBlock = if (temporalInstruction.isNotEmpty()) "$temporalInstruction\n\n" else ""
+        val enumerationBlock = buildEnumerationInstruction(context)
         val todayLine = "今日は ${formatJapaneseDate(context.today)}（${context.today.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.JAPAN)}）です。\n"
         // 小さいモデルは質問の直前・直後の指示を優先するので、解決済みの期間を質問のすぐ後ろにも書く（ADR-050）
         val periodNote = context.dateRange?.let { "\n（この質問の期間: ${formatPeriod(it)}）" } ?: ""
-        return "$contextBlock\n\n$temporalBlock$todayLine$historyBlock\nユーザー: ${context.question}$periodNote\nアシスタント:"
+        return "$contextBlock\n\n$temporalBlock$enumerationBlock$todayLine$historyBlock\nユーザー: ${context.question}$periodNote\nアシスタント:"
+    }
+
+    /**
+     * 一覧・全部を尋ねる質問では、小さいモデルが候補の途中を飛ばす（5 件中 1 件が抜ける）ので、
+     * 渡したファイルを番号付きで並べ、1 件ずつ確かめるよう質問の直前で指示する（ADR-051）。
+     */
+    private fun buildEnumerationInstruction(context: AnswerContext): String {
+        if (!SearchPipeline.isEnumerationQuery(context.question)) return ""
+        val paths = context.citations.mapNotNull { it.relativePath }.distinct()
+        if (paths.size < 2) return ""
+        val list = paths.mapIndexed { i, p -> "${i + 1}. $p" }.joinToString("\n")
+        return """
+【一覧の質問】
+知識ベースには次の ${paths.size} ファイルがあります。1 件ずつ順に確かめ、質問に当てはまるものは省略せずにすべて挙げてください。当てはまらないものは挙げないでください。
+$list
+""".trimIndent() + "\n\n"
     }
 
     private fun formatJapaneseDate(date: LocalDate): String = "${date.year}年${date.monthValue}月${date.dayOfMonth}日"

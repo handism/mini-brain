@@ -126,4 +126,23 @@ class AnswerPromptBuilderTest {
         val context = AnswerContext("NISAの積立額は？", emptyList(), emptyList(), today = java.time.LocalDate.of(2026, 10, 7))
         assertTrue(AnswerPromptBuilder.buildAnswerPrompt(context).endsWith("ユーザー: NISAの積立額は？\nアシスタント:"))
     }
+
+    @Test
+    fun `一覧の質問では渡したファイルを番号付きで並べる`() {
+        fun cit(path: String) = com.minibrain.ai.rag.Citation(headingPath = path, snippet = "s", relativePath = path)
+        val context = AnswerContext(
+            question = "これまでに行った旅行を全部教えて",
+            citations = listOf(cit("travel/京都.md"), cit("travel/沖縄.md"), cit("travel/京都.md")),
+            history = emptyList(),
+        )
+        val prompt = AnswerPromptBuilder.buildAnswerPrompt(context)
+        assertTrue(prompt.contains("【一覧の質問】\n知識ベースには次の 2 ファイルがあります。"))
+        assertTrue(prompt.contains("1. travel/京都.md\n2. travel/沖縄.md"))
+    }
+
+    @Test
+    fun `一覧の質問でなければ番号付きの一覧は出さない`() {
+        val context = AnswerContext("沖縄旅行はどうだった？", listOf(com.minibrain.ai.rag.Citation(headingPath = "h", snippet = "s", relativePath = "a.md")), emptyList())
+        assertFalse(AnswerPromptBuilder.buildAnswerPrompt(context).contains("【一覧の質問】"))
+    }
 }
