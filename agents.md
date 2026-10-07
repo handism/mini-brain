@@ -112,6 +112,7 @@
 - `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新すること。
 - `SearchPipeline.search` は `dateRange != null` かつ `dateRangeSearch` ヒットありのとき、上位 `DATE_RANGE_PIN_COUNT = 5` 件を Reranker 結果の先頭に強制マージします（ADR-025）。固定する 5 件は日付順の先頭ではなく、Reranker の順位 → RRF の順位 → 日付順で doc 単位に選びます（`selectDateRangePins`、ADR-043）。
 - 列挙の質問（`ENUMERATION_QUERY_REGEX`: 全部 / 全て / すべて / 一覧 / これまでに・の）で `dateRange == null` のときは、`RagPipeline.nearestFolder`（フォルダ埋め込み）で最も近いフォルダを選び、その上位フォルダが `ENUMERATION_MAX_DOCS = 8` 件以下なら上位フォルダごと、多ければ選んだフォルダだけの文書を全部、結果の先頭に置きます（`pinEnumerationFolder`、ADR-046）。
+- 質問にフォルダが書かれていれば（`SearchPipeline.explicitFolder`。`/` を含むパス、または 1 段の名前 +「にある」「の中」など）、そのフォルダの文書を先頭に固定し、`folderScope` として回答に渡して一覧をそのフォルダのファイルに絞ります（ADR-052）。
 - 一覧の質問（`isEnumerationQuery`）では、回答プロンプトの質問の前に、渡したファイルのパスを番号付きで並べて「省略せずにすべて挙げる」よう指示します（`AnswerPromptBuilder.buildEnumerationInstruction`、ADR-051）。
 - `QueryExpander` のプロンプトは、中心になる名詞の英訳を 1〜2 件含めるよう指示しています（英語のノートを日本語の質問で拾うため、ADR-046）。`docId::headingPath` で dedupe し、後段は Reranker 順を維持、最終的に `RERANK_TOP_K = 10` で切ります。`RRF_WEIGHTS` は変更しません（他クエリの順位を壊さないため）。
 - `dateRangeSearch` のスニペットは `firstParagraph`（200 字）ではなく **doc の先頭 chunk テキストから `DATE_RANGE_SNIPPET_CHARS = 600` 字** を採ります（ADR-025）。期間分岐・特定日付分岐のどちらも `dateHitCitation` を通します（ADR-029）。chunk が空の場合のみ `firstParagraph` フォールバック。スニペットが薄すぎて LLM が「具体的な内容が記載されていません」と返す問題への対処です。
@@ -119,7 +120,7 @@
 
 **日付抽出の詳細**
 - `DocumentRepository.Companion.extractDateFromPath` は 完全日付（`YYYY[-/_.]MM[-/_.]DD` / `YYYY年MM月DD日` / 8桁 `YYYYMMDD`）と 月のみ（`YYYY-MM` / `YYYY年MM月` / 6桁 `YYYYMM`）の両方を抽出します。月のみは月初 1 日（`YYYY-MM-01`）として登録。**完全日付 → 月のみの順を厳守**し、`LocalDate.of` の validity + 年が `1990..今年` の範囲チェックで誤マッチを弾きます。`@VisibleForTesting` で JVM テストから直接呼べます（ADR-025）。
-- `MarkdownMetaExtractor.extractDateFromContent` の YAML frontmatter ラベルは `date / created / published / updated / 日付 / 作成日 / 記録日`（IGNORE_CASE、`'"` クォート可）。**和暦パターン（`YYYY年MM月DD日` / `YYYY年MM月`）は見出し限定**で検出します — 本文中のカジュアルな言及で誤って `documentDate` が付くと Reranker の競合候補が増えて固有名詞ファイルが押し出される regression が起きるためです。Western 形式（`YYYY-MM-DD` / `YYYY/MM/DD`）は従来通り本文全行を走査します。
+- `MarkdownMetaExtractor.extractDateFromContent` の YAML frontmatter ラベルは `date / created / published / updated / 日付 / 作成日 / 記録日`（IGNORE_CASE、`'"` クォート可）。**和暦パターン（`YYYY年MM月DD日` / `YYYY年MM月`）は見出しと、行頭のラベル行（`- 読了: 2025年5月` など、ADR-052）に限って**検出します — 本文中のカジュアルな言及で誤って `documentDate` が付くと Reranker の競合候補が増えて固有名詞ファイルが押し出される regression が起きるためです。Western 形式（`YYYY-MM-DD` / `YYYY/MM/DD`）は従来通り本文全行を走査します。
 
 **トピックマッチと短絡判定（ADR-026）**
 - `Citation.topicMatch: Boolean` は `SearchPipeline.metadataSearch` でファイル名 stem が query の substring として一致したヒットだけ true。RRF 融合は metaCandidates を先頭に置く既存挙動と `mergeCandidatesRrf` の first-wins により後段まで保持されます。

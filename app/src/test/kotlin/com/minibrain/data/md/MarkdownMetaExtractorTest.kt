@@ -319,5 +319,18 @@ class MarkdownMetaExtractorTest {
     fun testExtractTags_noTags() {
         assertEquals(emptyList<String>(), MarkdownMetaExtractor.extractTags("Just some normal text without tags."))
     }
-}
 
+    @Test
+    fun `ラベル行の和暦は日付として拾い、月までなら月初にする`() {
+        val md = "# 三体\n\n- 著者: 劉慈欣\n- 読了: 2025年11月（第 1 部）、2026年1月（第 3 部まで）\n"
+        assertEquals("2025-11-01", MarkdownMetaExtractor.extractDateFromContent(md))
+        assertEquals("2025-05-03", MarkdownMetaExtractor.extractDateFromContent("# メモ\n読了日：2025年5月3日\n"))
+    }
+
+    @Test
+    fun `行頭のラベルでない和暦は拾わない`() {
+        // 本文中のカジュアルな言及で documentDate が付くと Reranker の競合が増える（agents.md 5.4）
+        assertEquals(null, MarkdownMetaExtractor.extractDateFromContent("# 本\n\n2025年5月に読了したのを思い出した\n"))
+        assertEquals(null, MarkdownMetaExtractor.extractDateFromContent("# 本\n\n- 購入: 2026年9月（神保町の古書店）。読書中\n"))
+    }
+}

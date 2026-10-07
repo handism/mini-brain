@@ -17,6 +17,8 @@ data class AnswerContext(
     val dateRange: DateRange? = null,
     // 「去年」「先月」を LLM が自分の感覚（学習時点の年）で読み替えないよう、プロンプトに今日の日付を書く（ADR-050）
     val today: LocalDate = LocalDate.now(),
+    // 質問に書かれたフォルダ（SearchPipelineResult.folderScope）。一覧の指示をこのフォルダのファイルに絞る（ADR-052）
+    val folderScope: String? = null,
 )
 
 /**
@@ -132,15 +134,19 @@ $body
     /**
      * 一覧・全部を尋ねる質問では、小さいモデルが候補の途中を飛ばす（5 件中 1 件が抜ける）ので、
      * 渡したファイルを番号付きで並べ、1 件ずつ確かめるよう質問の直前で指示する（ADR-051）。
+     * 質問にフォルダが書かれていれば、そのフォルダのファイルだけを並べる（ADR-052）。
      */
     private fun buildEnumerationInstruction(context: AnswerContext): String {
-        if (!SearchPipeline.isEnumerationQuery(context.question)) return ""
+        val scope = context.folderScope
+        if (scope == null && !SearchPipeline.isEnumerationQuery(context.question)) return ""
         val paths = context.citations.mapNotNull { it.relativePath }.distinct()
-        if (paths.size < 2) return ""
+            .filter { scope == null || it.startsWith("$scope/") }
+        if (paths.size < if (scope == null) 2 else 1) return ""
         val list = paths.mapIndexed { i, p -> "${i + 1}. $p" }.joinToString("\n")
+        val where = if (scope != null) "「$scope」フォルダ" else "知識ベース"
         return """
 【一覧の質問】
-知識ベースには次の ${paths.size} ファイルがあります。1 件ずつ順に確かめ、質問に当てはまるものは省略せずにすべて挙げてください。当てはまらないものは挙げないでください。
+${where}には次の ${paths.size} ファイルがあります。1 件ずつ順に確かめ、質問に当てはまるものは省略せずにすべて挙げてください。当てはまらないものは挙げないでください。
 $list
 """.trimIndent() + "\n\n"
     }

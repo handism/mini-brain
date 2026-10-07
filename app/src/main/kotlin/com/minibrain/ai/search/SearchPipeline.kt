@@ -37,6 +37,8 @@ data class SearchPipelineResult(
     val candidates: List<Citation> = emptyList(),
     // しきい値を通ったベクトル検索の結果（類似度つき）。評価で VECTOR_MIN_SCORE を見直すため（ADR-040）
     val vectorHits: List<Citation> = emptyList(),
+    // 質問に書かれたフォルダ（`work/meetings` など）。回答でこのフォルダのファイルを漏れなく挙げさせるため（ADR-052）
+    val folderScope: String? = null,
 )
 
 class SearchPipeline(
@@ -82,6 +84,43 @@ class SearchPipeline(
         private val WHITESPACE_NORMALIZE_REGEX = Regex("""\s+""")
 
         internal fun isEnumerationQuery(query: String): Boolean = ENUMERATION_QUERY_REGEX.containsMatchIn(query)
+
+        // フォルダ名 1 段だけの一致は、後ろにこれが続くときだけフォルダの指定とみなす（「レシピ一覧」の「レシピ」は数えない）
+        private val FOLDER_CUE_REGEX = Regex("""^\s*(?:フォルダ|にある|の中|内の|配下|folder|directory)""", RegexOption.IGNORE_CASE)
+        private val FOLDER_NAME_CHAR = Regex("""[\p{L}\p{N}_\-/]""")
+
+        /**
+         * 質問に書かれたフォルダ。`work/meetings` のように `/` を含むパスはそのまま、`travel-plan` のような
+         * 1 段の名前は後ろに「にある」「の中」などが続くときだけ一致とみなす。名前の一部だけの一致
+         * （`travel-plan` の中の `travel`）は数えない。複数あれば最も長いパス（ADR-052）。
+         */
+        internal fun explicitFolder(query: String, paths: List<String>): String? {
+            val folders = paths.flatMap { path ->
+                path.split('/').dropLast(1).runningReduce { acc, seg -> "$acc/$seg" }
+            }.distinct()
+            return folders.filter { folder ->
+                if ('/' in folder && mentions(query, folder) { true }) return@filter true
+                mentions(query, folder.substringAfterLast('/')) { after -> FOLDER_CUE_REGEX.containsMatchIn(after) }
+            }.maxByOrNull { it.length }
+        }
+
+        // name が前後を区切られた形で query に現れ、その直後の文字列が accept を満たすか
+        private inline fun mentions(query: String, name: String, accept: (String) -> Boolean): Boolean {
+            if (name.length < 2) return false
+            var from = 0
+            while (true) {
+                val i = query.indexOf(name, from, ignoreCase = true)
+                if (i < 0) return false
+                val before = query.getOrNull(i - 1)
+                val after = query.getOrNull(i + name.length)
+                // ASCII の名前は前後が英数字・記号で続いていない所だけ（日本語の名前は助詞が直接続くので見ない）
+                val asciiName = name.all { it.code < 128 }
+                val bounded = !asciiName || ((before == null || !FOLDER_NAME_CHAR.matches(before.toString())) &&
+                    (after == null || !FOLDER_NAME_CHAR.matches(after.toString())))
+                if (bounded && accept(query.substring(i + name.length))) return true
+                from = i + 1
+            }
+        }
 
         /**
          * 列挙で固定するフォルダ。近いフォルダの上位フォルダ（`travel/キャンプ` なら `travel`）が
@@ -182,9 +221,12 @@ class SearchPipeline(
         val final = performRerankingAndPinning(
             query, merged, dateRange, retrievalResult.dateRangeHits, onStatus, traceEvents
         )
-        val withFolder = if (dateRange == null && isEnumerationQuery(query)) {
-            pinEnumerationFolder(query, treeUri, final, merged, ctx)
-        } else final
+        val folderScope = if (dateRange == null) explicitFolder(query, ctx.documents().map { it.relativePath }) else null
+        val withFolder = when {
+            folderScope != null -> pinFolderDocs(folderScope, final, merged, ctx)
+            dateRange == null && isEnumerationQuery(query) -> pinEnumerationFolder(query, treeUri, final, merged, ctx)
+            else -> final
+        }
         val finishedAt = System.currentTimeMillis()
         traceEvents += SearchTimingEvent(
             expansionMs = expansionResult.expansionMs,
@@ -197,6 +239,7 @@ class SearchPipeline(
 
         return SearchPipelineResult(
             withFolder, traceEvents, candidates = merged, vectorHits = retrievalResult.vectorCandidates,
+            folderScope = folderScope,
         )
     }
 
@@ -387,12 +430,22 @@ class SearchPipeline(
         ctx: SearchRequestCache,
     ): List<Citation> {
         val folder = ragPipeline.nearestFolder(query, treeUri, ctx) ?: return reranked
-        val docs = ctx.documents()
-        val scope = enumerationScope(folder, docs.map { it.relativePath }) ?: run {
+        val scope = enumerationScope(folder, ctx.documents().map { it.relativePath }) ?: run {
             Timber.tag(TAG).d("enumeration: folder=$folder too large, skip")
             return reranked
         }
-        val inScope = docs.filter { it.relativePath.startsWith("$scope/") }
+        Timber.tag(TAG).d("enumeration: folder=$folder scope=$scope")
+        return pinFolderDocs(scope, reranked, merged, ctx)
+    }
+
+    // scope フォルダ（配下を含む）の文書を全部先頭に置く。並びは Reranker の順位 → RRF の順位 → パス順
+    private suspend fun pinFolderDocs(
+        scope: String,
+        reranked: List<Citation>,
+        merged: List<Citation>,
+        ctx: SearchRequestCache,
+    ): List<Citation> {
+        val inScope = ctx.documents().filter { it.relativePath.startsWith("$scope/") }
 
         fun firstByDoc(list: List<Citation>): Map<Long, IndexedValue<Citation>> =
             list.withIndex().filter { it.value.docId != null }
@@ -411,7 +464,7 @@ class SearchPipeline(
             )
             .map { doc -> rerankHit[doc.id]?.value ?: mergedHit[doc.id]?.value ?: folderDocCitation(doc, ctx) }
         val pinnedIds = inScope.mapTo(HashSet()) { it.id }
-        Timber.tag(TAG).d("enumeration: folder=$folder scope=$scope pinned=${pinned.size}")
+        Timber.tag(TAG).d("folder pin: scope=$scope pinned=${pinned.size}")
         return (pinned + reranked.filterNot { it.docId in pinnedIds }).take(RERANK_TOP_K)
     }
 

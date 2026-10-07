@@ -95,7 +95,7 @@ class AgentPipeline(
         val answerCitations = runCatchingCancellable { AnswerDocumentExpander.expand(citations, cache) }
             .onFailure { Timber.tag(TAG).w(it, "expand citations failed") }
             .getOrDefault(citations)
-        val answerContext = AnswerContext(question, answerCitations, recentHistory, dateRange)
+        val answerContext = AnswerContext(question, answerCitations, recentHistory, dateRange, folderScope = searchResult.folderScope)
         val answerFlow = llmService.generateStream(AnswerPromptBuilder.buildAnswerPrompt(answerContext))
         AgentResult(citations, answerFlow, traceEvents, searchResult)
     }

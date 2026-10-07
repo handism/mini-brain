@@ -145,4 +145,18 @@ class AnswerPromptBuilderTest {
         val context = AnswerContext("沖縄旅行はどうだった？", listOf(com.minibrain.ai.rag.Citation(headingPath = "h", snippet = "s", relativePath = "a.md")), emptyList())
         assertFalse(AnswerPromptBuilder.buildAnswerPrompt(context).contains("【一覧の質問】"))
     }
+
+    @Test
+    fun `フォルダが書かれた質問では、そのフォルダのファイルだけを並べる`() {
+        fun cit(path: String) = com.minibrain.ai.rag.Citation(headingPath = path, snippet = "s", relativePath = path)
+        val context = AnswerContext(
+            question = "travel-plan にある行きたい場所",
+            citations = listOf(cit("travel-plan/欧州.md"), cit("travel/京都.md"), cit("travel-plan/屋久島.md")),
+            history = emptyList(),
+            folderScope = "travel-plan",
+        )
+        val prompt = AnswerPromptBuilder.buildAnswerPrompt(context)
+        assertTrue(prompt.contains("「travel-plan」フォルダには次の 2 ファイルがあります。"))
+        assertTrue(prompt.contains("1. travel-plan/欧州.md\n2. travel-plan/屋久島.md"))
+    }
 }

@@ -15,6 +15,11 @@ object MarkdownMetaExtractor {
         """(?:初回訪問日|訪問日|来訪日|日付|date|created|published|updated|作成日|記録日|イベント日|visited)[：:]\s*(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})""",
         RegexOption.IGNORE_CASE,
     )
+    // 「- 読了: 2025年5月」のようなラベル行の和暦。本文の和暦は誤マッチが多いので拾わない（下の 4.）が、
+    // 行頭のラベルに続く日付は記録日とみなせる（ADR-052）。日まであれば日付、月までなら月初
+    private val LABELED_JP_DATE_REGEX = Regex(
+        """(?m)^\s*(?:[-*+]\s+)?(?:初回訪問日|訪問日|来訪日|日付|作成日|記録日|イベント日|読了|読了日|鑑賞日|視聴日|開催日|実施日)[：:]\s*(\d{4})年(\d{1,2})月(?:(\d{1,2})日)?""",
+    )
     private val BODY_DATE_REGEX = Regex("""(?<!\d)(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})(?!\d)""")
     private val HEADING_JP_DATE_REGEX = Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日""")
     private val HEADING_JP_MONTH_REGEX = Regex("""(\d{4})年(\d{1,2})月(?!\d)""")
@@ -81,6 +86,12 @@ object MarkdownMetaExtractor {
         LABELED_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
             val (y, m, d) = it.destructured
             safeDate(y, m, d)
+        }?.let { return it }
+
+        // 2b. 行頭のラベル行の YYYY年M月(D日)
+        LABELED_JP_DATE_REGEX.findAll(content).firstNotNullOfOrNull {
+            val (y, m, d) = it.destructured
+            safeDate(y, m, d.ifEmpty { "1" })
         }?.let { return it }
 
         // 3. 本文中の最初の YYYY/MM/DD または YYYY-MM-DD（1990〜今日の範囲のみ）

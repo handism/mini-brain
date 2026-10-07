@@ -419,5 +419,19 @@ class SearchPipelineTest {
         val bm25 = result.candidates.single { it.source == SourceType.BM25 }
         assertEquals("food/note.md", bm25.relativePath)
     }
-}
 
+    @Test
+    fun `質問に書かれたフォルダを見つける`() {
+        val paths = listOf(
+            "travel/京都.md", "travel/キャンプ/長野 白樺湖.md", "travel-plan/屋久島.md",
+            "work/meetings/a.md", "work/オンボーディング.md", "food/レシピ/カレー.md",
+        )
+        assertEquals("travel-plan", SearchPipeline.explicitFolder("travel-plan にある行きたい場所", paths))
+        assertEquals("work/meetings", SearchPipeline.explicitFolder("work/meetings の議事録を一覧で", paths))
+        assertEquals("travel/キャンプ", SearchPipeline.explicitFolder("キャンプフォルダの中身", paths))
+        // 名前の一部（travel-plan の travel）や、後ろにフォルダの合図が無い 1 段の名前は数えない
+        assertEquals(null, SearchPipeline.explicitFolder("travelplan について", paths))
+        assertEquals(null, SearchPipeline.explicitFolder("作ったことのある料理のレシピ一覧", paths))
+        assertEquals(null, SearchPipeline.explicitFolder("how does work go", paths))
+    }
+}
