@@ -219,5 +219,22 @@ class EvalMetricsTest {
         assertTrue(EvalMetrics.isAbstention("提供された情報には記載されていません。"))
         assertTrue(EvalMetrics.isAbstention("その情報は見つかりませんでした"))
         assertFalse(EvalMetrics.isAbstention("2025年4月に引っ越しました。"))
+        // 答えた後の補足は数えない
+        assertFalse(EvalMetrics.isAbstention("スパイス堂は欧風カレーの店です。" + "場所は神保町駅から徒歩3分。".repeat(12) + "（補足: 営業時間は記載されていません）"))
+    }
+
+    @Test
+    fun `答えの無い質問は検索の指標から外し、控えた割合だけを数える`() {
+        val obs = listOf(
+            EvalObservation(EvalCase("ok", "q", listOf("a.md")), listOf(cit("a.md"))),
+            EvalObservation(EvalCase("un1", "q", emptyList(), unanswerable = true), listOf(cit("x.md")), answer = "ご質問ありがとうございます。知識ベースには記載されていません。"),
+            EvalObservation(EvalCase("un2", "q", emptyList(), unanswerable = true), listOf(cit("x.md")), answer = "ホテル・オーシャンです。"),
+        )
+        val r = EvalMetrics.computeObservations(obs, k = 10)
+        assertEquals(1.0, r.precisionAtK, 1e-9)
+        assertEquals(1.0, r.recallAtK, 1e-9)
+        assertEquals(2, r.unanswerableCases)
+        assertEquals(0.5, r.declineRate, 1e-9)
+        assertEquals(0, r.abstentions)
     }
 }

@@ -73,6 +73,7 @@ class EvalRunner(
             var query: String? = null
             var expected: List<String> = emptyList()
             var facts: List<String> = emptyList()
+            var unanswerable = false
             reader.beginObject()
             while (reader.hasNext()) {
                 when (reader.nextName()) {
@@ -80,6 +81,7 @@ class EvalRunner(
                     "query" -> query = reader.nextString()
                     "expected" -> expected = parseStringArray(reader)
                     "facts" -> facts = parseStringArray(reader)
+                    "unanswerable" -> unanswerable = reader.nextBoolean()
                     else -> reader.skipValue()
                 }
             }
@@ -87,7 +89,7 @@ class EvalRunner(
             require(!id.isNullOrBlank() && !query.isNullOrBlank()) {
                 "eval case missing id/query"
             }
-            return EvalCase(id, query, expected, facts)
+            return EvalCase(id, query, expected, facts, unanswerable)
         }
 
         private fun parseStringArray(reader: JsonReader): List<String> {

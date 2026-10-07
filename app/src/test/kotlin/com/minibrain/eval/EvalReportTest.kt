@@ -91,4 +91,19 @@ class EvalReportTest {
         assertTrue(answers.contains("- 事実: ✗ B"))
         assertTrue(answers.contains("> 記載されていません"))
     }
+
+    @Test
+    fun `答えの無い質問に答えたケースを取りこぼしに出す`() {
+        val r = EvalMetrics.computeObservations(
+            listOf(
+                EvalObservation(EvalCase("un", "ホテルの名前", emptyList(), unanswerable = true), listOf(cit("x.md")), answer = "ホテル・オーシャンです。"),
+            ),
+            k = 10,
+        )
+        val md = EvalReport.toMarkdown(r, "回答評価")
+        assertTrue(md.contains("- 答えの無い質問で控えた割合: 0.00（1 件）"))
+        assertTrue(md.contains("- [un] ホテルの名前（答えの無い質問に答えた）"))
+        assertFalse(md.contains("## 取りこぼし"))
+        assertTrue(EvalReport.answersToMarkdown(r, "回答").contains("- 答えの無い質問: ✗ 答えた"))
+    }
 }

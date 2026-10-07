@@ -30,6 +30,9 @@ object EvalReport {
             appendLine("- 回答の完全正答率: ${fmt(result.answerAccuracy)}")
             appendLine("- 答えられず: ${result.abstentions} 件")
         }
+        if (result.unanswerableCases > 0) {
+            appendLine("- 答えの無い質問で控えた割合: ${fmt(result.declineRate)}（${result.unanswerableCases} 件）")
+        }
 
         if (unknownPaths.isNotEmpty()) {
             appendLine()
@@ -37,7 +40,7 @@ object EvalReport {
             unknownPaths.forEach { appendLine("- $it") }
         }
 
-        val misses = result.perCase.filter { it.missedPaths.isNotEmpty() || it.error != null }
+        val misses = result.perCase.filter { !it.unanswerable && (it.missedPaths.isNotEmpty() || it.error != null) }
         if (misses.isNotEmpty()) {
             appendLine()
             appendLine("## 取りこぼし")
@@ -82,13 +85,19 @@ object EvalReport {
             )
         }
 
-        val answerMisses = result.perCase.filter { it.missedFacts.isNotEmpty() || it.abstained }
+        val answerMisses = result.perCase.filter {
+            if (it.unanswerable) it.answer != null && !it.declined else it.missedFacts.isNotEmpty() || it.abstained
+        }
         if (answerMisses.isNotEmpty()) {
             appendLine()
             appendLine("## 回答の取りこぼし")
             answerMisses.forEach { c ->
-                val searchNote = if (c.missedPaths.isEmpty()) "検索は正解" else "検索で ${c.missedPaths.size} 件取りこぼし"
-                val abstainNote = if (c.abstained) "・答えられず" else ""
+                val searchNote = when {
+                    c.unanswerable -> "答えの無い質問に答えた"
+                    c.missedPaths.isEmpty() -> "検索は正解"
+                    else -> "検索で ${c.missedPaths.size} 件取りこぼし"
+                }
+                val abstainNote = if (c.abstained && !c.unanswerable) "・答えられず" else ""
                 appendLine("- [${c.id}] ${c.query}（$searchNote$abstainNote）")
                 if (c.missedFacts.isNotEmpty()) appendLine("  - 無い事実: ${c.missedFacts.joinToString(" / ")}")
             }
@@ -103,6 +112,7 @@ object EvalReport {
             appendLine("## ${c.id} ${c.query}")
             val facts = c.hitFacts.map { "✓ $it" } + c.missedFacts.map { "✗ $it" }
             if (facts.isNotEmpty()) appendLine("- 事実: ${facts.joinToString(" / ")}")
+            if (c.unanswerable) appendLine("- 答えの無い質問: ${if (c.declined) "✓ 控えた" else "✗ 答えた"}")
             appendLine("- 上位: ${c.retrievedPaths.take(5).joinToString(", ")}")
             appendLine()
             c.answer!!.trim().lines().forEach { appendLine("> $it") }

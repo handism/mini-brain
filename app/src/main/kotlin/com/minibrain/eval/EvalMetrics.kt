@@ -18,7 +18,10 @@ import java.text.Normalizer
  * 回答の指標（ADR-048。facts のあるケースで回答を生成したときだけ）:
  * - 事実 Recall : facts のうち回答に含まれていたものの割合
  * - 完全正答率  : facts をすべて含んでいたケースの割合
- * - 答えられず  : 「見つかりません」などと答えたケースの数
+ * - 答えられず  : 回答の冒頭で「見つかりません」などと答えたケースの数（ADR-054）
+ * - 答えの無い質問で控えた割合: unanswerable のケースで、回答のどこかで「見つからない」と答えた割合（ADR-054）
+ *
+ * unanswerable のケースは、検索の指標（P / R / MRR / 候補 R）と回答の事実の指標から外す。
  */
 data class EvalResult(
     val cases: Int,
@@ -34,6 +37,9 @@ data class EvalResult(
     val factRecall: Double = 0.0,
     val answerAccuracy: Double = 0.0,
     val abstentions: Int = 0,
+    /** 答えの無い質問（unanswerable）で回答を生成したケースの数と、そのうち「見つからない」と答えた割合 */
+    val unanswerableCases: Int = 0,
+    val declineRate: Double = 0.0,
 )
 
 data class PerCaseResult(
@@ -66,6 +72,9 @@ data class PerCaseResult(
     val missedFacts: List<String> = emptyList(),
     /** 「見つかりません」などと答えたか */
     val abstained: Boolean = false,
+    val unanswerable: Boolean = false,
+    /** unanswerable のケースで、回答のどこかで「見つからない」と答えたか */
+    val declined: Boolean = false,
 ) {
     /** 回答の採点対象か（回答があり、facts がある） */
     val answerScored: Boolean get() = answer != null && (hitFacts.size + missedFacts.size) > 0
@@ -89,7 +98,7 @@ object EvalMetrics {
 
     // 回答が根拠を見つけられなかったときの言い回し（AnswerPromptBuilder の指示とモデルの癖から）
     private val ABSTAIN_REGEX = Regex(
-        "(情報|記載|記述|記録)(が|は)?(見つかり|含まれてい|ありませ|され(てい)?ませ)|わかりません|分かりません|特定できません"
+        "(情報|記載|記述|記録)(が|は)?(見つかり|見当たり|含まれてい|ありませ|され(てい)?ませ)|見当たりません|書かれていません|載っていません|わかりません|分かりません|特定できません"
     )
 
     // 照合の前に全角半角・大文字小文字・空白・桁区切りをそろえる
@@ -102,7 +111,11 @@ object EvalMetrics {
         return fact.split('|').map(::normalizeForFact).any { it.isNotEmpty() && it in normalized }
     }
 
-    fun isAbstention(answer: String): Boolean = ABSTAIN_REGEX.containsMatchIn(answer)
+    // 答えた後の補足（「…は記載されていませんが」）は数えない。冒頭の前置きの挨拶を越える程度の長さにする
+    private const val ABSTAIN_HEAD_CHARS = 150
+
+    /** 回答の冒頭で、根拠が見つからないと答えたか。補足欄の「記載されていません」は数えない（ADR-054） */
+    fun isAbstention(answer: String): Boolean = ABSTAIN_REGEX.containsMatchIn(answer.trimStart().take(ABSTAIN_HEAD_CHARS))
 
     fun compute(
         cases: List<Pair<EvalCase, List<Citation>>>,
@@ -114,8 +127,10 @@ object EvalMetrics {
         if (observations.isEmpty()) return EvalResult(0, k, 0.0, 0.0, 0.0, emptyList())
 
         val perCase = observations.map { computeOne(it, k) }
-        val avg = { sel: (PerCaseResult) -> Double -> perCase.sumOf(sel) / perCase.size }
+        val answerable = perCase.filterNot { it.unanswerable }
+        val avg = { sel: (PerCaseResult) -> Double -> if (answerable.isEmpty()) 0.0 else answerable.sumOf(sel) / answerable.size }
         val scored = perCase.filter { it.answerScored }
+        val unanswered = perCase.filter { it.unanswerable && it.answer != null }
         return EvalResult(
             cases = perCase.size,
             k = k,
@@ -128,7 +143,9 @@ object EvalMetrics {
             answeredCases = scored.size,
             factRecall = if (scored.isEmpty()) 0.0 else scored.sumOf { it.factRecall } / scored.size,
             answerAccuracy = if (scored.isEmpty()) 0.0 else scored.count { it.missedFacts.isEmpty() }.toDouble() / scored.size,
-            abstentions = perCase.count { it.abstained },
+            abstentions = answerable.count { it.abstained },
+            unanswerableCases = unanswered.size,
+            declineRate = if (unanswered.isEmpty()) 0.0 else unanswered.count { it.declined }.toDouble() / unanswered.size,
         )
     }
 
@@ -196,6 +213,8 @@ object EvalMetrics {
             hitFacts = hitFacts,
             missedFacts = missedFacts,
             abstained = answer != null && isAbstention(answer),
+            unanswerable = case.unanswerable,
+            declined = answer != null && ABSTAIN_REGEX.containsMatchIn(answer),
         )
     }
 }
