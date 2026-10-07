@@ -91,7 +91,11 @@ class AgentPipeline(
         }
 
         onStatus?.invoke("")
-        val answerContext = AnswerContext(question, citations, recentHistory, dateRange)
+        // 回答には上位の文書を全文で渡す。画面に出す引用元（AgentResult.citations）は変えない（ADR-049）
+        val answerCitations = runCatchingCancellable { AnswerDocumentExpander.expand(citations, cache) }
+            .onFailure { Timber.tag(TAG).w(it, "expand citations failed") }
+            .getOrDefault(citations)
+        val answerContext = AnswerContext(question, answerCitations, recentHistory, dateRange)
         val answerFlow = llmService.generateStream(AnswerPromptBuilder.buildAnswerPrompt(answerContext))
         AgentResult(citations, answerFlow, traceEvents, searchResult)
     }

@@ -20,10 +20,14 @@ data class AnswerContext(
  */
 object AnswerPromptBuilder {
 
+    // 上位 3 件を全文（各 1,500 字まで）で渡すため、ReAct の観測（MAX_CONTEXT_TOKENS）より広く取る。
+    // Gemma の maxNumTokens 4096 は入出力の合計なので、指示文と回答の分を残す（ADR-049）
+    const val ANSWER_CONTEXT_TOKENS = 1800
+
     private fun buildContextBlock(citations: List<Citation>): String {
         return if (citations.isNotEmpty()) {
             val budgeted = mutableListOf<Citation>()
-            var remainingTokens = TokenEstimator.MAX_CONTEXT_TOKENS
+            var remainingTokens = ANSWER_CONTEXT_TOKENS
             for (c in citations) {
                 val cost = TokenEstimator.estimate(c.headingPath, c.snippet)
                 if (remainingTokens <= 0) break

@@ -105,6 +105,7 @@
 
 **チューニング定数**
 - RRF 後の候補は `SearchPipeline.collapseByDoc` で 1 ファイル 1 件にまとめてから Reranker に渡します。代表は最上位のチャンクで、ファイル名一致（`topicMatch`）があればそちらを残し、日付ヒットの日付は代表のスニペットに `[日付:]` として付けます。Reranker の後、RRF 上位 `RRF_KEEP_COUNT = 3` 件のうち落とされたものを末尾に戻します（`keepRrfTop`、ADR-047）。
+- 回答 LLM には、最終結果の上位 `AnswerDocumentExpander.EXPAND_DOCS = 3` 文書を 1 チャンクではなく全文（`MAX_DOC_CHARS = 1500` 字まで。超えたら一致したチャンクの前後）で渡します。同じ文書の 2 件目は外します。画面の引用元（`AgentResult.citations`）は変えません。回答側の文脈の上限は `AnswerPromptBuilder.ANSWER_CONTEXT_TOKENS = 1800` で、ReAct 用の `TokenEstimator.MAX_CONTEXT_TOKENS`（1200）とは別です（ADR-049）。
 - `LlmReranker` は RRF 上位 `CANDIDATE_LIMIT = 20` 件を、本文 `SNIPPET_MAX_CHARS = 300` 字ずつで判定します。件数と字数はプロンプト量（約 2,500 トークン）とのトレードオフなので、片方を増やすなら片方を減らしてください。BM25 のスニペット長（`SearchPipeline.SNIPPET_CHARS`）もこれに揃えています（ADR-039）。
 - `mergeCandidatesRrf(weights=...)` の重みは `[meta=1.5, vector=1.0, bm25=1.2]`。順序を変える場合は SearchPipeline 側の `RRF_WEIGHTS` も合わせて更新すること。
 - `MarkdownChunker.OVERLAP_CHARS = 120` / `SECTION_TAIL_CARRY = 80`。チャンクサイズを変更したら `MarkdownChunkerTest` の期待値も更新すること。
