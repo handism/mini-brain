@@ -77,6 +77,7 @@
 ### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
 - **ファイル名逆引き**: `SearchPipeline.metadataSearch` では、ファイルの拡張子を除いた名前に部分一致するクエリを検出して優先抽出します（形態素解析に依存しない日本語ファイル検出のため）。判定は `FileNames.stemMatchesAnyQuery` に集約されており、`PlannerHintBuilder.build` のファイル名候補抽出も同じ規則を使います。しきい値 `MIN_STEM_MATCH_CHARS = 1` は `歯.md` / `AI.md` のような 1 文字 stem を拾うための値です（ADR-026 の記載は 3 でしたが後日 1 に引き下げ）。
 - **期間クエリ**: `dateRange != null` のときは、該当期間に属する文書（`documentDate` で判定）を優先検索し、上位5件を再ランカー結果の先頭に強制ピン留めします。`DateResolver.resolveDateRange` は年まで入った特定の日付（`YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日` / 8 桁 `YYYYMMDD`）を最初に見て、1 日だけの期間として返します（月全体に広げない）。「YYYY年の夏」のような年 + 季節も期間にします（ADR-042）。
+- **回答プロンプトの日付**: `AnswerPromptBuilder.buildAnswerPrompt` は質問の前に今日の日付（`AnswerContext.today`）を入れ、`dateRange` があれば質問文のすぐ後ろに「（この質問の期間: …）」を足します。無いと LLM が「去年」を学習時点の年で読み替えます（ADR-050）。
 - **日付抽出**: `DocumentRepository.extractDateFromPath` は、ファイル名から日付（完全日付 `YYYY-MM-DD` または月のみ `YYYY-MM`）を正しくパースできるようにしてください。月のみの場合は月初の日付（`-01`）として処理します。
 - **日付の LLM 参照優先度**: 日付に関連するクエリの場合、LLM に対して以下の優先順位で日付情報を解決するように回答プロンプト（`AnswerPromptBuilder.buildAnswerPrompt`）内で明確に指示を差し込みます。
   1. `[日付: YYYY-MM-DD]` のプレフィックス

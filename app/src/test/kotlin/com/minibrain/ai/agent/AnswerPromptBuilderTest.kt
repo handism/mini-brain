@@ -106,4 +106,24 @@ class AnswerPromptBuilderTest {
         assertTrue(prompt.contains("【日付に関する質問】"))
         assertTrue(prompt.contains("該当ファイル名がクエリに含まれている場合は、そのファイルの本文中の日付を主な根拠として「いつ」かを具体的に答えてください"))
     }
+
+    @Test
+    fun `今日の日付と、解決済みの期間を質問のすぐ後ろに書く`() {
+        val context = AnswerContext(
+            question = "去年の秋に何があった？",
+            citations = listOf(com.minibrain.ai.rag.Citation(headingPath = "h", snippet = "s", relativePath = "a.md")),
+            history = emptyList(),
+            dateRange = DateRange(java.time.LocalDate.of(2025, 9, 1), java.time.LocalDate.of(2025, 11, 30)),
+            today = java.time.LocalDate.of(2026, 10, 7),
+        )
+        val prompt = AnswerPromptBuilder.buildAnswerPrompt(context)
+        assertTrue(prompt.contains("今日は 2026年10月7日（水）です。"))
+        assertTrue(prompt.contains("ユーザー: 去年の秋に何があった？\n（この質問の期間: 2025年9月1日 〜 2025年11月30日）\nアシスタント:"))
+    }
+
+    @Test
+    fun `期間が無ければ質問の後ろに何も足さない`() {
+        val context = AnswerContext("NISAの積立額は？", emptyList(), emptyList(), today = java.time.LocalDate.of(2026, 10, 7))
+        assertTrue(AnswerPromptBuilder.buildAnswerPrompt(context).endsWith("ユーザー: NISAの積立額は？\nアシスタント:"))
+    }
 }
