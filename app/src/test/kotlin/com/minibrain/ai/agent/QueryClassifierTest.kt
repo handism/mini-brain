@@ -127,4 +127,11 @@ class QueryClassifierTest {
             QueryClassifier.classify("去年の夏は何してた？", today, dateRange = null),
         )
     }
+
+    @Test
+    fun `仕組みでも自分が調べたことを聞いていればMEMORY`() {
+        assertEquals(QueryType.MEMORY_SEARCH, classify("検索の仕組みについて調べたこと"))
+        assertEquals(QueryType.MEMORY_SEARCH, classify("Raftの仕組みで勉強したこと"))
+        assertEquals(QueryType.GENERAL_KNOWLEDGE, classify("検索の仕組み"))
+    }
 }
