@@ -10,7 +10,14 @@
 # 環境変数: AVD（既定 minibrain-eval）/ ANDROID_HOME / JAVA_HOME / EVAL_GPU=true で LLM を GPU で試す
 #           EVAL_CASES=id1,id2 で一部のケースだけ / EVAL_DUMP=true で候補の並びを eval/reports/*-dump.md に出す
 #           EVAL_ANSWER=true で回答まで生成して facts と照合し、全文を eval/reports/*-answers.md に出す（ADR-048）
+#           EVAL_LLM=gemma-4-E4B-it.litertlm で eval/models/ の別の LLM を使う / EVAL_SPEC=true|false で投機的デコード（ADR-056）
 set -euo pipefail
+
+# 実行中に Mac がスリープするとエミュレータ内の LiteRT-LM が毎回落ちる状態になり、AVD のデータを消すまで直らない（ADR-056）。
+# 評価の間はスリープを止める
+if [[ "$(uname)" == Darwin && -z "${EVAL_CAFFEINATED:-}" ]]; then
+  EVAL_CAFFEINATED=1 exec caffeinate -ims "$0" "$@"
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 QUERIES="${1:-$ROOT/eval/queries.json}"
@@ -23,6 +30,7 @@ ADB="$ANDROID_HOME/platform-tools/adb"
 PKG=com.minibrain
 DEVICE_NOTES=Documents/minibrain-eval
 MODEL_FILES=(gemma-4-E2B-it.litertlm multilingual-e5-small-q.onnx e5-tokenizer.json)
+[[ -n "${EVAL_LLM:-}" ]] && MODEL_FILES+=("$EVAL_LLM")
 
 log() { printf '\033[1m[eval]\033[0m %s\n' "$*"; }
 
@@ -78,6 +86,7 @@ started=$(date +%s)
 out=$($ADB shell am instrument -w -e class com.minibrain.eval.EmulatorEvalTest \
   -e gpu "${EVAL_GPU:-false}" ${EVAL_CASES:+-e cases "$EVAL_CASES"} -e dump "${EVAL_DUMP:-false}" \
   -e answer "${EVAL_ANSWER:-false}" \
+  ${EVAL_LLM:+-e llm "$EVAL_LLM"} ${EVAL_SPEC:+-e spec "$EVAL_SPEC"} \
   $PKG.test/androidx.test.runner.AndroidJUnitRunner)
 if ! grep -q '^OK (1 test)' <<<"$(tr -d '\r' <<<"$out")"; then
   echo "$out" >&2

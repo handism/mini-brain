@@ -10,6 +10,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import com.google.ai.edge.litertlm.Capabilities
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.minibrain.MiniBrainApp
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.debug.GrantFolderActivity
@@ -36,6 +39,8 @@ import org.junit.runner.RunWith
  * - cases : カンマ区切りの id。指定したケースだけ流す
  * - dump  : true なら各ケースの候補（RRF 後・Reranker 前）と最終結果を filesDir/eval/dump.md に書く
  * - answer: true なら AgentPipeline で回答まで生成し、facts と照合する。回答の全文は filesDir/eval/answers.md（ADR-048）
+ * - llm   : filesDir/models の LLM のファイル名（既定はアプリと同じ E2B）。E4B などを比べるため（ADR-056）
+ * - spec  : true / false で LiteRT-LM の投機的デコードを明示的に有効 / 無効にする（既定はライブラリ任せ）
  *
  * 結果は filesDir/eval/report.md に書き、進み具合は logcat の EmulatorEval タグに出す。
  */
@@ -45,6 +50,7 @@ class EmulatorEvalTest {
     private val args = InstrumentationRegistry.getArguments()
     private val app = ApplicationProvider.getApplicationContext<MiniBrainApp>()
 
+    @OptIn(ExperimentalApi::class)
     @Test
     fun runEval() = runBlocking {
         val folder = args.getString("folder") ?: "Documents/minibrain-eval"
@@ -60,8 +66,11 @@ class EmulatorEvalTest {
         val container = app.container
         val models = container.modelDownloader
         container.embedderService.initialize(models.embedderModelFile, models.tokenizerModelFile)
-        container.llmService.initialize(models.llmModelFile, forceCpu = args.getString("gpu") != "true")
-        log("models ready")
+        val llmFile = args.getString("llm")?.let { File(models.llmModelFile.parentFile, it) } ?: models.llmModelFile
+        args.getString("spec")?.let { ExperimentalFlags.enableSpeculativeDecoding = it == "true" }
+        val specSupported = runCatching { Capabilities(llmFile.absolutePath).use { it.hasSpeculativeDecodingSupport() } }.getOrNull()
+        container.llmService.initialize(llmFile, forceCpu = args.getString("gpu") != "true")
+        log("models ready llm=${llmFile.name} specSupported=$specSupported spec=${ExperimentalFlags.enableSpeculativeDecoding}")
 
         val repo = container.documentRepository
         repo.indexFolder(treeUri)
@@ -84,7 +93,8 @@ class EmulatorEvalTest {
         }
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.JAPAN).format(Date())
         val kind = if (withAnswer) "回答評価" else "検索評価"
-        val report = EvalReport.toMarkdown(result, "$kind $stamp（${queries.name}・エミュレータ）", unknownPaths)
+        val llmNote = if (llmFile != models.llmModelFile) "・${llmFile.name}" else ""
+        val report = EvalReport.toMarkdown(result, "$kind $stamp（${queries.name}・エミュレータ$llmNote）", unknownPaths)
         File(evalDir, "report.md").writeText(report)
         if (withAnswer) {
             File(evalDir, "answers.md").writeText(EvalReport.answersToMarkdown(result, "回答 $stamp（${queries.name}）"))
