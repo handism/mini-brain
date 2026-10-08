@@ -14,6 +14,12 @@ import com.minibrain.data.repo.DocumentRepository
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.dataStore
 import com.minibrain.di.AppContainer
+import com.minibrain.ai.llm.LlmModel
+import com.minibrain.ai.llm.LlmService
+import com.minibrain.ai.llm.DownloadResult
+import com.minibrain.ai.llm.DownloadProgress
+import io.mockk.verify
+import kotlinx.coroutines.flow.flowOf
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -178,6 +184,7 @@ class SettingsViewModelTest {
         val prefs = mockk<Preferences>()
         every { prefs[PREF_TREE_URI_SETTINGS] } returns uriStr
         every { prefs[PREF_SHOW_SEARCH_LOG] } returns null
+        every { prefs.asMap() } returns emptyMap()
         prefsFlow.value = prefs
         indexingStateFlow.value = IndexingState.Progress(1, 10, "a.md")
 
@@ -196,6 +203,7 @@ class SettingsViewModelTest {
         val prefs = mockk<Preferences>()
         every { prefs[PREF_TREE_URI_SETTINGS] } returns uriStr
         every { prefs[PREF_SHOW_SEARCH_LOG] } returns null
+        every { prefs.asMap() } returns emptyMap()
         prefsFlow.value = prefs
         val sameUri = mockk<Uri>()
         every { sameUri.toString() } returns uriStr
@@ -284,12 +292,71 @@ class SettingsViewModelTest {
     fun `model files are retrieved correctly`() {
         val llmFile = File("llm.bin")
         val embedderFile = File("embedder.onnx")
-        every { modelDownloader.llmModelFile } returns llmFile
+        every { modelDownloader.llmFile(LlmModel.E2B) } returns llmFile
         every { modelDownloader.embedderModelFile } returns embedderFile
 
         val viewModel = SettingsViewModel(app)
 
-        assertEquals(llmFile, viewModel.llmModelFile)
+        assertEquals(llmFile, viewModel.llmFile(LlmModel.E2B))
         assertEquals(embedderFile, viewModel.embedderModelFile)
+    }
+
+    private fun stubLlm(): LlmService {
+        val llm = mockk<LlmService>(relaxed = true)
+        every { container.llmService } returns llm
+        every { modelDownloader.llmFile(LlmModel.E2B) } returns File("e2b")
+        every { modelDownloader.llmFile(LlmModel.E4B) } returns File("e4b")
+        every { modelDownloader.deleteLlm(any()) } returns Unit
+        return llm
+    }
+
+    @Test
+    fun `モデルを切り替えると読み込んでから選択を保存し、前のモデルを消す`() = runTest(testDispatcher) {
+        val llm = stubLlm()
+        every { modelDownloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+
+        val viewModel = SettingsViewModel(app)
+        advanceUntilIdle()
+        viewModel.switchLlmModel(LlmModel.E4B)
+        advanceUntilIdle()
+
+        coVerify { llm.initialize(File("e4b"), any()) }
+        coVerify { dataStore.updateData(any()) }
+        verify { modelDownloader.deleteLlm(LlmModel.E2B) }
+        assertEquals(ModelSwitchState.Idle, viewModel.modelSwitch.value)
+    }
+
+    @Test
+    fun `読み込みに失敗したら前のモデルに戻し、選択もファイルも変えない`() = runTest(testDispatcher) {
+        val llm = stubLlm()
+        every { modelDownloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+        coEvery { llm.initialize(File("e4b"), any()) } throws RuntimeException("out of memory")
+
+        val viewModel = SettingsViewModel(app)
+        advanceUntilIdle()
+        viewModel.switchLlmModel(LlmModel.E4B)
+        advanceUntilIdle()
+
+        coVerify { llm.initialize(File("e2b"), any()) }
+        coVerify(exactly = 0) { dataStore.updateData(any()) }
+        verify(exactly = 0) { modelDownloader.deleteLlm(any()) }
+        assertEquals(ModelSwitchState.Failed(LlmModel.E4B, "out of memory"), viewModel.modelSwitch.value)
+    }
+
+    @Test
+    fun `ダウンロードに失敗したら読み込まない`() = runTest(testDispatcher) {
+        val llm = stubLlm()
+        every { modelDownloader.downloadLlm(LlmModel.E4B) } returns flowOf(
+            DownloadResult.Progress(DownloadProgress("e4b", 10, 100)),
+            DownloadResult.Error("HTTP 500"),
+        )
+
+        val viewModel = SettingsViewModel(app)
+        advanceUntilIdle()
+        viewModel.switchLlmModel(LlmModel.E4B)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { llm.initialize(any(), any()) }
+        assertEquals(ModelSwitchState.Failed(LlmModel.E4B, "HTTP 500"), viewModel.modelSwitch.value)
     }
 }

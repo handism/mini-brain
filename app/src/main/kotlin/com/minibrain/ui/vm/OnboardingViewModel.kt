@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.minibrain.MiniBrainApp
 import com.minibrain.ai.llm.DownloadProgress
 import com.minibrain.ai.llm.DownloadResult
+import com.minibrain.ai.llm.selectedLlmModel
 import com.minibrain.dataStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,7 +63,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             val prefs = app.dataStore.data.first()
             val crashedLastTime = prefs[PREF_KEY_INIT_IN_PROGRESS] ?: false
             
-            if (downloader.isAllReady()) {
+            if (downloader.isAllReady(app.dataStore.selectedLlmModel())) {
                 if (crashedLastTime) {
                     _state.value = OnboardingUiState.Failure(
                         "前回の起動時に初期化中に問題が発生しました。GPUメモリ不足の可能性があります。CPUモードで試しますか？",
@@ -88,7 +89,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             var llm: DownloadProgress? = null
             var embedder: DownloadProgress? = null
 
-            downloader.downloadAll().collect { result ->
+            downloader.downloadAll(app.dataStore.selectedLlmModel()).collect { result ->
                 when (result) {
                     is DownloadResult.Progress -> {
                         val p = result.progress
@@ -124,12 +125,9 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             Timber.tag(TAG).d("Initializing Embedder...")
             app.container.embedderService.initialize(downloader.embedderModelFile, downloader.tokenizerModelFile)
 
-            Timber.tag(TAG).d("Initializing LLM (forceCpu=$forceCpu)...")
-            if (forceCpu) {
-                app.container.llmService.initialize(downloader.llmModelFile, forceCpu = true)
-            } else {
-                app.container.llmService.initialize(downloader.llmModelFile)
-            }
+            val model = app.dataStore.selectedLlmModel()
+            Timber.tag(TAG).d("Initializing LLM $model (forceCpu=$forceCpu)...")
+            app.container.llmService.initialize(downloader.llmFile(model), forceCpu = forceCpu)
 
             Timber.tag(TAG).d("All services initialized")
             _state.value = OnboardingUiState.Ready

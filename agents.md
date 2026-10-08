@@ -35,6 +35,8 @@
   ```
 - **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。JSON 配列だけを返させる呼び出し（`QueryExpander` / `LlmReranker`）は `generateJsonArray` を使い、`]` が出たら生成を打ち切り、タイムアウト（展開 15 秒 / Reranker 30 秒）なら元のクエリ・RRF 順に戻します。最後まで collect すると同じ語の繰り返しで `maxNumTokens` まで止まらず、1 件 100 秒かかったことがあります（ADR-044）。
 
+- **モデルの選択**: 回答などに使う LLM は `LlmModel`（E2B 既定 / E4B）で、設定から切り替えます。ファイルは `ModelDownloader.llmFile(model)` で引き、`llmModelFile` のような固定のパスを足さないでください。切り替えは「ダウンロード → 読み込み → 選択を保存 → 前のモデルを削除」の順で、読み込みに失敗したら前のモデルに戻します（ADR-057）。
+
 ### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
 - **クエリ・文章プレフィックス**: クエリには `query: `、文書（チャンク）には `passage: ` のプレフィックス付与が必須。`EmbedType` enum を使用します。
 - **実行制御**: `EmbedderService` 内の推論は `Mutex` でシリアライズされています。初期化はバックグラウンドスレッドで行い、並列推論は避けてください。

@@ -35,14 +35,15 @@ class ModelDownloader(private val context: Context) {
         .readTimeout(0, TimeUnit.SECONDS) // ストリームDLなので timeout なし
         .build()
 
-    val llmModelFile: File get() = File(modelsDir, LLM_FILE_NAME)
+    fun llmFile(model: LlmModel = LlmModel.DEFAULT): File = File(modelsDir, model.fileName)
     val embedderModelFile: File get() = File(modelsDir, EMBEDDER_FILE_NAME)
     val tokenizerModelFile: File get() = File(modelsDir, TOKENIZER_FILE_NAME)
 
-    fun isLlmReady(): Boolean = llmModelFile.exists() && llmModelFile.length() >= MIN_LLM_SIZE && verifyHash(llmModelFile, LLM_SHA256)
+    fun isLlmReady(model: LlmModel = LlmModel.DEFAULT): Boolean =
+        llmFile(model).let { it.exists() && it.length() >= model.minSize && verifyHash(it, model.sha256) }
     fun isEmbedderReady(): Boolean = embedderModelFile.exists() && embedderModelFile.length() >= MIN_EMBEDDER_SIZE && verifyHash(embedderModelFile, EMBEDDER_SHA256)
     fun isTokenizerReady(): Boolean = tokenizerModelFile.exists() && tokenizerModelFile.length() >= MIN_TOKENIZER_SIZE && verifyHash(tokenizerModelFile, TOKENIZER_SHA256)
-    fun isAllReady(): Boolean = isLlmReady() && isEmbedderReady() && isTokenizerReady()
+    fun isAllReady(model: LlmModel = LlmModel.DEFAULT): Boolean = isLlmReady(model) && isEmbedderReady() && isTokenizerReady()
 
     private fun verifyHash(file: File, expectedHash: String): Boolean {
         if (!file.exists()) return false
@@ -66,22 +67,44 @@ class ModelDownloader(private val context: Context) {
         ""
     }
 
-    fun downloadAll(): Flow<DownloadResult> = flow {
+    fun downloadAll(model: LlmModel = LlmModel.DEFAULT): Flow<DownloadResult> = flow {
         try {
             if (!isEmbedderReady() && !downloadAndVerifyModel(EMBEDDER_URL, EMBEDDER_FILE_NAME, EMBEDDER_SHA256, embedderModelFile, "Embedder")) return@flow
             if (!isTokenizerReady() && !downloadAndVerifyModel(TOKENIZER_URL, TOKENIZER_FILE_NAME, TOKENIZER_SHA256, tokenizerModelFile, "Tokenizer")) return@flow
-            if (!isLlmReady() && !downloadAndVerifyModel(LLM_URL, LLM_FILE_NAME, LLM_SHA256, llmModelFile, "LLM")) return@flow
+            val llmFile = llmFile(model)
+            if (!isLlmReady(model) && !downloadAndVerifyModel(model.url, model.fileName, model.sha256, llmFile, "LLM")) return@flow
 
-            if (isAllReady()) {
-                emit(DownloadResult.Done(llmModelFile))
+            if (isAllReady(model)) {
+                emit(DownloadResult.Done(llmFile))
             } else {
-                val msg = "準備失敗: LLM=${llmModelFile.length()}/$MIN_LLM_SIZE, Embedder=${embedderModelFile.length()}/$MIN_EMBEDDER_SIZE, Tokenizer=${tokenizerModelFile.length()}/$MIN_TOKENIZER_SIZE"
+                val msg = "準備失敗: LLM=${llmFile.length()}/${model.minSize}, Embedder=${embedderModelFile.length()}/$MIN_EMBEDDER_SIZE, Tokenizer=${tokenizerModelFile.length()}/$MIN_TOKENIZER_SIZE"
                 emit(DownloadResult.Error("ダウンロードが完了しましたが、ファイルが準備できていません。($msg)"))
             }
         } catch (e: Exception) {
             emit(DownloadResult.Error("エラー: ${e.localizedMessage}"))
         }
     }.flowOn(Dispatchers.IO)
+
+    /** LLM だけをダウンロードする（設定でモデルを切り替えるとき、ADR-057）。済んでいれば Done だけを出す */
+    fun downloadLlm(model: LlmModel): Flow<DownloadResult> = flow {
+        try {
+            val file = llmFile(model)
+            if (isLlmReady(model) || downloadAndVerifyModel(model.url, model.fileName, model.sha256, file, "LLM")) {
+                emit(DownloadResult.Done(file))
+            }
+        } catch (e: Exception) {
+            emit(DownloadResult.Error("エラー: ${e.localizedMessage}"))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * 使わなくなった LLM のファイルを消す。LiteRT-LM がモデルの横に作るキャッシュ
+     * （`<ファイル名>_*.xnnpack_cache`）と、途中までのダウンロードも一緒に消す。
+     */
+    fun deleteLlm(model: LlmModel) {
+        modelsDir.listFiles { f -> f.name == model.fileName || f.name.startsWith("${model.fileName}_") || f.name == "${model.fileName}.download" }
+            ?.forEach { if (!it.delete()) Timber.tag(TAG).w("failed to delete ${it.name}") }
+    }
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<DownloadResult>.downloadAndVerifyModel(
         url: String,
@@ -193,13 +216,8 @@ class ModelDownloader(private val context: Context) {
 
     companion object {
         private const val TAG = "ModelDownloader"
-        const val LLM_FILE_NAME = "gemma-4-E2B-it.litertlm"
         const val EMBEDDER_FILE_NAME = "multilingual-e5-small-q.onnx"
         const val TOKENIZER_FILE_NAME = "e5-tokenizer.json"
-
-        // HuggingFace litert-community/gemma-4-E2B-it-litert-lm 配布 URL
-        private const val LLM_URL =
-            "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
 
         // Xenova/multilingual-e5-small INT8 量子化版 ONNX
         private const val EMBEDDER_URL =
@@ -209,11 +227,9 @@ class ModelDownloader(private val context: Context) {
         private const val TOKENIZER_URL =
             "https://huggingface.co/Xenova/multilingual-e5-small/resolve/main/tokenizer.json"
 
-        private const val MIN_LLM_SIZE = 2_000_000_000L    // 2GB (実際は約2.5GB)
         private const val MIN_EMBEDDER_SIZE = 50_000_000L  // 50MB (実際は約118MB)
         private const val MIN_TOKENIZER_SIZE = 1_000_000L  // 1MB (実際は約17MB)
 
-        private const val LLM_SHA256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
         private const val EMBEDDER_SHA256 = "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193"
         private const val TOKENIZER_SHA256 = "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
     }

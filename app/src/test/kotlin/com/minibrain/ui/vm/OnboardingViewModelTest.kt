@@ -83,10 +83,10 @@ class OnboardingViewModelTest {
         every { container.llmService } returns llmService
         every { container.modelDownloader } returns modelDownloader
 
-        every { modelDownloader.isAllReady() } returns true
+        every { modelDownloader.isAllReady(any()) } returns true
         every { modelDownloader.embedderModelFile } returns File("embedder.onnx")
         every { modelDownloader.tokenizerModelFile } returns File("tokenizer.json")
-        every { modelDownloader.llmModelFile } returns File("model.bin")
+        every { modelDownloader.llmFile(any()) } returns File("model.bin")
 
         val errorMessage = "GPU out of memory"
         coEvery { llmService.initialize(any(), any()) } throws RuntimeException(errorMessage)
@@ -126,10 +126,10 @@ class OnboardingViewModelTest {
         every { container.llmService } returns llmService
         every { container.modelDownloader } returns modelDownloader
 
-        every { modelDownloader.isAllReady() } returns true
+        every { modelDownloader.isAllReady(any()) } returns true
         every { modelDownloader.embedderModelFile } returns File("embedder.onnx")
         every { modelDownloader.tokenizerModelFile } returns File("tokenizer.json")
-        every { modelDownloader.llmModelFile } returns File("model.bin")
+        every { modelDownloader.llmFile(any()) } returns File("model.bin")
 
         val errorMessage = "Embedder init failed"
         coEvery { embedderService.initialize(any(), any()) } throws RuntimeException(errorMessage)
@@ -162,7 +162,7 @@ class OnboardingViewModelTest {
 
         val modelDownloader = mockk<ModelDownloader>(relaxed = true)
         every { container.modelDownloader } returns modelDownloader
-        every { modelDownloader.isAllReady() } returns true
+        every { modelDownloader.isAllReady(any()) } returns true
 
         val viewModel = OnboardingViewModel(app)
 
@@ -192,7 +192,7 @@ class OnboardingViewModelTest {
 
         val modelDownloader = mockk<ModelDownloader>(relaxed = true)
         every { container.modelDownloader } returns modelDownloader
-        every { modelDownloader.isAllReady() } returns false
+        every { modelDownloader.isAllReady(any()) } returns false
 
         val viewModel = OnboardingViewModel(app)
 
@@ -225,10 +225,10 @@ class OnboardingViewModelTest {
         every { container.llmService } returns llmService
         every { container.modelDownloader } returns modelDownloader
 
-        every { modelDownloader.isAllReady() } returns true
+        every { modelDownloader.isAllReady(any()) } returns true
         every { modelDownloader.embedderModelFile } returns File("embedder.onnx")
         every { modelDownloader.tokenizerModelFile } returns File("tokenizer.json")
-        every { modelDownloader.llmModelFile } returns File("model.bin")
+        every { modelDownloader.llmFile(any()) } returns File("model.bin")
 
         val errorMessage = "CPU initialization failed"
         coEvery { llmService.initialize(any(), forceCpu = true) } throws RuntimeException(errorMessage)

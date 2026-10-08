@@ -6,7 +6,7 @@
 
 ## 特徴
 
-- **完全プライベート** — 質問・回答・md の内容はクラウドに送信しない。ネットワーク通信は初回モデルダウンロードのみ
+- **完全プライベート** — 質問・回答・md の内容はクラウドに送信しない。ネットワーク通信はモデルのダウンロード（初回と、設定でモデルを切り替えたとき）のみ
 - **Search First → Coverage Check → Agent** — Query Expansion で検索語を展開し BM25 / Metadata / Vector を並行検索、LLM Reranker で上位候補を選択。さらに Coverage Check で「証拠が揃っているか」を評価し、不足している場合は Explorer Strategy を決定して ReAct にエスカレーション
 - **Query Expansion** — LLM が元クエリを 3〜8 件の検索語群に展開。固有名詞（人名・地名・施設名・サービス名等）は助詞・疑問詞を取り除いた単独名詞として必ず保持し、日付表現・関連語も補完
 - **HyDE（Hypothetical Document Embeddings）** — LLM がクエリへの「ありそうな回答」を 1〜2 文生成し、その埋め込みでベクトル検索を追加実行。query↔passage の表現非対称を緩和して Recall を底上げ
@@ -34,7 +34,7 @@
 | 言語         | Kotlin                                    |
 | UI           | Jetpack Compose + Material 3              |
 | 最小 SDK     | API 31 (Android 12)                       |
-| LLM          | Gemma 4 E2B via LiteRT-LM                 |
+| LLM          | Gemma 4 E2B（設定で E4B に切り替え可）via LiteRT-LM |
 | Embedder     | multilingual-e5-small (INT8 ONNX) via ONNX Runtime + 純 Kotlin tokenizer |
 | DB           | Room（FTS4 + ベクトル）                   |
 | 設定保存     | DataStore                                 |
@@ -246,13 +246,14 @@ finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECA
 | Home       | フォルダ選択・変更（変更時は確認あり、前のフォルダのインデックスは削除）・インデックス状態（残り時間の目安）・ファイル数 |
 | Chat       | Q&A（ストリーミング、回答はテキスト選択可）・セッション名の表示・検索ステータス・質問例・引用元ファイルのチップ（タップで元ファイルを開く）と引用箇所の展開・インデックス中の進捗バナー・失敗時の再試行 |
 | History    | 日付グループ付きのチャット一覧・タイトル検索・スワイプで削除（Snackbar から取り消し可） |
-| Settings   | フォルダ変更・再インデックス（進捗表示）・チャット履歴削除・検索ログ表示（既定は OFF）・検索精度の評価・モデル情報 |
+| Settings   | フォルダ変更・再インデックス（進捗表示）・チャット履歴削除・検索ログ表示（既定は OFF）・検索精度の評価・LLM モデルの切り替え（E2B / E4B） |
 
 ## モデル情報
 
 | モデル                                | 用途             | サイズ    | ライセンス |
 | ------------------------------------- | ---------------- | --------- | ---------- |
 | Gemma 4 E2B                           | テキスト生成     | 約 2.5 GB | Apache 2.0 |
+| Gemma 4 E4B（設定で選んだときだけ）       | テキスト生成     | 約 3.7 GB | Apache 2.0 |
 | multilingual-e5-small (INT8 ONNX)     | テキスト埋め込み | 約 118 MB | MIT        |
 | XLM-RoBERTa SentencePiece (tokenizer) | トークナイズ     | 約 17 MB  | MIT        |
 
@@ -261,6 +262,6 @@ finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECA
 ## プライバシー
 
 - 推論はすべてオンデバイス
-- ネットワーク通信は初回モデルダウンロードのみ（Wi-Fi 推奨）
+- ネットワーク通信はモデルのダウンロード（初回と、設定でモデルを切り替えたとき）のみ（Wi-Fi 推奨）
 - md の内容・質問・回答はデバイス外に送信しない
 - チャット履歴は Room DB（アプリ内部ストレージ）にのみ保存

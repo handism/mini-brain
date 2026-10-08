@@ -82,16 +82,16 @@ class ReadinessCheckTest {
             field.get(null) as String
         }
 
-        val minLlmSize = getConstLong("MIN_LLM_SIZE")
+        val minLlmSize = LlmModel.DEFAULT.minSize
         val minEmbedderSize = getConstLong("MIN_EMBEDDER_SIZE")
         val minTokenizerSize = getConstLong("MIN_TOKENIZER_SIZE")
 
-        val expectedLlmHash = getConstString("LLM_SHA256")
+        val expectedLlmHash = LlmModel.DEFAULT.sha256
         val expectedEmbedderHash = getConstString("EMBEDDER_SHA256")
         val expectedTokenizerHash = getConstString("TOKENIZER_SHA256")
 
         // 2. LLM file with valid size and hash
-        createMockFile(downloader.llmModelFile, minLlmSize)
+        createMockFile(downloader.llmFile(), minLlmSize)
         every { mockDigest.digest() } returns expectedLlmHash.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         assertTrue(downloader.isLlmReady())
 
@@ -114,12 +114,12 @@ class ReadinessCheckTest {
         assertTrue(downloader.isAllReady())
 
         // 6. Test invalid size for LLM
-        createMockFile(downloader.llmModelFile, minLlmSize - 1)
+        createMockFile(downloader.llmFile(), minLlmSize - 1)
         assertFalse(downloader.isLlmReady())
         assertFalse(downloader.isAllReady())
 
         // 7. Test invalid hash
-        createMockFile(downloader.llmModelFile, minLlmSize)
+        createMockFile(downloader.llmFile(), minLlmSize)
         every { mockDigest.digest() } returns "0000000000000000000000000000000000000000000000000000000000000000".chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         assertFalse(downloader.isLlmReady())
     }

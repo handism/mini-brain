@@ -66,7 +66,7 @@ class EmulatorEvalTest {
         val container = app.container
         val models = container.modelDownloader
         container.embedderService.initialize(models.embedderModelFile, models.tokenizerModelFile)
-        val llmFile = args.getString("llm")?.let { File(models.llmModelFile.parentFile, it) } ?: models.llmModelFile
+        val llmFile = args.getString("llm")?.let { File(models.llmFile().parentFile, it) } ?: models.llmFile()
         args.getString("spec")?.let { ExperimentalFlags.enableSpeculativeDecoding = it == "true" }
         val specSupported = runCatching { Capabilities(llmFile.absolutePath).use { it.hasSpeculativeDecodingSupport() } }.getOrNull()
         container.llmService.initialize(llmFile, forceCpu = args.getString("gpu") != "true")
@@ -93,7 +93,7 @@ class EmulatorEvalTest {
         }
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.JAPAN).format(Date())
         val kind = if (withAnswer) "回答評価" else "検索評価"
-        val llmNote = if (llmFile != models.llmModelFile) "・${llmFile.name}" else ""
+        val llmNote = if (llmFile != models.llmFile()) "・${llmFile.name}" else ""
         val report = EvalReport.toMarkdown(result, "$kind $stamp（${queries.name}・エミュレータ$llmNote）", unknownPaths)
         File(evalDir, "report.md").writeText(report)
         if (withAnswer) {

@@ -6,6 +6,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.Alignment
+import com.minibrain.ai.llm.LlmModel
+import com.minibrain.ui.vm.ModelSwitchState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -67,7 +75,10 @@ fun SettingsScreen(
     val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
     val indexingState by vm.indexingState.collectAsStateWithLifecycle()
+    val llmModel by vm.llmModel.collectAsStateWithLifecycle()
+    val modelSwitch by vm.modelSwitch.collectAsStateWithLifecycle()
     var showClearDialog by remember { mutableStateOf(false) }
+    var showModelDialog by remember { mutableStateOf(false) }
     var showFolderChangeDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -85,7 +96,17 @@ fun SettingsScreen(
         treeUri = treeUri,
         showSearchLog = showSearchLog,
         indexingProgress = indexingState as? IndexingState.Progress,
-        llmModelFile = vm.llmModelFile,
+        llmModel = llmModel,
+        llmModelFile = vm.llmFile(llmModel),
+        modelSwitch = modelSwitch,
+        onChangeModel = {
+            // 失敗したときは、行をタップするとそのまま同じモデルで再試行する
+            when (val st = modelSwitch) {
+                is ModelSwitchState.Failed -> vm.switchLlmModel(st.target)
+                ModelSwitchState.Idle -> showModelDialog = true
+                else -> Unit
+            }
+        },
         embedderModelFile = vm.embedderModelFile,
         onReindex = { vm.reindex() },
         // 初めて選ぶときは消えるインデックスが無いので、確認せずに開く
@@ -96,6 +117,17 @@ fun SettingsScreen(
         onShowSearchLogChange = { vm.setShowSearchLog(it) },
         onOpenEval = onOpenEval,
     )
+
+    if (showModelDialog) {
+        LlmModelDialog(
+            current = llmModel,
+            onConfirm = { target ->
+                showModelDialog = false
+                vm.switchLlmModel(target)
+            },
+            onDismiss = { showModelDialog = false },
+        )
+    }
 
     if (showFolderChangeDialog) {
         FolderChangeDialog(
@@ -127,7 +159,10 @@ private fun SettingsScreenContent(
     treeUri: String?,
     showSearchLog: Boolean,
     indexingProgress: IndexingState.Progress?,
+    llmModel: LlmModel,
     llmModelFile: java.io.File,
+    modelSwitch: ModelSwitchState,
+    onChangeModel: () -> Unit,
     embedderModelFile: java.io.File,
     onReindex: () -> Unit,
     onChangeFolder: () -> Unit,
@@ -163,7 +198,10 @@ private fun SettingsScreenContent(
             )
             ChatHistorySection(onClearChat = onClearChat)
             ModelInfoSection(
+                llmModel = llmModel,
                 llmModelFile = llmModelFile,
+                modelSwitch = modelSwitch,
+                onChangeModel = onChangeModel,
                 embedderModelFile = embedderModelFile
             )
             PrivacySection()
@@ -252,19 +290,106 @@ private fun DeveloperSection(
 
 @Composable
 private fun ModelInfoSection(
+    llmModel: LlmModel,
     llmModelFile: java.io.File,
+    modelSwitch: ModelSwitchState,
+    onChangeModel: () -> Unit,
     embedderModelFile: java.io.File,
 ) {
     SectionTitle(stringResource(R.string.settings_section_model))
+    val supporting = when (modelSwitch) {
+        ModelSwitchState.Idle -> llmModelName(llmModel) + " · " + modelFileSize(llmModelFile)
+        is ModelSwitchState.Downloading -> modelSwitch.fraction?.let {
+            stringResource(R.string.settings_llm_downloading, llmModelName(modelSwitch.target), (it * 100).toInt())
+        } ?: stringResource(R.string.settings_llm_downloading_unknown, llmModelName(modelSwitch.target))
+        is ModelSwitchState.Loading -> stringResource(R.string.settings_llm_loading, llmModelName(modelSwitch.target))
+        is ModelSwitchState.Failed -> stringResource(R.string.settings_llm_switch_failed, llmModelName(modelSwitch.target))
+    }
+    val busy = modelSwitch is ModelSwitchState.Downloading || modelSwitch is ModelSwitchState.Loading
     SettingsListItem(
         icon = Icons.Default.Psychology,
         headline = stringResource(R.string.settings_llm_model),
-        supporting = stringResource(R.string.settings_llm_model_value) + " · " + modelFileSize(llmModelFile),
+        supporting = supporting,
+        contentColor = if (modelSwitch is ModelSwitchState.Failed) MaterialTheme.colorScheme.error else Color.Unspecified,
+        trailing = if (busy) {
+            { CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp) }
+        } else {
+            {
+                Text(stringResource(R.string.change), color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        onClick = onChangeModel.takeIf { !busy },
     )
     SettingsListItem(
         icon = Icons.Default.Hub,
         headline = stringResource(R.string.settings_embedder),
         supporting = stringResource(R.string.settings_embedder_value) + " · " + modelFileSize(embedderModelFile),
+    )
+}
+
+@Composable
+private fun llmModelName(model: LlmModel): String = stringResource(
+    when (model) {
+        LlmModel.E2B -> R.string.llm_model_e2b
+        LlmModel.E4B -> R.string.llm_model_e4b
+    }
+)
+
+@Composable
+private fun llmModelDescription(model: LlmModel): String = stringResource(
+    when (model) {
+        LlmModel.E2B -> R.string.llm_model_e2b_desc
+        LlmModel.E4B -> R.string.llm_model_e4b_desc
+    }
+)
+
+@Composable
+private fun LlmModelDialog(
+    current: LlmModel,
+    onConfirm: (LlmModel) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selected by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_llm_model)) },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                LlmModel.entries.forEach { model ->
+                    Row(
+                        verticalAlignment = Alignment.Top,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = model == selected, role = Role.RadioButton, onClick = { selected = model })
+                            .padding(vertical = 8.dp),
+                    ) {
+                        RadioButton(selected = model == selected, onClick = null)
+                        Column(Modifier.padding(start = 12.dp)) {
+                            Text(llmModelName(model), style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                llmModelDescription(model),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    stringResource(R.string.settings_llm_dialog_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selected) }, enabled = selected != current) {
+                Text(stringResource(R.string.settings_llm_switch))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
     )
 }
 
