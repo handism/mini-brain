@@ -88,7 +88,14 @@ fun OnboardingScreen(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(48.dp))
+            Spacer(Modifier.height(24.dp))
+            Text(
+                stringResource(R.string.onboarding_steps),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(24.dp))
 
             when (val s = state) {
                 is OnboardingUiState.Checking -> CircularProgressIndicator()

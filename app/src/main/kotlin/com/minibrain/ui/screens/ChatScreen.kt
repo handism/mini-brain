@@ -100,6 +100,8 @@ import com.minibrain.ui.vm.ChatErrorKind
 import com.minibrain.ui.vm.ChatMessage
 import com.minibrain.ui.vm.ChatViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +118,7 @@ fun ChatScreen(
     val showSearchLog by vm.showSearchLog.collectAsStateWithLifecycle()
     val sessionTitle by vm.sessionTitle.collectAsStateWithLifecycle()
     val suggestions by vm.suggestions.collectAsStateWithLifecycle()
+    val treeUri by vm.savedTreeUri.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -147,6 +150,14 @@ fun ChatScreen(
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
+            treeUri?.let { uri ->
+                Text(
+                    stringResource(R.string.chat_reference_folder, com.minibrain.ui.components.folderDisplayName(uri)),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
             (indexingState as? IndexingState.Progress)?.let { ChatIndexingBanner(it) }
 
             ChatMessageList(
@@ -367,7 +378,10 @@ private fun ChatEmptyState(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
+            .verticalScroll(rememberScrollState())
+            .wrapContentWidth(Alignment.CenterHorizontally)
+            .widthIn(max = CHAT_CONTENT_MAX_WIDTH)
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -392,20 +406,31 @@ private fun ChatEmptyState(
         )
         Spacer(Modifier.height(24.dp))
         Text(
-            stringResource(R.string.chat_suggestions_label),
+            stringResource(R.string.chat_suggestion_edit),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
         // タップしたら入力欄に入れるだけにして、固有名詞などを書き換えてから送れるようにする
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        ) {
+        val periodSuggestions = setOf(
+            stringResource(R.string.chat_suggestion_last_month),
+            stringResource(R.string.chat_suggestion_this_month),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             suggestions.forEach { suggestion ->
-                SuggestionChip(
+                androidx.compose.material3.Card(
                     onClick = { onSuggestionClick(suggestion) },
-                    label = { Text(suggestion) },
-                )
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            stringResource(if (suggestion in periodSuggestions) R.string.chat_suggestion_reflect else R.string.chat_suggestion_explore),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(suggestion, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
             }
         }
     }

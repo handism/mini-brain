@@ -34,9 +34,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -141,14 +141,6 @@ private val HOME_CONTENT_MAX_WIDTH = 600.dp
 private data class KnowledgeBaseStats(val docCount: Int, val lastIndexedAt: Long?)
 
 @Composable
-private fun StatItem(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
 private fun FolderUnselectedContent(
     onSelectFolder: () -> Unit
 ) {
@@ -197,17 +189,16 @@ private fun FolderSelectedContent(
                 style = MaterialTheme.typography.titleMedium,
             )
             Spacer(Modifier.height(16.dp))
-            Row(modifier = Modifier.fillMaxWidth()) {
-                StatItem(
-                    label = stringResource(R.string.home_stat_files),
-                    value = "${stats.docCount}",
-                    modifier = Modifier.weight(1f),
-                )
-                StatItem(
-                    label = stringResource(R.string.home_stat_last_indexed),
-                    value = stats.lastIndexedAt?.let { formatTimestamp(it) } ?: stringResource(R.string.home_stat_none),
-                    modifier = Modifier.weight(1f),
-                )
+            Text(stringResource(R.string.home_note_count, stats.docCount), style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.home_updated_at, stats.lastIndexedAt?.let { formatTimestamp(it) } ?: stringResource(R.string.home_stat_none)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onChangeFolder) {
+                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(stringResource(R.string.home_change_folder), modifier = Modifier.padding(start = 8.dp))
             }
         }
     }
@@ -231,17 +222,6 @@ private fun FolderSelectedContent(
     ) {
         Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
         Text(stringResource(R.string.home_open_chat), modifier = Modifier.padding(start = 8.dp))
-    }
-
-    Spacer(Modifier.height(12.dp))
-
-    // 再インデックスは設定画面にまとめる（ここはフォルダの切り替えだけ）
-    OutlinedButton(
-        onClick = onChangeFolder,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-        Text(stringResource(R.string.home_change_folder), modifier = Modifier.padding(start = 8.dp))
     }
 }
 

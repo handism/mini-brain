@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -49,6 +50,7 @@ class ChatScreenTest {
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>(null)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -56,7 +58,15 @@ class ChatScreenTest {
         }
 
         composeTestRule.onNodeWithText("ノートについて聞いてみましょう").assertIsDisplayed()
-        composeTestRule.onNodeWithText("フォルダ内の Markdown をもとに、端末の中だけで回答します").assertIsDisplayed()
+        composeTestRule.onNodeWithText("フォルダ内のノートをもとに回答します。内容は端末の外に送られません。").assertIsDisplayed()
+    }
+
+    @Test
+    fun testReferenceFolderIsVisible() {
+        val vm = relaxedVm()
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>("content://com.android.externalstorage.documents/tree/primary%3ANotes")
+        composeTestRule.setContent { ChatScreen(onBack = {}, vm = vm) }
+        composeTestRule.onNodeWithText("参照中：Notes").assertIsDisplayed()
     }
 
     @Test
@@ -67,7 +77,7 @@ class ChatScreenTest {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
         }
 
-        composeTestRule.onNodeWithText("最近書いたメモは？").performClick()
+        composeTestRule.onNodeWithText("最近書いたメモは？").performScrollTo().performClick()
         composeTestRule.onNodeWithContentDescription("送信").performClick()
 
         verify { vm.sendMessage("最近書いたメモは？") }
@@ -171,6 +181,7 @@ class ChatScreenTest {
         every { vm.showSearchLog } returns MutableStateFlow(true)
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>(null)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
         return vm
     }
@@ -195,6 +206,7 @@ class ChatScreenTest {
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>(null)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -227,6 +239,7 @@ class ChatScreenTest {
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>(null)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -255,6 +268,7 @@ class ChatScreenTest {
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>(null)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -301,6 +315,7 @@ class ChatScreenTest {
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>(null)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {
@@ -332,6 +347,7 @@ class ChatScreenTest {
         every { vm.showSearchLog } returns showSearchLogFlow
         every { vm.sessionTitle } returns MutableStateFlow<String?>(null)
         every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Idle)
+        every { vm.savedTreeUri } returns MutableStateFlow<String?>(null)
         every { vm.suggestions } returns MutableStateFlow(listOf("「カレー」について教えて", "最近書いたメモは？"))
 
         composeTestRule.setContent {

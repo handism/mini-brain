@@ -75,7 +75,7 @@ class ChatViewModel(
     private val _statusText = MutableStateFlow<String?>(null)
     val statusText: StateFlow<String?> = _statusText
 
-    private val savedTreeUri: StateFlow<String?> = app.dataStore.data
+    val savedTreeUri: StateFlow<String?> = app.dataStore.data
         .map { prefs -> prefs[PREF_TREE_URI] }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 

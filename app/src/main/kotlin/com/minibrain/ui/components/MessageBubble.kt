@@ -9,9 +9,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -53,12 +50,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.ClipEntry
@@ -254,9 +245,10 @@ private fun GenerationProgress(statusText: String) {
 }
 
 /**
- * コピー・再生成・引用元を 1 行にまとめる。引用元はファイル単位のチップを横スクロールで並べ、
- * 先頭の「引用元 (n)」でスニペットの一覧を開閉する。
+ * コピー・再生成の下に、ファイル単位の引用元を折り返して表示する。
+ * 通常は先頭 2 件、展開するとすべてのファイルと引用箇所を表示する。
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun AssistantMessageActions(
     msg: ChatMessage,
@@ -281,55 +273,26 @@ private fun AssistantMessageActions(
                 )
             }
         }
-        if (msg.citations.isNotEmpty()) {
-            val scrollState = rememberScrollState()
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    // 画面外にチップが続いていることが分かるよう、スクロールできる側の端を薄くする
-                    .fadingEdges(scrollState)
-                    .horizontalScroll(scrollState),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { onCitationsExpandedChange(!citationsExpanded) }) {
-                    Icon(
-                        if (citationsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(
-                        stringResource(R.string.chat_citations, msg.citations.size),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                CitationChips(citations = msg.citations, onOpen = onOpenCitation)
-            }
+    }
+    if (msg.citations.isNotEmpty()) {
+        val sources = distinctCitationSources(msg.citations)
+        Text(
+            stringResource(R.string.chat_reference_notes, sources.size),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CitationChips(citations = if (citationsExpanded) sources else sources.take(2), onOpen = onOpenCitation)
+        }
+        TextButton(onClick = { onCitationsExpandedChange(!citationsExpanded) }) {
+            Icon(if (citationsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
+            Text(stringResource(if (citationsExpanded) R.string.chat_sources_hide else R.string.chat_sources_show))
         }
     }
 }
-
-private val FADING_EDGE_WIDTH = 24.dp
-
-/** 横スクロールの続きがある側の端をフェードさせる。色は使わず、描いた内容のアルファだけを削る。 */
-private fun Modifier.fadingEdges(scrollState: ScrollState): Modifier = this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
-        val edge = FADING_EDGE_WIDTH.toPx().coerceAtMost(size.width / 2)
-        if (scrollState.canScrollBackward) {
-            drawRect(
-                brush = Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = 0f, endX = edge),
-                blendMode = BlendMode.DstIn,
-            )
-        }
-        if (scrollState.canScrollForward) {
-            drawRect(
-                brush = Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = size.width - edge, endX = size.width),
-                blendMode = BlendMode.DstIn,
-            )
-        }
-    }
 
 /** チップに出す名前。ファイル名（フォルダは落とす）、無ければ見出しパス。 */
 internal fun citationChipLabel(citation: Citation): String =

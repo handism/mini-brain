@@ -20,24 +20,24 @@
     <string name="folder_change_confirm">変更する</string>
 
     <!-- Onboarding -->
-    <string name="onboarding_tagline">プライベートRAG — すべてオンデバイスで動作</string>
-    <string name="onboarding_download_notice">初回起動時に約 2.8GB のモデルをダウンロードします。\nWi-Fi 接続を推奨します。</string>
+    <string name="onboarding_tagline">自分のノートに質問できる、あなただけのAI</string>
+    <string name="onboarding_download_notice">ノート・質問・回答は端末の外に送られません。\n初回に約 2.8GB のAIをダウンロードします。Wi-Fi 接続を推奨します。</string>
     <string name="onboarding_download_start">ダウンロード開始</string>
     <string name="onboarding_downloading">モデルをダウンロード中...</string>
-    <string name="onboarding_embedder_model">Embedderモデル</string>
-    <string name="onboarding_llm_model">Gemma 4 E2B LLM (約2.5GB)</string>
+    <string name="onboarding_embedder_model">ノートを検索するAI</string>
+    <string name="onboarding_llm_model">回答をつくるAI（約2.5GB）</string>
     <string name="onboarding_initializing">モデルを初期化中...</string>
     <string name="onboarding_error_title">準備を完了できませんでした</string>
     <string name="onboarding_progress">%1$d%% (%2$d / %3$d MB)</string>
     <string name="onboarding_retry_cpu">CPUモードで試す (低速ですが安定します)</string>
 
     <!-- Home -->
-    <string name="home_select_folder_title">mdフォルダを選択してください</string>
-    <string name="home_select_folder_desc">Markdownファイルが格納されたフォルダを選ぶと\n自動でインデックスを作成します</string>
+    <string name="home_select_folder_title">ノートのフォルダを選びましょう</string>
+    <string name="home_select_folder_desc">Markdown（.md）のノートが入ったフォルダを選ぶと、\n質問できるように内容を整理します</string>
     <string name="home_select_folder">フォルダを選択</string>
     <string name="home_knowledge_base">知識ベース</string>
     <string name="home_stat_files">ファイル数</string>
-    <string name="home_stat_last_indexed">最終インデックス</string>
+    <string name="home_stat_last_indexed">最終更新</string>
     <string name="home_stat_none">—</string>
     <string name="home_recent_chats">最近のチャット</string>
     <string name="home_indexing">インデックス中... %1$d/%2$d %3$s</string>
@@ -52,7 +52,7 @@
     <string name="chat_history">履歴</string>
     <string name="chat_new">新しいチャット</string>
     <string name="chat_empty_title">ノートについて聞いてみましょう</string>
-    <string name="chat_empty_desc">フォルダ内の Markdown をもとに、端末の中だけで回答します</string>
+    <string name="chat_empty_desc">フォルダ内のノートをもとに回答します。内容は端末の外に送られません。</string>
     <string name="chat_suggestions_label">たとえば</string>
     <!-- 知識ベースから質問例を作れたときは、先頭の 1 件だけを末尾に添える -->
     <string-array name="chat_suggestions">
@@ -144,8 +144,8 @@
     <string name="eval_reason_not_retrieved">候補に無い</string>
     <string name="eval_reason_dropped">絞り込みで落ちた</string>
     <string name="eval_case_metrics">Recall %1$s · RR %2$s</string>
-    <string name="settings_section_model">モデル情報</string>
-    <string name="settings_llm_model">LLM モデル</string>
+    <string name="settings_section_model">AIの設定</string>
+    <string name="settings_llm_model">回答用AI</string>
     <string name="llm_model_e2b">Gemma 4 E2B</string>
     <string name="llm_model_e4b">Gemma 4 E4B</string>
     <string name="llm_model_e2b_desc">標準。速さを優先します。約 2.6GB</string>
@@ -178,4 +178,16 @@
     <string name="settings_clear_dialog_title">チャット履歴を削除</string>
     <string name="settings_clear_dialog_text">すべてのチャット履歴が削除されます。この操作は取り消せません。</string>
     <string name="settings_history_cleared">チャット履歴を削除しました</string>
+    <string name="onboarding_steps">1. AIを準備する\n2. ノートのフォルダを選ぶ\n3. ノートについて質問する</string>
+    <string name="chat_reference_folder">参照中：%1$s</string>
+    <string name="chat_suggestion_edit">タップすると入力欄で編集できます</string>
+    <string name="chat_suggestion_reflect">最近の記録を振り返る</string>
+    <string name="chat_suggestion_explore">ノートの内容を調べる</string>
+    <string name="chat_reference_notes">参照したノート %1$d件</string>
+    <string name="chat_sources_show">すべての引用元と引用箇所を表示</string>
+    <string name="chat_sources_hide">引用箇所を閉じる</string>
+    <string name="home_note_count">%1$d件のノート</string>
+    <string name="home_updated_at">最終更新：%1$s</string>
+    <string name="settings_technical_show">技術情報を表示</string>
+    <string name="settings_technical_hide">技術情報を閉じる</string>
 </resources>

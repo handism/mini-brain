@@ -4,6 +4,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.minibrain.ai.agent.QueryExpansionEvent
@@ -91,14 +96,38 @@ class MessageBubbleTest {
 
         // 引用元はチップとして常に見える
         composeTestRule.onNodeWithText("Test Document").assertIsDisplayed()
-        composeTestRule.onNodeWithText("引用元 (1)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("参照したノート 1件").assertIsDisplayed()
 
         // 引用箇所（スニペット）は展開するまで出ない
         composeTestRule.onNodeWithText("This is a test snippet.").assertDoesNotExist()
 
-        composeTestRule.onNodeWithText("引用元 (1)").performClick()
+        composeTestRule.onNodeWithText("すべての引用元と引用箇所を表示").performClick()
 
         composeTestRule.onNodeWithText("This is a test snippet.").assertIsDisplayed()
+    }
+
+    @Test
+    fun testSourcesCollapseByFileAndExpandRemainingFiles() {
+        val citations = listOf(
+            Citation(headingPath = "A", snippet = "first", docId = 1, relativePath = "A.md"),
+            Citation(headingPath = "A2", snippet = "second", docId = 1, relativePath = "A.md"),
+            Citation(headingPath = "B", snippet = "third", docId = 2, relativePath = "B.md"),
+            Citation(headingPath = "C", snippet = "fourth", docId = 3, relativePath = "C.md"),
+        )
+        composeTestRule.setContent {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                MessageBubble(
+                    msg = ChatMessage(role = MessageRole.ASSISTANT, content = "answer", citations = citations),
+                    showSearchLog = false,
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("参照したノート 3件").assertIsDisplayed()
+        composeTestRule.onNodeWithText("C.md").assertDoesNotExist()
+        composeTestRule.onNodeWithText("すべての引用元と引用箇所を表示").performClick()
+        composeTestRule.onNodeWithText("fourth").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("引用箇所を閉じる").performScrollTo().performClick()
+        composeTestRule.onNodeWithText("fourth").assertDoesNotExist()
     }
 
     @Test

@@ -360,11 +360,17 @@ private fun ModelInfoSection(
         enabled = !busy,
         dimWhenDisabled = false,
     )
-    SettingsListItem(
-        icon = Icons.Default.Hub,
-        headline = stringResource(R.string.settings_embedder),
-        supporting = stringResource(R.string.settings_embedder_value) + " · " + modelFileSize(embedderModelFile),
-    )
+    var showTechnicalInfo by remember { mutableStateOf(false) }
+    TextButton(onClick = { showTechnicalInfo = !showTechnicalInfo }) {
+        Text(stringResource(if (showTechnicalInfo) R.string.settings_technical_hide else R.string.settings_technical_show))
+    }
+    if (showTechnicalInfo) {
+        SettingsListItem(
+            icon = Icons.Default.Hub,
+            headline = stringResource(R.string.settings_embedder),
+            supporting = stringResource(R.string.settings_embedder_value) + " · " + modelFileSize(embedderModelFile),
+        )
+    }
 }
 
 @Composable
