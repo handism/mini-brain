@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -223,22 +224,13 @@ private fun FolderSelectedContent(
 
     Spacer(Modifier.height(24.dp))
 
+    // インデックス中も開ける。進み具合はチャット側のバナーにも出る（起動直後と同じ扱い）
     Button(
         onClick = onOpenChat,
         modifier = Modifier.fillMaxWidth(),
-        enabled = indexState !is IndexingState.Progress,
     ) {
         Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
         Text(stringResource(R.string.home_open_chat), modifier = Modifier.padding(start = 8.dp))
-    }
-
-    if (indexState is IndexingState.Progress) {
-        Spacer(Modifier.height(4.dp))
-        Text(
-            stringResource(R.string.home_indexing_chat_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 
     Spacer(Modifier.height(12.dp))
@@ -333,6 +325,7 @@ private fun IndexingProgress(state: IndexingState.Progress) {
             stringResource(R.string.home_indexing, state.current, state.total, state.fileName),
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 8.dp),
         )
     }

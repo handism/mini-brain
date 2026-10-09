@@ -14,6 +14,9 @@ import com.minibrain.ai.llm.selectedLlmModelFlow
 import com.minibrain.ai.llm.setSelectedLlmModel
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.dataStore
+import com.minibrain.ui.theme.ThemeMode
+import com.minibrain.ui.theme.setThemeMode
+import com.minibrain.ui.theme.themeModeFlow
 import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,6 +61,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             app.dataStore.edit { prefs -> prefs[PREF_SHOW_SEARCH_LOG] = enabled }
         }
+    }
+
+    val themeMode: StateFlow<ThemeMode> = app.dataStore.themeModeFlow()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.DEFAULT)
+
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { app.dataStore.setThemeMode(app, mode) }
     }
 
     val llmModel: StateFlow<LlmModel> = app.dataStore.selectedLlmModelFlow()

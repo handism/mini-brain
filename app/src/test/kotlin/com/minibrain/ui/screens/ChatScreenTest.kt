@@ -208,7 +208,13 @@ class ChatScreenTest {
     @Test
     fun testGeneratingStateDisplaysStatusAndStopButton() {
         val vm = mockk<ChatViewModel>(relaxed = true)
-        val messagesFlow = MutableStateFlow<List<ChatMessage>>(emptyList())
+        // 送信すると質問と空の回答欄（ストリーミング中）がすぐ並び、段階の文言は回答欄に出る
+        val messagesFlow = MutableStateFlow(
+            listOf(
+                ChatMessage(role = MessageRole.USER, content = "質問"),
+                ChatMessage(role = MessageRole.ASSISTANT, content = "", isStreaming = true),
+            )
+        )
         val isGeneratingFlow = MutableStateFlow(true)
         val errorMessageFlow = MutableStateFlow<ChatError?>(null)
         val statusTextFlow = MutableStateFlow("Searching...")

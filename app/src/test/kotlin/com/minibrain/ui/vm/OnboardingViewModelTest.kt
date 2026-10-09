@@ -245,4 +245,38 @@ class OnboardingViewModelTest {
         assertEquals(errorMessage, failureState.detail)
         assertTrue(!failureState.canTryCpu)
     }
+
+    @Test
+    fun `cancelDownload stops the download and returns to Required`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[any<Preferences.Key<Boolean>>()] } returns false
+        every { testDataStore.data } returns flowOf(testPrefs)
+        coEvery { testDataStore.updateData(any()) } returns testPrefs
+
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val modelDownloader = mockk<ModelDownloader>(relaxed = true)
+        every { container.modelDownloader } returns modelDownloader
+        every { modelDownloader.isAllReady(any()) } returns false
+        // 終わらないダウンロード
+        every { modelDownloader.downloadAll(any()) } returns kotlinx.coroutines.flow.flow {
+            kotlinx.coroutines.awaitCancellation()
+        }
+
+        val viewModel = OnboardingViewModel(app)
+        advanceUntilIdle()
+        viewModel.startDownload()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value is OnboardingUiState.Downloading)
+
+        viewModel.cancelDownload()
+        advanceUntilIdle()
+        assertEquals(OnboardingUiState.Required, viewModel.state.value)
+    }
 }

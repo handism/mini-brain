@@ -80,6 +80,8 @@ class ModelDownloader(private val context: Context) {
                 val msg = "準備失敗: LLM=${llmFile.length()}/${model.minSize}, Embedder=${embedderModelFile.length()}/$MIN_EMBEDDER_SIZE, Tokenizer=${tokenizerModelFile.length()}/$MIN_TOKENIZER_SIZE"
                 emit(DownloadResult.Error("ダウンロードが完了しましたが、ファイルが準備できていません。($msg)"))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             emit(DownloadResult.Error("エラー: ${e.localizedMessage}"))
         }
@@ -92,6 +94,8 @@ class ModelDownloader(private val context: Context) {
             if (isLlmReady(model) || downloadAndVerifyModel(model.url, model.fileName, model.sha256, file, "LLM")) {
                 emit(DownloadResult.Done(file))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             emit(DownloadResult.Error("エラー: ${e.localizedMessage}"))
         }

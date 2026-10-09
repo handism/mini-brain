@@ -11,6 +11,7 @@ import com.minibrain.ai.llm.DownloadProgress
 import com.minibrain.ai.llm.DownloadResult
 import com.minibrain.ai.llm.selectedLlmModel
 import com.minibrain.dataStore
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -83,8 +84,11 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     /** フォルダ選択済みなら、準備完了後に Home を経由せずチャットを開く。 */
     suspend fun hasKnowledgeBase(): Boolean = app.dataStore.data.first()[PREF_TREE_URI] != null
 
+    private var downloadJob: Job? = null
+
     fun startDownload() {
-        viewModelScope.launch {
+        if (downloadJob?.isActive == true) return
+        downloadJob = viewModelScope.launch {
             _state.value = OnboardingUiState.Downloading(null, null, "接続中...")
             var llm: DownloadProgress? = null
             var embedder: DownloadProgress? = null
@@ -109,6 +113,16 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                 }
             }
         }
+    }
+
+    /**
+     * ダウンロードを止めて開始前の画面に戻す。途中までのファイル（`*.download`）は残るので、
+     * 次に始めたときは続きから再開する。
+     */
+    fun cancelDownload() {
+        downloadJob?.cancel()
+        downloadJob = null
+        _state.value = OnboardingUiState.Required
     }
 
     fun retryWithCpu() {

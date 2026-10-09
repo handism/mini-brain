@@ -43,7 +43,6 @@
     <string name="home_indexing">インデックス中... %1$d/%2$d %3$s</string>
     <string name="home_indexing_eta_minutes">残り約 %1$d 分</string>
     <string name="home_indexing_eta_soon">まもなく完了</string>
-    <string name="home_indexing_chat_hint">インデックス完了後にチャットを開けます</string>
     <string name="home_indexing_done">インデックス完了: %1$d ファイル</string>
     <string name="home_indexing_error">インデックスに失敗しました: %1$s</string>
     <string name="home_open_chat">チャットを開く</string>
@@ -164,6 +163,16 @@
     <string name="settings_embedder_file">Embedder ファイル</string>
     <string name="settings_file_size_mb">%1$d MB</string>
     <string name="settings_not_downloaded">未ダウンロード</string>
+    <string name="settings_section_display">表示</string>
+    <string name="settings_theme">テーマ</string>
+    <string name="settings_theme_system">端末の設定に従う</string>
+    <string name="settings_theme_light">ライト</string>
+    <string name="settings_theme_dark">ダーク</string>
+    <string name="settings_section_about">このアプリについて</string>
+    <string name="settings_version">バージョン</string>
+    <string name="settings_licenses">ライセンス</string>
+    <string name="settings_licenses_desc">モデルとオープンソースライブラリ</string>
+    <string name="onboarding_download_cancel">ダウンロードを中止</string>
     <string name="settings_section_privacy">プライバシー</string>
     <string name="settings_privacy_text">すべての推論はオンデバイスで行われます。\n質問・回答・mdの内容はクラウドに送信されません。\nネットワーク通信はモデルのダウンロード時（初回と、設定でモデルを切り替えたとき）のみです。</string>
     <string name="settings_clear_dialog_title">チャット履歴を削除</string>

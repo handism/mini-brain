@@ -28,7 +28,10 @@ import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Sync
@@ -43,6 +46,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -56,7 +60,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.shape.CircleShape
+import com.minibrain.ui.theme.ThemeMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -77,7 +86,14 @@ fun SettingsScreen(
     val indexingState by vm.indexingState.collectAsStateWithLifecycle()
     val llmModel by vm.llmModel.collectAsStateWithLifecycle()
     val modelSwitch by vm.modelSwitch.collectAsStateWithLifecycle()
+    val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     var showClearDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
+    var showLicenseDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val appVersion = remember {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty()
+    }
     var showModelDialog by remember { mutableStateOf(false) }
     var showFolderChangeDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -114,6 +130,10 @@ fun SettingsScreen(
             if (treeUri == null) folderLauncher.launch(null) else showFolderChangeDialog = true
         },
         onClearChat = { showClearDialog = true },
+        themeMode = themeMode,
+        onChangeTheme = { showThemeDialog = true },
+        appVersion = appVersion,
+        onShowLicenses = { showLicenseDialog = true },
         onShowSearchLogChange = { vm.setShowSearchLog(it) },
         onOpenEval = onOpenEval,
     )
@@ -127,6 +147,21 @@ fun SettingsScreen(
             },
             onDismiss = { showModelDialog = false },
         )
+    }
+
+    if (showThemeDialog) {
+        ThemeModeDialog(
+            current = themeMode,
+            onSelect = { mode ->
+                showThemeDialog = false
+                vm.setThemeMode(mode)
+            },
+            onDismiss = { showThemeDialog = false },
+        )
+    }
+
+    if (showLicenseDialog) {
+        LicenseDialog(onDismiss = { showLicenseDialog = false })
     }
 
     if (showFolderChangeDialog) {
@@ -167,6 +202,10 @@ private fun SettingsScreenContent(
     onReindex: () -> Unit,
     onChangeFolder: () -> Unit,
     onClearChat: () -> Unit,
+    themeMode: ThemeMode,
+    onChangeTheme: () -> Unit,
+    appVersion: String,
+    onShowLicenses: () -> Unit,
     onShowSearchLogChange: (Boolean) -> Unit,
     onOpenEval: () -> Unit,
 ) {
@@ -196,7 +235,6 @@ private fun SettingsScreenContent(
                 onReindex = onReindex,
                 onChangeFolder = onChangeFolder
             )
-            ChatHistorySection(onClearChat = onClearChat)
             ModelInfoSection(
                 llmModel = llmModel,
                 llmModelFile = llmModelFile,
@@ -204,7 +242,11 @@ private fun SettingsScreenContent(
                 onChangeModel = onChangeModel,
                 embedderModelFile = embedderModelFile
             )
+            DisplaySection(themeMode = themeMode, onChangeTheme = onChangeTheme)
             PrivacySection()
+            AboutSection(appVersion = appVersion, onShowLicenses = onShowLicenses)
+            // 取り消せない操作なので、普段触る項目から離して下に置く
+            ChatHistorySection(onClearChat = onClearChat)
             // 普段は触らない項目なので最後に置く
             DeveloperSection(
                 showSearchLog = showSearchLog,
@@ -227,15 +269,10 @@ private fun KnowledgeBaseSection(
         icon = Icons.Default.Folder,
         headline = stringResource(R.string.settings_current_folder),
         supporting = treeUri?.let { folderDisplayName(it) } ?: stringResource(R.string.not_selected),
-        trailing = {
-            Text(
-                stringResource(R.string.change_folder),
-                color = if (indexingProgress == null) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
+        trailing = { ActionLabel(stringResource(R.string.change_folder)) },
+        onClick = onChangeFolder,
         // インデックス中に切り替えると、走っている索引の後で消すことになるので待ってもらう
-        onClick = onChangeFolder.takeIf { indexingProgress == null },
+        enabled = indexingProgress == null,
     )
     SettingsListItem(
         icon = Icons.Default.Sync,
@@ -246,7 +283,10 @@ private fun KnowledgeBaseSection(
         trailing = indexingProgress?.let {
             { CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp) }
         },
-        onClick = onReindex.takeIf { indexingProgress == null },
+        onClick = onReindex,
+        // 進み具合を出している間は押せないが、文字は読めるよう薄くしない
+        enabled = indexingProgress == null,
+        dimWhenDisabled = false,
     )
 }
 
@@ -314,11 +354,11 @@ private fun ModelInfoSection(
         trailing = if (busy) {
             { CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp) }
         } else {
-            {
-                Text(stringResource(R.string.change), color = MaterialTheme.colorScheme.primary)
-            }
+            { ActionLabel(stringResource(R.string.change)) }
         },
-        onClick = onChangeModel.takeIf { !busy },
+        onClick = onChangeModel,
+        enabled = !busy,
+        dimWhenDisabled = false,
     )
     SettingsListItem(
         icon = Icons.Default.Hub,
@@ -399,6 +439,116 @@ private fun modelFileSize(file: java.io.File): String =
     else stringResource(R.string.settings_not_downloaded)
 
 @Composable
+private fun themeModeName(mode: ThemeMode): String = stringResource(
+    when (mode) {
+        ThemeMode.SYSTEM -> R.string.settings_theme_system
+        ThemeMode.LIGHT -> R.string.settings_theme_light
+        ThemeMode.DARK -> R.string.settings_theme_dark
+    }
+)
+
+@Composable
+private fun DisplaySection(themeMode: ThemeMode, onChangeTheme: () -> Unit) {
+    SectionTitle(stringResource(R.string.settings_section_display))
+    SettingsListItem(
+        icon = Icons.Default.Contrast,
+        headline = stringResource(R.string.settings_theme),
+        supporting = themeModeName(themeMode),
+        onClick = onChangeTheme,
+    )
+}
+
+/** 選んだらすぐ反映して閉じる（取り消しの要らない軽い選択なので確定ボタンは置かない）。 */
+@Composable
+private fun ThemeModeDialog(
+    current: ThemeMode,
+    onSelect: (ThemeMode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_theme)) },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                ThemeMode.entries.forEach { mode ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = mode == current, role = Role.RadioButton, onClick = { onSelect(mode) })
+                            .padding(vertical = 12.dp),
+                    ) {
+                        RadioButton(selected = mode == current, onClick = null)
+                        Text(
+                            themeModeName(mode),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+private fun AboutSection(appVersion: String, onShowLicenses: () -> Unit) {
+    SectionTitle(stringResource(R.string.settings_section_about))
+    SettingsListItem(
+        icon = Icons.Default.Info,
+        headline = stringResource(R.string.settings_version),
+        supporting = appVersion,
+    )
+    SettingsListItem(
+        icon = Icons.Default.Gavel,
+        headline = stringResource(R.string.settings_licenses),
+        supporting = stringResource(R.string.settings_licenses_desc),
+        onClick = onShowLicenses,
+    )
+}
+
+/** 同梱・ダウンロードするモデルと、主なライブラリのライセンス。 */
+private data class LicenseEntry(val name: String, val license: String, val url: String)
+
+private val LICENSES = listOf(
+    LicenseEntry("Gemma 4", "Apache License 2.0", "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm"),
+    LicenseEntry("multilingual-e5-small", "MIT License", "https://huggingface.co/intfloat/multilingual-e5-small"),
+    LicenseEntry("LiteRT-LM", "Apache License 2.0", "https://github.com/google-ai-edge/LiteRT-LM"),
+    LicenseEntry("ONNX Runtime", "MIT License", "https://github.com/microsoft/onnxruntime"),
+    LicenseEntry("AndroidX / Jetpack Compose", "Apache License 2.0", "https://developer.android.com/jetpack/androidx"),
+    LicenseEntry("Kotlin Coroutines", "Apache License 2.0", "https://github.com/Kotlin/kotlinx.coroutines"),
+    LicenseEntry("OkHttp", "Apache License 2.0", "https://github.com/square/okhttp"),
+    LicenseEntry("Moshi", "Apache License 2.0", "https://github.com/square/moshi"),
+    LicenseEntry("Timber", "Apache License 2.0", "https://github.com/JakeWharton/timber"),
+)
+
+@Composable
+private fun LicenseDialog(onDismiss: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_licenses)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                LICENSES.forEach { entry ->
+                    ListItem(
+                        headlineContent = { Text(entry.name) },
+                        supportingContent = { Text(entry.license) },
+                        modifier = Modifier.clickable { runCatching { uriHandler.openUri(entry.url) } },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
+}
+
+@Composable
 private fun PrivacySection() {
     SectionTitle(stringResource(R.string.settings_section_privacy))
     SettingsListItem(
@@ -435,8 +585,12 @@ private fun SettingsListItem(
     contentColor: Color = Color.Unspecified,
     trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
+    // 押せないことを薄くして示す。進み具合を出している行は読めるよう false にする
+    dimWhenDisabled: Boolean = true,
 ) {
     val color = contentColor.takeOrElse { MaterialTheme.colorScheme.onSurface }
+    val clickable = onClick != null && enabled
     ListItem(
         leadingContent = {
             Icon(
@@ -448,8 +602,28 @@ private fun SettingsListItem(
         headlineContent = { Text(headline, color = color) },
         supportingContent = supporting?.let { { Text(it) } },
         trailingContent = trailing,
-        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+        modifier = Modifier
+            .then(if (onClick != null) Modifier.clickable(enabled = clickable, onClick = onClick) else Modifier)
+            .then(if (!enabled && dimWhenDisabled) Modifier.alpha(DISABLED_ALPHA) else Modifier),
     )
+}
+
+private const val DISABLED_ALPHA = 0.38f
+
+/**
+ * 行の末尾に置く「変更」などの表示。押せることが分かるようボタンの形にするが、
+ * タップは行全体で受けるので、これ自体はクリックを持たない。
+ */
+@Composable
+private fun ActionLabel(text: String) {
+    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
 }
 
 @Composable

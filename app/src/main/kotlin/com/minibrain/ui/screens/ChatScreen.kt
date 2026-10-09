@@ -49,7 +49,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
@@ -72,6 +73,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -170,9 +174,8 @@ fun ChatScreen(
                 modifier = Modifier.weight(1f)
             )
 
+            // 生成中の段階は回答欄（GenerationProgress）にだけ出す。ここは失敗の表示だけ
             ChatStatusArea(
-                // ストリーミング中の吹き出しがあればそちらに出すので、ここでは出さない
-                statusText = statusText.takeIf { isGenerating && messages.none { it.isStreaming } },
                 error = error,
                 onRetry = { vm.regenerate() }.takeUnless { isGenerating },
                 onDismissError = { vm.dismissError() },
@@ -410,20 +413,10 @@ private fun ChatEmptyState(
 
 @Composable
 fun ChatStatusArea(
-    statusText: String?,
     error: ChatError?,
     onRetry: (() -> Unit)?,
     onDismissError: () -> Unit,
 ) {
-    statusText?.let {
-        Text(
-            text = it,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-        )
-    }
-
     error?.let {
         ChatErrorCard(
             error = it,
@@ -508,8 +501,10 @@ fun ChatInputArea(
         fieldValue = TextFieldValue(inputText, TextRange(inputText.length))
     }
     val canSend = !isGenerating && inputText.isNotBlank()
+    val haptic = LocalHapticFeedback.current
     val send = {
         if (canSend) {
+            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
             onSendMessage(inputText.trim())
             onValueChange("")
         }
@@ -524,7 +519,8 @@ fun ChatInputArea(
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedTextField(
+        // 枠線ではなく塗りのピル型にして、入力欄を画面下の操作面としてまとめる
+        TextField(
             value = fieldValue,
             onValueChange = {
                 fieldValue = it
@@ -540,13 +536,27 @@ fun ChatInputArea(
             ),
             keyboardActions = KeyboardActions(onSend = { send() }),
             maxLines = 5,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent,
+            ),
         )
 
         // 入力欄（1 行時 56dp）と高さを揃える
         val buttonModifier = Modifier.size(56.dp)
         if (isGenerating) {
-            FilledTonalIconButton(onClick = onStopGenerating, modifier = buttonModifier) {
+            FilledTonalIconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.Reject)
+                    onStopGenerating()
+                },
+                modifier = buttonModifier,
+            ) {
                 Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.chat_stop))
             }
         } else {

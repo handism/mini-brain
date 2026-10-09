@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +53,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
@@ -256,10 +265,14 @@ private fun AssistantMessageActions(
     onOpenCitation: ((Citation) -> Unit)?,
     onRegenerate: (() -> Unit)?,
 ) {
+    val haptic = LocalHapticFeedback.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         MessageCopyButton(content = msg.content)
         onRegenerate?.let { regenerate ->
-            IconButton(onClick = regenerate) {
+            IconButton(onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                regenerate()
+            }) {
                 Icon(
                     Icons.Default.Refresh,
                     contentDescription = stringResource(R.string.chat_regenerate),
@@ -269,10 +282,13 @@ private fun AssistantMessageActions(
             }
         }
         if (msg.citations.isNotEmpty()) {
+            val scrollState = rememberScrollState()
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
+                    // 画面外にチップが続いていることが分かるよう、スクロールできる側の端を薄くする
+                    .fadingEdges(scrollState)
+                    .horizontalScroll(scrollState),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -292,6 +308,28 @@ private fun AssistantMessageActions(
         }
     }
 }
+
+private val FADING_EDGE_WIDTH = 24.dp
+
+/** 横スクロールの続きがある側の端をフェードさせる。色は使わず、描いた内容のアルファだけを削る。 */
+private fun Modifier.fadingEdges(scrollState: ScrollState): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val edge = FADING_EDGE_WIDTH.toPx().coerceAtMost(size.width / 2)
+        if (scrollState.canScrollBackward) {
+            drawRect(
+                brush = Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = 0f, endX = edge),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+        if (scrollState.canScrollForward) {
+            drawRect(
+                brush = Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = size.width - edge, endX = size.width),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+    }
 
 /** チップに出す名前。ファイル名（フォルダは落とす）、無ければ見出しパス。 */
 internal fun citationChipLabel(citation: Citation): String =
@@ -439,11 +477,14 @@ fun MessageCopyButton(content: String) {
         }
     }
 
+    val haptic = LocalHapticFeedback.current
+
     IconButton(
         onClick = {
             scope.launch {
                 clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("", content)))
             }
+            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
             copied = true
         },
     ) {

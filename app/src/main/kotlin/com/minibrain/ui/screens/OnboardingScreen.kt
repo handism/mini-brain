@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
@@ -54,11 +58,15 @@ fun OnboardingScreen(
     }
 
     Scaffold { padding ->
+        // 失敗時の詳細を開いたときや横画面でボタンが画面外に出ないよう、スクロールできるようにする
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(32.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(32.dp)
+                .wrapContentWidth(Alignment.CenterHorizontally)
+                .widthIn(max = ONBOARDING_CONTENT_MAX_WIDTH),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -87,7 +95,7 @@ fun OnboardingScreen(
 
                 is OnboardingUiState.Required -> RequiredStateView(onStartDownload = { vm.startDownload() })
 
-                is OnboardingUiState.Downloading -> DownloadingStateView(s)
+                is OnboardingUiState.Downloading -> DownloadingStateView(s, onCancel = { vm.cancelDownload() })
 
                 is OnboardingUiState.Initializing -> InitializingStateView()
 
@@ -107,6 +115,8 @@ fun OnboardingScreen(
     }
 }
 
+private val ONBOARDING_CONTENT_MAX_WIDTH = 480.dp
+
 @Composable
 private fun RequiredStateView(onStartDownload: () -> Unit) {
     Text(
@@ -122,7 +132,7 @@ private fun RequiredStateView(onStartDownload: () -> Unit) {
 }
 
 @Composable
-private fun DownloadingStateView(state: OnboardingUiState.Downloading) {
+private fun DownloadingStateView(state: OnboardingUiState.Downloading, onCancel: () -> Unit) {
     Text(stringResource(R.string.onboarding_downloading), style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(8.dp))
     Text(state.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -137,6 +147,11 @@ private fun DownloadingStateView(state: OnboardingUiState.Downloading) {
         }
     } else {
         CircularProgressIndicator(modifier = Modifier.size(32.dp))
+    }
+    Spacer(Modifier.height(16.dp))
+    // モバイル回線で始めてしまったときに止められるように。続きは次に始めたとき再開する
+    TextButton(onClick = onCancel) {
+        Text(stringResource(R.string.onboarding_download_cancel))
     }
 }
 
