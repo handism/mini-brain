@@ -8,17 +8,20 @@ import com.minibrain.data.db.AppDatabase
 import com.minibrain.data.db.daos.ChunkDao
 import com.minibrain.data.db.daos.DocumentDao
 import com.minibrain.data.db.daos.FolderEmbeddingDao
+import com.minibrain.data.db.entities.DocumentEntity
 import com.minibrain.data.md.MdFile
 import com.minibrain.data.md.MdFileReader
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.system.measureTimeMillis
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -35,11 +38,11 @@ class DocumentRepositoryIndexBenchmarkTest {
 
         coEvery { embedder.embed(any(), any()) } returns FloatArray(384) { 0.1f }
 
-        val dummyMdFiles = (1..100).map {
+        val dummyMdFiles = (1..9000).map {
             MdFile(
-                uri = Uri.parse("file://test/$it.md"),
+                uri = Uri.parse("file://test/folder/$it.md"),
                 name = "$it.md",
-                relativePath = "$it.md",
+                relativePath = "folder/$it.md",
                 lastModified = 0L,
                 content = "# Heading\nSome content $it. " + "Lots of words to make it chunk. ".repeat(10),
                 contentHash = "hash$it"
@@ -49,7 +52,12 @@ class DocumentRepositoryIndexBenchmarkTest {
         mockkObject(MdFileReader)
         coEvery { MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns dummyMdFiles
 
-        coEvery { documentDao.getByFileUris(any()) } returns emptyList()
+        // Simulate DB latency for getByFileUris
+        coEvery { documentDao.getByFileUris(any()) } coAnswers {
+            delay(500) // simulate some DB IO per chunk
+            emptyList()
+        }
+
         coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
         coEvery { documentDao.insert(any()) } returns 1L
         coEvery { documentDao.insertAll(any()) } returns (1..100).map { it.toLong() }
@@ -65,10 +73,10 @@ class DocumentRepositoryIndexBenchmarkTest {
             context, documentDao, chunkDao, embedder, db, folderEmbeddingDao
         )
 
-        val start = System.currentTimeMillis()
-        repo.indexFolder(Uri.parse("file://test"))
-        val time1 = System.currentTimeMillis() - start
+        val time1 = measureTimeMillis {
+            repo.indexFolder(Uri.parse("file://test"))
+        }
 
-        println("Indexing 100 files took $time1 ms")
+        println("Indexing files took $time1 ms")
     }
 }

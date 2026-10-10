@@ -351,9 +351,11 @@ class DocumentRepository(
             .groupBy { it.relativePath.substringBeforeLast('/') }
 
         val allFileUrisToFetch = byFolder.values.flatten().map { it.uri.toString() }
-        val allDocsMap = allFileUrisToFetch.chunked(SQL_BATCH_SIZE).flatMap { chunk ->
-            documentDao.getByFileUris(chunk)
-        }.associateBy { it.fileUri }
+        val allDocsMap = kotlinx.coroutines.coroutineScope {
+            allFileUrisToFetch.chunked(SQL_BATCH_SIZE).map { chunk ->
+                async { documentDao.getByFileUris(chunk) }
+            }.awaitAll().flatten().associateBy { it.fileUri }
+        }
 
         val folderEmbeddings = mutableListOf<FolderEmbeddingEntity>()
 
