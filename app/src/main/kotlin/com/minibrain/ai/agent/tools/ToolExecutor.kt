@@ -238,13 +238,8 @@ class ToolExecutor(
             val validDocIds = docsById.values
                 .mapNotNull { if (isInScope(it.relativePath, tool.scope)) it.id else null }
                 .toSet()
-            val filteredCandidates = ArrayList<Pair<FloatArray, ChunkEntity>>()
-            for (i in chunks.indices) {
-                val chunk = chunks[i]
-                if (chunk.docId in validDocIds) {
-                    filteredCandidates.add(Pair(vectors[i], chunk))
-                }
-            }
+            val filteredCandidates = vectors.zip(chunks)
+                .filter { it.second.docId in validDocIds }
             CosineSimilarity.topK(vec, filteredCandidates, tool.k)
         }
 
