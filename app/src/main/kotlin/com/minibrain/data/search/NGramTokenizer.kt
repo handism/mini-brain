@@ -112,8 +112,10 @@ object NGramTokenizer {
         // creating an expression tree that is too large.
         val maxTokens = 100
         val limitedTokens = if (tokens.size > maxTokens) tokens.take(maxTokens) else tokens
-        // Escape double quotes inside tokens to prevent FTS match syntax errors/injections
-        // According to SQLite FTS documentation, a double quote within a phrase must be escaped as two double quotes
-        return limitedTokens.joinToString(" OR ") { "\"${it.replace("\"", "\"\"")}\"" }
+        // Strip double quotes and other potential FTS special characters entirely instead of trying to escape them.
+        // Proper escaping for SQLite FTS MATCH is difficult to do manually and error-prone.
+        return limitedTokens.map { it.replace(Regex("[\"\\x00]"), "") }
+            .filter { it.isNotEmpty() }
+            .joinToString(" OR ") { "\"$it\"" }
     }
 }
