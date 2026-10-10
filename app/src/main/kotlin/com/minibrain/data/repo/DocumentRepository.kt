@@ -240,16 +240,16 @@ class DocumentRepository(
     // removeDocuments=true : フォルダから消えた doc。document 行ごと削除する
     private suspend fun deleteDocs(docIds: List<Long>, writableDb: SupportSQLiteDatabase, removeDocuments: Boolean) {
         if (docIds.isEmpty()) return
-        docIds.chunked(SQL_BATCH_SIZE).forEach { batch ->
-            writableDb.beginTransaction()
-            try {
+        writableDb.beginTransaction()
+        try {
+            docIds.chunked(SQL_BATCH_SIZE).forEach { batch ->
                 chunkDao.deleteFtsByDocIds(batch)
                 chunkDao.deleteByDocIds(batch)
                 if (removeDocuments) documentDao.deleteByIds(batch)
-                writableDb.setTransactionSuccessful()
-            } finally {
-                writableDb.endTransaction()
             }
+            writableDb.setTransactionSuccessful()
+        } finally {
+            writableDb.endTransaction()
         }
     }
 
