@@ -44,7 +44,7 @@ class PlannerHintBuilderTest {
 
     @Test
     fun `build adds file match hint`() = runBlocking {
-        val doc1 = DocumentEntity(id = 1, treeUri = "tree1", relativePath = "meeting_notes.md", fileName = "meeting_notes.md")
+        val doc1 = DocumentEntity(id = 1, treeUri = "tree1", fileUri = "uri1", fileName = "meeting_notes.md", relativePath = "meeting_notes.md", lastModified = 0L, contentHash = "hash1")
         coEvery { mockCache.documents() } returns listOf(doc1)
 
         val hint = PlannerHintBuilder.build(
@@ -58,36 +58,40 @@ class PlannerHintBuilderTest {
 
     @Test
     fun `build adds date hints for diary query`() = runBlocking {
-        val doc1 = DocumentEntity(id = 1, treeUri = "tree1", relativePath = "2023/05/15.md", fileName = "15.md")
+        val currentYear = LocalDate.now().year
+        val doc1 = DocumentEntity(id = 1, treeUri = "tree1", fileUri = "uri1", fileName = "15.md", relativePath = "$currentYear/05/15.md", lastModified = 0L, contentHash = "hash1")
         coEvery { mockCache.documents() } returns listOf(doc1)
 
         val hint = PlannerHintBuilder.build(
-            question = "2023年5月15日の日記",
+            question = "${currentYear}年5月15日の日記",
             dateRange = null,
             cache = mockCache
         )
 
-        assertTrue(hint!!.contains("検出された日付: 2023-05-15"))
-        assertTrue(hint.contains("日付に一致するファイル: [d=1] 2023/05/15.md"))
+        assertTrue(hint!!.contains("検出された日付: $currentYear-05-15"))
+        assertTrue(hint.contains("日付に一致するファイル: [d=1] $currentYear/05/15.md"))
     }
+
 
     @Test
     fun `build adds glob recommendations when date files are not found`() = runBlocking {
         coEvery { mockCache.documents() } returns emptyList()
+        val currentYear = LocalDate.now().year
 
         val hint = PlannerHintBuilder.build(
-            question = "2023年5月16日の日記",
+            question = "${currentYear}年5月16日の日記",
             dateRange = null,
             cache = mockCache
         )
 
-        assertTrue(hint!!.contains("検出された日付: 2023-05-16"))
-        assertTrue(hint.contains("推奨 glob パターン: \"20230516*\" or \"2023/05/16*\" or \"2023-05-16*\""))
+        assertTrue(hint!!.contains("検出された日付: $currentYear-05-16"))
+        assertTrue(hint.contains("推奨 glob パターン: \"${currentYear}0516*\" or \"$currentYear/05/16*\" or \"$currentYear-05-16*\""))
     }
+
 
     @Test
     fun `build combines multiple hints with slash`() = runBlocking {
-        val doc1 = DocumentEntity(id = 1, treeUri = "tree1", relativePath = "meeting_notes.md", fileName = "meeting_notes.md")
+        val doc1 = DocumentEntity(id = 1, treeUri = "tree1", fileUri = "uri1", fileName = "meeting_notes.md", relativePath = "meeting_notes.md", lastModified = 0L, contentHash = "hash1")
         coEvery { mockCache.documents() } returns listOf(doc1)
 
         val dateRange = DateRange(LocalDate.of(2023, 1, 1), LocalDate.of(2023, 12, 31))
