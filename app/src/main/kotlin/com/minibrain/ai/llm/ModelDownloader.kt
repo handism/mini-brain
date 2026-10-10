@@ -157,9 +157,15 @@ class ModelDownloader(private val context: Context) {
         "ファイルの移動に失敗しました: ${e.localizedMessage}"
     }
 
-    private fun downloadFile(url: String, dest: File, label: String): Flow<DownloadResult> = flow {
+    @androidx.annotation.VisibleForTesting
+    internal fun downloadFile(url: String, dest: File, label: String): Flow<DownloadResult> = flow {
+        val secureUrl = if (url.startsWith("http://", ignoreCase = true)) {
+            "https://" + url.substring(7)
+        } else {
+            url
+        }
         val alreadyDownloaded = if (dest.exists()) dest.length() else 0L
-        val requestBuilder = Request.Builder().url(url)
+        val requestBuilder = Request.Builder().url(secureUrl)
         if (alreadyDownloaded > 0) {
             requestBuilder.header("Range", "bytes=$alreadyDownloaded-")
         }

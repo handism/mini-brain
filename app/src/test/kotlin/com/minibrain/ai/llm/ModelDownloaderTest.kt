@@ -298,6 +298,43 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun `downloadFile enforces HTTPS for HTTP URLs`() = runTest {
+        mockkConstructor(OkHttpClient.Builder::class)
+        val mockClient = mockk<OkHttpClient>()
+        val mockCall = mockk<Call>()
+        val mockResponse = mockk<Response>()
+        val mockBody = mockk<ResponseBody>()
+
+        every { anyConstructed<OkHttpClient.Builder>().build() } returns mockClient
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } returns mockResponse
+        every { mockResponse.isSuccessful } returns true
+        every { mockResponse.code } returns 200
+        every { mockResponse.body } returns mockBody
+        every { mockBody.contentLength() } returns 10L
+        every { mockBody.byteStream() } returns java.io.ByteArrayInputStream(ByteArray(10))
+
+        val mockContext = mockk<Context>()
+        val filesDir = tempFolder.newFolder("models_https_test")
+        every { mockContext.filesDir } returns filesDir
+
+        try {
+            val downloader = ModelDownloader(mockContext)
+            val destFile = File(filesDir, "test.txt")
+            downloader.downloadFile("http://example.com/model.bin", destFile, "Test").toList()
+
+            io.mockk.verify {
+                mockClient.newCall(withArg { request ->
+                    assertEquals("https", request.url.scheme)
+                    assertEquals("https://example.com/model.bin", request.url.toString())
+                })
+            }
+        } finally {
+            unmockkConstructor(OkHttpClient.Builder::class)
+        }
+    }
+
+    @Test
     fun `calculateSha256 exception returns empty string when reading invalid file`() {
         val mockContext = mockk<Context>()
         val filesDir = tempFolder.newFolder("models_test_read_err")
