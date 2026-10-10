@@ -47,7 +47,7 @@ class DocumentRepositoryIndexBenchmarkTest {
         }
 
         mockkObject(MdFileReader)
-        coEvery { MdFileReader.listMdFiles(any(), any()) } returns dummyMdFiles
+        coEvery { MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns dummyMdFiles
 
         coEvery { documentDao.getByFileUris(any()) } returns emptyList()
         coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()

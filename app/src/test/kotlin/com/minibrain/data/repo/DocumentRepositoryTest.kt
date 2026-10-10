@@ -162,7 +162,7 @@ class DocumentRepositoryTest {
             contentHash = "hash1",
             content = "# Heading 1\nThis is paragraph 1.\n# Heading 2\nThis is paragraph 2."
         )
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile)
 
         io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
@@ -227,7 +227,7 @@ class DocumentRepositoryTest {
             io.mockk.every { contentHash } returns "hash_new"
             io.mockk.every { content } returns "# New Content"
         }
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile)
 
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
         io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
@@ -271,7 +271,7 @@ class DocumentRepositoryTest {
             contentHash = "hash_same",
             content = "# Existing Content"
         )
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile)
 
         io.mockk.mockkObject(com.minibrain.data.md.MarkdownMetaExtractor)
         io.mockk.every { com.minibrain.data.md.MarkdownMetaExtractor.extractHeadings(any()) } returns emptyList()
@@ -354,7 +354,7 @@ class DocumentRepositoryTest {
             contentHash = "hash2",
             content = "# Valid chunking text"
         )
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile1, mdFile2)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile1, mdFile2)
 
         io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
@@ -408,7 +408,7 @@ class DocumentRepositoryTest {
             contentHash = "hash1",
             content = "# Heading 1\nThis is paragraph 1.\n# Heading 2\nThis is paragraph 2."
         )
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile)
 
         io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns emptyList()
         io.mockk.coEvery { documentDao.getByFileUris(any()) } returns emptyList()
@@ -526,7 +526,7 @@ class DocumentRepositoryTest {
             io.mockk.every { contentHash } returns "hash_new"
             io.mockk.every { content } returns "# New Content"
         }
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile)
 
         val docEntity = io.mockk.mockk<com.minibrain.data.db.entities.DocumentEntity>(relaxed = true) {
             io.mockk.every { id } returns 1L
@@ -574,7 +574,7 @@ class DocumentRepositoryTest {
 
         // フォルダには何も残っていない
         io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns emptyList()
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns emptyList()
 
         val removedDoc = io.mockk.mockk<com.minibrain.data.db.entities.DocumentEntity>(relaxed = true) {
             io.mockk.every { id } returns 42L
@@ -623,7 +623,7 @@ class DocumentRepositoryTest {
             contentHash = "hash1",
             content = "# a",
         )
-        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any(), any()) } returns listOf(mdFile)
+        io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile)
         io.mockk.mockkObject(com.minibrain.data.md.MarkdownChunker)
         io.mockk.every { com.minibrain.data.md.MarkdownChunker.chunk(any(), any()) } returns List(3) {
             com.minibrain.data.md.Chunk("h$it", "text$it")

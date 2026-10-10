@@ -7,6 +7,7 @@ import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -98,20 +99,45 @@ object MdFileReader {
     private const val MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024L // 10MB
     private const val READ_PARALLELISM = 4
 
-    suspend fun listMdFiles(context: Context, treeUri: Uri): List<MdFile> =
-        listMdFiles(ContentResolverDocumentTree(context.contentResolver, treeUri))
+    /**
+     * 列挙と読み込みが終わるまで返らないので、進み具合をコールバックで知らせる。
+     * クラウドの提供元だと 1 件ずつ取りに行くため、ここが長く止まって見えることがある。
+     * - [onListing]: 列挙中。これまでに見つかった .md の数
+     * - [onRead]: 読み込み中。読み終えた数・総数・読み終えたファイル名（並列に呼ばれる）
+     */
+    suspend fun listMdFiles(
+        context: Context,
+        treeUri: Uri,
+        onListing: (found: Int) -> Unit = {},
+        onRead: (done: Int, total: Int, fileName: String) -> Unit = { _, _, _ -> },
+    ): List<MdFile> =
+        listMdFiles(ContentResolverDocumentTree(context.contentResolver, treeUri), onListing, onRead)
 
     // DocumentFile は query の失敗を握りつぶして空や false を返すため、
     // 深い階層のノートが黙って欠けていた。DocumentsContract で直接列挙し、失敗は例外にする。
-    internal suspend fun listMdFiles(tree: DocumentTree): List<MdFile> = withContext(Dispatchers.IO) {
-        val targets = collectMdEntries(tree)
+    internal suspend fun listMdFiles(
+        tree: DocumentTree,
+        onListing: (found: Int) -> Unit = {},
+        onRead: (done: Int, total: Int, fileName: String) -> Unit = { _, _, _ -> },
+    ): List<MdFile> = withContext(Dispatchers.IO) {
+        val targets = collectMdEntries(tree, onListing)
         val semaphore = Semaphore(READ_PARALLELISM)
+        val done = AtomicInteger(0)
         targets.map { (entry, relativePath) ->
-            async { semaphore.withPermit { readMdFile(tree, entry, relativePath) } }
+            async {
+                semaphore.withPermit {
+                    readMdFile(tree, entry, relativePath).also {
+                        onRead(done.incrementAndGet(), targets.size, entry.name)
+                    }
+                }
+            }
         }.awaitAll().filterNotNull()
     }
 
-    private fun collectMdEntries(tree: DocumentTree): List<Pair<DocumentEntry, String>> {
+    private fun collectMdEntries(
+        tree: DocumentTree,
+        onListing: (found: Int) -> Unit,
+    ): List<Pair<DocumentEntry, String>> {
         val result = mutableListOf<Pair<DocumentEntry, String>>()
         val pending = ArrayDeque<Pair<String, String>>() // documentId, pathPrefix
         pending.addLast(tree.rootDocumentId to "")
@@ -130,6 +156,7 @@ object MdFileReader {
                     child.name.endsWith(".md", ignoreCase = true) -> result.add(child to path)
                 }
             }
+            onListing(result.size)
         }
         return result
     }

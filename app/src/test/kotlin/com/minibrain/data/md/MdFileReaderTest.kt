@@ -173,4 +173,25 @@ class MdFileReaderTest {
         assertEquals(listOf("ok.md"), MdFileReader.listMdFiles(tree).map { it.name })
         assertTrue(loggedMessages.any { it.contains("read failed: error.md") })
     }
+
+    @Test
+    fun `listMdFiles reports listing and reading progress`() = runTest {
+        val sub = tree.dir("root", "sub")
+        tree.file("root", "a.md", "a")
+        tree.file("root", "skip.txt", "x")
+        tree.file(sub, "b.md", "b")
+        tree.file(sub, "c.md", "c")
+
+        val listed = mutableListOf<Int>()
+        val reads = mutableListOf<Pair<Int, Int>>()
+        MdFileReader.listMdFiles(
+            tree,
+            onListing = { listed += it },
+            onRead = { done, total, _ -> synchronized(reads) { reads += done to total } },
+        )
+
+        assertEquals(listOf(1, 3), listed) // フォルダを 1 つ列挙するごと
+        assertEquals(listOf(1, 2, 3), reads.map { it.first }.sorted())
+        assertTrue(reads.all { it.second == 3 })
+    }
 }

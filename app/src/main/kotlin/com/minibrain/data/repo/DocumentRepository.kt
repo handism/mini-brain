@@ -126,7 +126,15 @@ class DocumentRepository(
     private suspend fun indexFolderLocked(treeUri: Uri) {
         _indexingState.value = IndexingState.Progress(0, 0, "スキャン中...")
 
-        val mdFiles = MdFileReader.listMdFiles(context, treeUri)
+        // 列挙・読み込みが終わるまで 0/0 のままだと、遅いのか止まっているのか分からないため
+        val mdFiles = MdFileReader.listMdFiles(
+            context,
+            treeUri,
+            onListing = { found -> _indexingState.value = IndexingState.Progress(0, 0, "スキャン中... $found 件") },
+            onRead = { done, total, name ->
+                _indexingState.value = IndexingState.Progress(done, total, "読み込み中: $name")
+            },
+        )
         val total = mdFiles.size
         var totalChunks = 0
 
@@ -147,9 +155,8 @@ class DocumentRepository(
             // 埋め込み・挿入をまとめて行うため、再インデックス対象を先に集める
             val pendingDocs = mutableListOf<PendingDoc>()
 
-            mdFiles.forEachIndexed { index, mdFile ->
-                _indexingState.value = IndexingState.Progress(index + 1, total, mdFile.name)
-
+            // メモリ上の比較だけで一瞬で終わるので進捗は出さない（出すと読み込みの残り時間の計測が崩れる）
+            mdFiles.forEach { mdFile ->
                 val existing = existingDocs[mdFile.uri.toString()]
                 var existingChunkCount = 0
                 if (existing != null && existing.contentHash == mdFile.contentHash) {
@@ -161,7 +168,7 @@ class DocumentRepository(
                 ) {
                     createUpdatedDocumentEntity(existing, mdFile)?.let { docsToUpdate.add(it) }
                     totalChunks += existingChunkCount
-                    return@forEachIndexed
+                    return@forEach
                 }
 
                 if (existing != null) {
