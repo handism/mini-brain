@@ -1,5 +1,7 @@
 package com.minibrain.data.repo
 
+import kotlinx.coroutines.*
+
 import android.content.Context
 import android.net.Uri
 import androidx.annotation.VisibleForTesting
@@ -266,19 +268,28 @@ class DocumentRepository(
             val chunkBuffer = mutableListOf<ChunkEntity>()
 
             // 採番された docId を使って chunk を埋め込み・収集する
+            val preChunked = withContext(Dispatchers.Default) {
+                pendingDocs.map { pending ->
+                    async {
+                        try {
+                            MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
+                        } catch (e: Exception) {
+                            Timber.tag(TAG).e(e, "chunking failed: ${pending.mdFile.relativePath}")
+                            emptyList()
+                        }
+                    }
+                }.awaitAll()
+            }
+
             pendingDocs.forEachIndexed { i, pending ->
+
                 // 重い埋め込みフェーズの進捗を通知する
                 _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
-
                 val docId = insertedDocIds[i]
-                val rawChunks = try {
-                    MarkdownChunker.chunk(pending.mdFile.content, pending.mdFile.relativePath)
-                } catch (e: Exception) {
-                    Timber.tag(TAG).e(e, "chunking failed: ${pending.mdFile.relativePath}")
-                    emptyList()
-                }
+                val rawChunks = preChunked[i]
                 val chunkEntities = rawChunks.chunked(EMBED_BATCH_SIZE).flatMap { batch ->
                     embedBatch(batch, pending.mdFile.relativePath).map { (chunk, embedding) ->
+
                         ChunkEntity(
                             docId = docId,
                             headingPath = chunk.headingPath,
