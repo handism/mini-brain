@@ -21,6 +21,31 @@ class UnigramModel(
         val backId = IntArray(n + 1)
         bestScore[0] = 0.0
 
+        runViterbi(segment, n, bestScore, backPos, backId)
+
+        val reversed = ArrayList<Int>()
+        var pos = n
+        while (pos > 0) {
+            reversed.add(backId[pos])
+            pos = backPos[pos]
+        }
+
+        val ids = ArrayList<Int>(reversed.size)
+        for (k in reversed.indices.reversed()) {
+            val id = reversed[k]
+            if (id == unkId && ids.lastOrNull() == unkId) continue
+            ids.add(id)
+        }
+        return ids
+    }
+
+    private fun runViterbi(
+        segment: String,
+        n: Int,
+        bestScore: DoubleArray,
+        backPos: IntArray,
+        backId: IntArray
+    ) {
         var i = 0
         while (i < n) {
             val base = bestScore[i]
@@ -54,21 +79,6 @@ class UnigramModel(
             }
             i++
         }
-
-        val reversed = ArrayList<Int>()
-        var pos = n
-        while (pos > 0) {
-            reversed.add(backId[pos])
-            pos = backPos[pos]
-        }
-
-        val ids = ArrayList<Int>(reversed.size)
-        for (k in reversed.indices.reversed()) {
-            val id = reversed[k]
-            if (id == unkId && ids.lastOrNull() == unkId) continue
-            ids.add(id)
-        }
-        return ids
     }
 
     companion object {
