@@ -102,7 +102,7 @@ class CosineSimilarityTest {
         var result = CosineSimilarity.topK(query, candidates, 0) { it.first }
         assertEquals(0, result.size)
 
-        result = CosineSimilarity.topK(query, candidates, -1)
+        result = CosineSimilarity.topK(query, candidates, -1) { it.first }
         assertEquals(0, result.size)
     }
 
