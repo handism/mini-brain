@@ -29,9 +29,6 @@ interface ChunkDao {
     @Query("SELECT docId, COUNT(*) as chunkCount FROM chunks GROUP BY docId")
     suspend fun getChunkCountsGroupedByDoc(): List<DocChunkCount>
 
-    @Query("SELECT * FROM chunks")
-    suspend fun getAll(): List<ChunkEntity>
-
     @Query("SELECT * FROM chunks WHERE id > :lastId ORDER BY id ASC LIMIT :limit")
     fun getBatchSync(lastId: Long, limit: Int): List<ChunkEntity>
 

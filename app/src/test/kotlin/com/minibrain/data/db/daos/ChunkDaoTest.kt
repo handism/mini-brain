@@ -103,15 +103,12 @@ class ChunkDaoTest {
     }
 
     @Test
-    fun getAllAndGetBatchSync() = runBlocking {
+    fun getBatchSync() = runBlocking {
         val ids = chunkDao.insertAll(listOf(
             ChunkEntity(docId = docId1, headingPath = "", text = "1", embedding = byteArrayOf()),
             ChunkEntity(docId = docId1, headingPath = "", text = "2", embedding = byteArrayOf()),
             ChunkEntity(docId = docId1, headingPath = "", text = "3", embedding = byteArrayOf())
         ))
-
-        val all = chunkDao.getAll()
-        assertEquals(3, all.size)
 
         val batch1 = chunkDao.getBatchSync(0, 2)
         assertEquals(2, batch1.size)
@@ -172,7 +169,7 @@ class ChunkDaoTest {
 
         chunkDao.deleteByDoc(docId1)
         assertEquals(1, chunkDao.count())
-        assertEquals(docId2, chunkDao.getAll()[0].docId)
+        assertEquals(docId2, chunkDao.getByDoc(docId2)[0].docId)
 
         chunkDao.deleteByDocIds(listOf(docId2))
         assertEquals(0, chunkDao.count())
