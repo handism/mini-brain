@@ -126,6 +126,13 @@ class CoverageCheckerTest {
         assertTrue(CoverageChecker.parse("").canAnswer)
     }
 
+    @Test
+    fun `garbage string fallback to canAnswer=true`() {
+        val result = CoverageChecker.parse("some garbage output that makes no sense")
+        assertTrue(result.canAnswer)
+        assertTrue(result.missingInformation.isEmpty())
+    }
+
 
     @Test
     fun `LLMの前置きの後にyesで始まる行がある場合に正しく解析する`() {
