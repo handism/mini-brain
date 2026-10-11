@@ -13,6 +13,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
@@ -98,6 +99,7 @@ object MdFileReader {
     private const val TAG = "MdFileReader"
     private const val MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024L // 10MB
     private const val READ_PARALLELISM = 4
+    private const val LIST_PARALLELISM = 8
 
     /**
      * 列挙と読み込みが終わるまで返らないので、進み具合をコールバックで知らせる。
@@ -134,31 +136,51 @@ object MdFileReader {
         }.awaitAll().filterNotNull()
     }
 
-    private fun collectMdEntries(
+    private suspend fun collectMdEntries(
         tree: DocumentTree,
         onListing: (found: Int) -> Unit,
-    ): List<Pair<DocumentEntry, String>> {
+    ): List<Pair<DocumentEntry, String>> = kotlinx.coroutines.coroutineScope {
         val result = mutableListOf<Pair<DocumentEntry, String>>()
-        val pending = ArrayDeque<Pair<String, String>>() // documentId, pathPrefix
-        pending.addLast(tree.rootDocumentId to "")
-        while (pending.isNotEmpty()) {
-            val (dirId, prefix) = pending.removeFirst()
+        val mutex = kotlinx.coroutines.sync.Mutex()
+        val semaphore = kotlinx.coroutines.sync.Semaphore(LIST_PARALLELISM)
+
+        suspend fun traverse(dirId: String, prefix: String) {
             val children = try {
-                tree.listChildren(dirId)
+                semaphore.withPermit {
+                    tree.listChildren(dirId)
+                }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 val where = prefix.ifEmpty { "(ルート)" }
-                throw IOException("フォルダを読み込めませんでした: $where", e)
+                throw java.io.IOException("フォルダを読み込めませんでした: $where", e)
             }
+
+            val dirs = mutableListOf<Pair<String, String>>()
+            val files = mutableListOf<Pair<DocumentEntry, String>>()
+
             for (child in children) {
                 val path = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
                 when {
-                    child.isDirectory -> pending.addLast(child.documentId to path)
-                    child.name.endsWith(".md", ignoreCase = true) -> result.add(child to path)
+                    child.isDirectory -> dirs.add(child.documentId to path)
+                    child.name.endsWith(".md", ignoreCase = true) -> files.add(child to path)
                 }
             }
-            onListing(result.size)
+
+            val currentSize = mutex.withLock {
+                if (files.isNotEmpty()) {
+                    result.addAll(files)
+                }
+                result.size
+            }
+            onListing(currentSize)
+
+            dirs.map { (childDirId, childPath) ->
+                async { traverse(childDirId, childPath) }
+            }.awaitAll()
         }
-        return result
+
+        traverse(tree.rootDocumentId, "")
+        result
     }
 
     private fun readMdFile(tree: DocumentTree, entry: DocumentEntry, relativePath: String): MdFile? {
