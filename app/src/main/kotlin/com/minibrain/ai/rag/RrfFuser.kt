@@ -28,6 +28,10 @@ object RrfFuser {
                 first.getOrPut(key) { item }
             }
         }
-        return scores.map { (key, score) -> Fused(key, score, first.getValue(key)) }
+        val result = ArrayList<Fused<T>>(scores.size)
+        for ((key, score) in scores) {
+            result.add(Fused(key, score, first.getValue(key)))
+        }
+        return result
     }
 }
