@@ -195,13 +195,13 @@ class ToolExecutor(
         val docsMapForGrep = cache.documents().associateBy { it.id }
 
         val filtered = if (tool.scope != null) {
-            rawChunks.filter { chunk ->
+            rawChunks.asSequence().filter { chunk ->
                 val doc = docsMapForGrep[chunk.docId]
                 doc != null && isInScope(doc.relativePath, tool.scope)
             }
-        } else rawChunks
+        } else rawChunks.asSequence()
 
-        val hits = filtered.take(MAX_GREP_RESULTS)
+        val hits = filtered.take(MAX_GREP_RESULTS).toList()
         val citations = hits.map { chunk ->
             val doc = docsMapForGrep[chunk.docId]
             Citation(
@@ -222,7 +222,10 @@ class ToolExecutor(
         val text = if (hits.isEmpty()) {
             "GREP \"${tool.query}\": 0 hits"
         } else {
-            "GREP \"${tool.query}\": ${filtered.size} hits (showing ${hits.size})\n$lines"
+            // we can't efficiently count the total filtered size with sequences without consuming it,
+            // so we just say how many we found or note if it might be more
+            val countStr = if (hits.size == MAX_GREP_RESULTS) "${hits.size}+" else "${hits.size}"
+            "GREP \"${tool.query}\": $countStr hits\n$lines"
         }
         return ToolResult(call, text, citations)
     }
