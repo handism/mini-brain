@@ -16,6 +16,19 @@ class UnigramModel(
     fun tokenize(segment: String): List<Int> {
         val n = segment.length
         if (n == 0) return emptyList()
+
+        val reversed = viterbiDecode(segment, n)
+
+        val ids = ArrayList<Int>(reversed.size)
+        for (k in reversed.indices.reversed()) {
+            val id = reversed[k]
+            if (id == unkId && ids.lastOrNull() == unkId) continue
+            ids.add(id)
+        }
+        return ids
+    }
+
+    private fun viterbiDecode(segment: String, n: Int): List<Int> {
         val bestScore = DoubleArray(n + 1) { Double.NEGATIVE_INFINITY }
         val backPos = IntArray(n + 1)
         val backId = IntArray(n + 1)
@@ -61,14 +74,7 @@ class UnigramModel(
             reversed.add(backId[pos])
             pos = backPos[pos]
         }
-
-        val ids = ArrayList<Int>(reversed.size)
-        for (k in reversed.indices.reversed()) {
-            val id = reversed[k]
-            if (id == unkId && ids.lastOrNull() == unkId) continue
-            ids.add(id)
-        }
-        return ids
+        return reversed
     }
 
     companion object {
