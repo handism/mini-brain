@@ -235,13 +235,11 @@ class ToolExecutor(
             cache.cosineTopK(vec, tool.k)
         } else {
             val (chunks, vectors) = cache.chunkVectors()
-            val validDocIds = docsById.values
-                .mapNotNull { if (isInScope(it.relativePath, tool.scope)) it.id else null }
-                .toSet()
             val filteredCandidates = ArrayList<Pair<FloatArray, ChunkEntity>>()
             for (i in chunks.indices) {
                 val chunk = chunks[i]
-                if (chunk.docId in validDocIds) {
+                val doc = docsById[chunk.docId]
+                if (doc != null && isInScope(doc.relativePath, tool.scope)) {
                     filteredCandidates.add(Pair(vectors[i], chunk))
                 }
             }
