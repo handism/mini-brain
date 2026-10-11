@@ -3,7 +3,8 @@ package com.minibrain.ai.llm
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
-import com.google.common.truth.Truth.assertThat
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
@@ -17,30 +18,30 @@ class LlmModelTest {
 
     @Test
     fun `fromName returns correct model for valid names`() {
-        assertThat(LlmModel.fromName("E2B")).isEqualTo(LlmModel.E2B)
-        assertThat(LlmModel.fromName("E4B")).isEqualTo(LlmModel.E4B)
+        assertEquals(LlmModel.E2B, LlmModel.fromName("E2B"))
+        assertEquals(LlmModel.E4B, LlmModel.fromName("E4B"))
     }
 
     @Test
     fun `fromName returns DEFAULT for invalid names`() {
-        assertThat(LlmModel.fromName("UNKNOWN")).isEqualTo(LlmModel.DEFAULT)
-        assertThat(LlmModel.fromName("")).isEqualTo(LlmModel.DEFAULT)
+        assertEquals(LlmModel.DEFAULT, LlmModel.fromName("UNKNOWN"))
+        assertEquals(LlmModel.DEFAULT, LlmModel.fromName(""))
     }
 
     @Test
     fun `fromName returns DEFAULT for null`() {
-        assertThat(LlmModel.fromName(null)).isEqualTo(LlmModel.DEFAULT)
+        assertEquals(LlmModel.DEFAULT, LlmModel.fromName(null))
     }
 
     @Test
     fun `enum properties are correctly configured`() {
         val e2b = LlmModel.E2B
-        assertThat(e2b.fileName).isEqualTo("gemma-4-E2B-it.litertlm")
-        assertThat(e2b.minSize).isEqualTo(2_000_000_000L)
+        assertEquals("gemma-4-E2B-it.litertlm", e2b.fileName)
+        assertEquals(2_000_000_000L, e2b.minSize)
 
         val e4b = LlmModel.E4B
-        assertThat(e4b.fileName).isEqualTo("gemma-4-E4B-it.litertlm")
-        assertThat(e4b.minSize).isEqualTo(3_000_000_000L)
+        assertEquals("gemma-4-E4B-it.litertlm", e4b.fileName)
+        assertEquals(3_000_000_000L, e4b.minSize)
     }
 
     @Test
@@ -50,18 +51,18 @@ class LlmModelTest {
         }
 
         // Initially it should be DEFAULT since nothing is set and fromName returns DEFAULT for null
-        assertThat(dataStore.selectedLlmModelFlow().first()).isEqualTo(LlmModel.DEFAULT)
-        assertThat(dataStore.selectedLlmModel()).isEqualTo(LlmModel.DEFAULT)
+        assertEquals(LlmModel.DEFAULT, dataStore.selectedLlmModelFlow().first())
+        assertEquals(LlmModel.DEFAULT, dataStore.selectedLlmModel())
 
         // Set to E4B
         dataStore.setSelectedLlmModel(LlmModel.E4B)
 
         // Should now read E4B
-        assertThat(dataStore.selectedLlmModelFlow().first()).isEqualTo(LlmModel.E4B)
-        assertThat(dataStore.selectedLlmModel()).isEqualTo(LlmModel.E4B)
+        assertEquals(LlmModel.E4B, dataStore.selectedLlmModelFlow().first())
+        assertEquals(LlmModel.E4B, dataStore.selectedLlmModel())
 
         // Set back to E2B
         dataStore.setSelectedLlmModel(LlmModel.E2B)
-        assertThat(dataStore.selectedLlmModel()).isEqualTo(LlmModel.E2B)
+        assertEquals(LlmModel.E2B, dataStore.selectedLlmModel())
     }
 }
