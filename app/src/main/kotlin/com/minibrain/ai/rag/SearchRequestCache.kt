@@ -113,11 +113,8 @@ class SearchRequestCache(
     suspend fun cosineTopK(queryVec: FloatArray, k: Int): List<Pair<Float, ChunkEntity>> {
         val (chunks, vectors) = chunkVectors()
         if (chunks.isEmpty()) return emptyList()
-        // vectors と chunks を Pair のリストに materialize せず、ビューとして topK に渡す
-        val candidates = object : AbstractList<Pair<FloatArray, ChunkEntity>>() {
-            override val size: Int get() = chunks.size
-            override fun get(index: Int): Pair<FloatArray, ChunkEntity> = vectors[index] to chunks[index]
-        }
-        return CosineSimilarity.topK(queryVec, candidates, k)
+        val indices = chunks.indices
+        val topKIndices = CosineSimilarity.topK(queryVec, indices, k) { i -> vectors[i] }
+        return topKIndices.map { Pair(it.first, chunks[it.second]) }
     }
 }

@@ -171,10 +171,9 @@ class RagPipeline(
         withContext(Dispatchers.Default) {
             val folders = withContext(Dispatchers.IO) { folderEmbeddingDao.getAllByTree(treeUri) }
             if (folders.isEmpty()) return@withContext emptyList()
-            val candidates = folders.map { fe ->
-                Pair(EmbedderService.bytesToFloatArray(fe.embedding), fe)
+            CosineSimilarity.topK(queryVec, folders, k) { fe ->
+                EmbedderService.bytesToFloatArray(fe.embedding)
             }
-            CosineSimilarity.topK(queryVec, candidates, k)
         }
 
     private data class RrfParams(

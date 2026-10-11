@@ -18,27 +18,30 @@ object CosineSimilarity {
      * candidates の要素型を型引数で受けるため、呼び出し側は `Any` へのキャスト
      * （およびその `@Suppress("UNCHECKED_CAST")`）を書かずに済む。
      */
-    fun <T> topK(query: FloatArray, candidates: List<Pair<FloatArray, T>>, k: Int): List<Pair<Float, T>> {
-        if (k <= 0 || candidates.isEmpty()) return emptyList()
+    inline fun <T> topK(
+        query: FloatArray,
+        candidates: Iterable<T>,
+        k: Int,
+        crossinline vectorSelector: (T) -> FloatArray
+    ): List<Pair<Float, T>> {
+        if (k <= 0) return emptyList()
 
-        // 最小ヒープを使い、スコアが最小のものを先頭にする。
-        // サイズが k を超えたら、最小スコアのものを queue から取り除くことで、上位 k 件を維持する。
         val queue = PriorityQueue<Pair<Float, T>>(k + 1, compareBy { it.first })
 
         for (cand in candidates) {
-            val score = compute(query, cand.first)
-            queue.add(Pair(score, cand.second))
+            val vector = vectorSelector(cand)
+            val score = compute(query, vector)
+            queue.add(Pair(score, cand))
             if (queue.size > k) {
                 queue.poll()
             }
         }
 
-        // PriorityQueue から取り出して、降順にソートする
         val result = ArrayList<Pair<Float, T>>(queue.size)
         while (queue.isNotEmpty()) {
             queue.poll()?.let { result.add(it) }
         }
-        result.reverse() // 最小ヒープから取り出したので昇順になっており、反転して降順にする
+        result.reverse()
         return result
     }
 }

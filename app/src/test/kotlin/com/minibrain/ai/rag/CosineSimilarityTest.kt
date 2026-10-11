@@ -69,7 +69,7 @@ class CosineSimilarityTest {
             Pair(floatArrayOf(5.0f, 5.0f), "doc5")
         )
 
-        val result = CosineSimilarity.topK(query, candidates, 3)
+        val result = CosineSimilarity.topK(query, candidates, 3) { it.first }
 
         assertEquals(3, result.size)
         // Check order and scores (descending order)
@@ -87,7 +87,7 @@ class CosineSimilarityTest {
         val query = floatArrayOf(1.0f, 1.0f)
         val candidates = emptyList<Pair<FloatArray, Any>>()
 
-        val result = CosineSimilarity.topK(query, candidates, 3)
+        val result = CosineSimilarity.topK(query, candidates, 3) { it.first }
 
         assertEquals(0, result.size)
     }
@@ -99,7 +99,7 @@ class CosineSimilarityTest {
             Pair(floatArrayOf(1.0f, 1.0f), "doc1")
         )
 
-        var result = CosineSimilarity.topK(query, candidates, 0)
+        var result = CosineSimilarity.topK(query, candidates, 0) { it.first }
         assertEquals(0, result.size)
 
         result = CosineSimilarity.topK(query, candidates, -1)
@@ -115,7 +115,7 @@ class CosineSimilarityTest {
             Pair(floatArrayOf(2.0f, 2.0f), "doc2")
         )
 
-        val result = CosineSimilarity.topK(query, candidates, 5)
+        val result = CosineSimilarity.topK(query, candidates, 5) { it.first }
 
         assertEquals(2, result.size)
         assertEquals(4.0f, result[0].first, 0.0001f)
@@ -132,7 +132,7 @@ class CosineSimilarityTest {
             Pair(floatArrayOf(2.0f, 2.0f), "doc2")
         )
 
-        val result = CosineSimilarity.topK(query, candidates, 2)
+        val result = CosineSimilarity.topK(query, candidates, 2) { it.first }
 
         assertEquals(2, result.size)
         assertEquals(4.0f, result[0].first, 0.0001f)
@@ -149,7 +149,7 @@ class CosineSimilarityTest {
         )
 
         val exception = assertThrows(IllegalArgumentException::class.java) {
-            CosineSimilarity.topK(query, candidates, 1)
+            CosineSimilarity.topK(query, candidates, 1) { it.first }
         }
         assertEquals("Vectors must be the same size", exception.message)
     }
@@ -164,7 +164,7 @@ class CosineSimilarityTest {
             Pair(floatArrayOf(1.0f, 1.0f), "doc4")    // 2.0
         )
 
-        val result = CosineSimilarity.topK(query, candidates, 3)
+        val result = CosineSimilarity.topK(query, candidates, 3) { it.first }
 
         assertEquals(3, result.size)
         assertEquals(2.0f, result[0].first, 0.0001f)
@@ -184,7 +184,7 @@ class CosineSimilarityTest {
             Pair(floatArrayOf(1.0f), "doc3")
         )
 
-        val result = CosineSimilarity.topK(query, candidates, 2)
+        val result = CosineSimilarity.topK(query, candidates, 2) { it.first }
 
         assertEquals(2, result.size)
         assertEquals(1.0f, result[0].first, 0.0001f)
