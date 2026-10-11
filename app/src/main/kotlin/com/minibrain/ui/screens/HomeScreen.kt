@@ -2,8 +2,6 @@
 package com.minibrain.ui.screens
 
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
@@ -18,7 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
-import com.minibrain.ui.components.FolderChangeDialog
+import com.minibrain.ui.components.rememberFolderLauncher
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.FolderOpen
@@ -73,13 +71,7 @@ fun HomeScreen(
     val docCount by vm.docCount.collectAsStateWithLifecycle()
     val lastIndexedAt by vm.lastIndexedAt.collectAsStateWithLifecycle()
     val recentSessions by vm.recentSessions.collectAsStateWithLifecycle()
-    var showFolderChangeDialog by remember { mutableStateOf(false) }
-
-    val folderLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        uri?.let { vm.onFolderSelected(it) }
-    }
+    val folderLauncher = rememberFolderLauncher(onFolderSelected = { vm.onFolderSelected(it) })
 
     Scaffold(
         topBar = {
@@ -107,7 +99,7 @@ fun HomeScreen(
             val uri = treeUri
             if (uri == null) {
                 FolderUnselectedContent(
-                    onSelectFolder = { folderLauncher.launch(null) }
+                    onSelectFolder = { folderLauncher.launch(requireConfirmation = false) }
                 )
             } else {
                 FolderSelectedContent(
@@ -115,7 +107,7 @@ fun HomeScreen(
                     stats = KnowledgeBaseStats(docCount, lastIndexedAt),
                     indexState = indexState,
                     onOpenChat = onOpenChat,
-                    onChangeFolder = { showFolderChangeDialog = true }
+                    onChangeFolder = { folderLauncher.launch(requireConfirmation = true) }
                 )
                 if (recentSessions.isNotEmpty()) {
                     RecentChats(sessions = recentSessions, onOpenSession = onOpenSession)
@@ -124,15 +116,6 @@ fun HomeScreen(
         }
     }
 
-    if (showFolderChangeDialog) {
-        FolderChangeDialog(
-            onConfirm = {
-                showFolderChangeDialog = false
-                folderLauncher.launch(null)
-            },
-            onDismiss = { showFolderChangeDialog = false },
-        )
-    }
 }
 
 private val HOME_CONTENT_MAX_WIDTH = 600.dp

@@ -2,8 +2,6 @@
 package com.minibrain.ui.screens
 
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,7 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import com.minibrain.data.repo.IndexingState
-import com.minibrain.ui.components.FolderChangeDialog
+import com.minibrain.ui.components.rememberFolderLauncher
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
@@ -95,16 +93,11 @@ fun SettingsScreen(
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty()
     }
     var showModelDialog by remember { mutableStateOf(false) }
-    var showFolderChangeDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clearedMessage = stringResource(R.string.settings_history_cleared)
 
-    val folderLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        uri?.let { vm.changeFolder(it) }
-    }
+    val folderLauncher = rememberFolderLauncher(onFolderSelected = { vm.changeFolder(it) })
 
     SettingsScreenContent(
         onBack = onBack,
@@ -127,7 +120,7 @@ fun SettingsScreen(
         onReindex = { vm.reindex() },
         // 初めて選ぶときは消えるインデックスが無いので、確認せずに開く
         onChangeFolder = {
-            if (treeUri == null) folderLauncher.launch(null) else showFolderChangeDialog = true
+            folderLauncher.launch(requireConfirmation = treeUri != null)
         },
         onClearChat = { showClearDialog = true },
         themeMode = themeMode,
@@ -162,16 +155,6 @@ fun SettingsScreen(
 
     if (showLicenseDialog) {
         LicenseDialog(onDismiss = { showLicenseDialog = false })
-    }
-
-    if (showFolderChangeDialog) {
-        FolderChangeDialog(
-            onConfirm = {
-                showFolderChangeDialog = false
-                folderLauncher.launch(null)
-            },
-            onDismiss = { showFolderChangeDialog = false },
-        )
     }
 
     if (showClearDialog) {
