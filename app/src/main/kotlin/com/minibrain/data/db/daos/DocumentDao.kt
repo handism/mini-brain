@@ -22,9 +22,6 @@ interface DocumentDao {
     @Query("SELECT * FROM documents WHERE treeUri = :treeUri")
     suspend fun getAllByTree(treeUri: String): List<DocumentEntity>
 
-    @Query("SELECT * FROM documents WHERE treeUri = :treeUri")
-    fun observeAllByTree(treeUri: String): Flow<List<DocumentEntity>>
-
     @Query("SELECT COUNT(*) FROM documents WHERE treeUri = :treeUri")
     fun observeCountByTree(treeUri: String): Flow<Int>
 
