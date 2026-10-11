@@ -13,7 +13,6 @@ class DocumentDaoTest {
 
         val fakeDao = object : DocumentDao {
             override suspend fun getAllByTree(treeUri: String): List<DocumentEntity> = emptyList()
-            override fun observeAllByTree(treeUri: String) = throw UnsupportedOperationException()
             override fun observeCountByTree(treeUri: String) = throw UnsupportedOperationException()
             override suspend fun getByFileUri(fileUri: String): DocumentEntity? = null
             override suspend fun getByFileUris(fileUris: List<String>): List<DocumentEntity> = emptyList()

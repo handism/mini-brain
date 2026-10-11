@@ -34,7 +34,6 @@ class SearchRequestCacheTest {
             )
         }
 
-        override fun observeAllByTree(treeUri: String): Flow<List<DocumentEntity>> = kotlinx.coroutines.flow.emptyFlow()
         override fun observeCountByTree(treeUri: String): Flow<Int> = kotlinx.coroutines.flow.flowOf(0)
         override suspend fun getByFileUri(fileUri: String): DocumentEntity? = null
         override suspend fun insert(doc: DocumentEntity): Long = 0L
