@@ -6,8 +6,6 @@ object SqlUtils {
      * Use with `ESCAPE '\'` in the SQL query.
      */
     fun escapeForLike(query: String): String {
-        return query.replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
+        return query.replace(Regex("([\\\\%_])"), "\\\\$1")
     }
 }
