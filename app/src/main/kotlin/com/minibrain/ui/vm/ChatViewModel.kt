@@ -99,6 +99,7 @@ class ChatViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private var currentJob: Job? = null
+    private var isSwitchingSession = false
 
     init {
         viewModelScope.launch {
@@ -128,7 +129,13 @@ class ChatViewModel(
     }
 
     fun sendMessage(question: String) {
-        if (question.isBlank() || _isGenerating.value) return
+        if (question.isBlank()) return
+        startGeneration { question }
+    }
+
+    private fun startGeneration(questionProvider: suspend (Long) -> String?) {
+        if (_isGenerating.value || isSwitchingSession || _sessionId.value <= 0L) return
+        val sessionId = _sessionId.value
 
         currentJob?.cancel()
         // launch 前に立てて、ディスパッチ待ちの間に二重送信されないようにする
@@ -138,13 +145,14 @@ class ChatViewModel(
         // viewModelScope は Main.immediate なので、currentJob を代入してから本体を走らせる
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
-                setupUserAndStreamingMessages(question)
+                val question = questionProvider(sessionId) ?: return@launch
+                setupUserAndStreamingMessages(question, sessionId)
 
                 // エージェントループ（計画 → 多段ツール実行 → 回答）
-                val agentResult = runAgentPipeline(question) ?: return@launch
+                val agentResult = runAgentPipeline(question, sessionId) ?: return@launch
                 val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
 
-                finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents)
+                finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents, sessionId)
             } finally {
                 // 途中で例外が出ても送信不能のまま固まらないよう必ず戻す。
                 // キャンセル後に次の送信が始まっていたら、そちらの状態は触らない
@@ -158,15 +166,15 @@ class ChatViewModel(
         job.start()
     }
 
-    private suspend fun setupUserAndStreamingMessages(question: String) {
+    private suspend fun setupUserAndStreamingMessages(question: String, sessionId: Long) {
         // ユーザーメッセージを追加（最初の送信時はセッションタイトルを質問で更新）
         if (_messages.value.isEmpty()) {
             val title = question.take(40).let { if (question.length > 40) "$it…" else it }
-            app.container.chatRepository.updateSessionTitle(_sessionId.value, title)
+            app.container.chatRepository.updateSessionTitle(sessionId, title)
         }
         val userMsg = ChatMessage(role = MessageRole.USER, content = question)
         _messages.value = _messages.value + userMsg
-        app.container.chatRepository.addMessage(_sessionId.value, MessageRole.USER, question)
+        app.container.chatRepository.addMessage(sessionId, MessageRole.USER, question)
 
         // ストリーミングプレースホルダーを先行追加（検索中も CircularProgressIndicator 表示）
         val streamingMsg = ChatMessage(
@@ -177,9 +185,9 @@ class ChatViewModel(
         _messages.value = _messages.value + streamingMsg
     }
 
-    private suspend fun runAgentPipeline(question: String): AgentResult? {
+    private suspend fun runAgentPipeline(question: String, sessionId: Long): AgentResult? {
         val treeUri = savedTreeUri.value ?: ""
-        val history = app.container.chatRepository.getRecentHistory(_sessionId.value).map { msg ->
+        val history = app.container.chatRepository.getRecentHistory(sessionId).map { msg ->
             Pair(msg.role.name.lowercase(), msg.content)
         }
 
@@ -220,10 +228,10 @@ class ChatViewModel(
     }
 
     // ストリーミング完了
-    private suspend fun finalizeMessage(finalContent: String, citations: List<Citation>, traceEvents: List<AgentTraceEvent>) {
+    private suspend fun finalizeMessage(finalContent: String, citations: List<Citation>, traceEvents: List<AgentTraceEvent>, sessionId: Long) {
         val filteredCitations = if (isNegativeResponse(finalContent)) emptyList() else citations
         val citationsJson = CitationJson.encode(filteredCitations)
-        val msgId = app.container.chatRepository.addMessage(_sessionId.value, MessageRole.ASSISTANT, finalContent, citationsJson)
+        val msgId = app.container.chatRepository.addMessage(sessionId, MessageRole.ASSISTANT, finalContent, citationsJson)
         val finalTrace = traceEvents + FinalAnswerEvent(finalContent.length)
 
         updateStreamingMessage {
@@ -250,13 +258,12 @@ class ChatViewModel(
 
     /** 最後の回答を捨てて、同じ質問をもう一度送る。 */
     fun regenerate() {
-        if (_isGenerating.value) return
-        viewModelScope.launch {
-            val question = app.container.chatRepository.removeLastExchange(_sessionId.value) ?: return@launch
-            // DB の変更通知を待たずに画面からも消し、sendMessage が末尾に積み直す
+        startGeneration { sessionId ->
+            val question = app.container.chatRepository.removeLastExchange(sessionId) ?: return@startGeneration null
+            // DB の変更通知を待たずに画面からも消し、この生成処理で末尾に積み直す
             val lastUser = _messages.value.indexOfLast { it.role == MessageRole.USER }
             if (lastUser >= 0) _messages.value = _messages.value.subList(0, lastUser)
-            sendMessage(question)
+            question
         }
     }
 
@@ -284,10 +291,17 @@ class ChatViewModel(
     }
 
     fun newSession() {
+        if (_isGenerating.value || isSwitchingSession || _sessionId.value <= 0L) return
+        isSwitchingSession = true
         _error.value = null
         viewModelScope.launch {
-            _sessionId.value = app.container.chatRepository.createSession()
-            _messages.value = emptyList()
+            try {
+                val sessionId = app.container.chatRepository.createSession()
+                _messages.value = emptyList()
+                _sessionId.value = sessionId
+            } finally {
+                isSwitchingSession = false
+            }
         }
     }
 

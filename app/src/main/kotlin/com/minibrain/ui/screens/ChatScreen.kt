@@ -137,7 +137,8 @@ fun ChatScreen(
                 title = sessionTitle,
                 onBack = onBack,
                 onOpenHistory = onOpenHistory,
-                onNewSession = { vm.newSession() }
+                onNewSession = { vm.newSession() },
+                newSessionEnabled = !isGenerating
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -281,6 +282,7 @@ fun ChatTopBar(
     onBack: () -> Unit,
     onOpenHistory: () -> Unit,
     onNewSession: () -> Unit,
+    newSessionEnabled: Boolean = true,
 ) {
     TopAppBar(
         title = {
@@ -299,7 +301,7 @@ fun ChatTopBar(
             IconButton(onClick = onOpenHistory) {
                 Icon(Icons.Default.History, contentDescription = stringResource(R.string.chat_history))
             }
-            IconButton(onClick = onNewSession) {
+            IconButton(onClick = onNewSession, enabled = newSessionEnabled) {
                 Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_new))
             }
         },

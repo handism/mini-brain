@@ -75,6 +75,7 @@
 - **LiteRT-LM は単一スレッドでのみ動作可能**なため、LLM を利用する `QueryExpander` や `LlmReranker` などを非同期で並行実行してはなりません。必ず逐次的に呼び出してください。
 - `EmbedderService` と `LlmService` の初期化は非常に重いため、必ず `Dispatchers.Default` などのバックグラウンドスレッドで行わせるコードにしてください。
 - suspend 文脈で例外を握るときは標準の `runCatching` ではなく `com.minibrain.util.runCatchingCancellable` を使ってください。`runCatching` は `CancellationException`（`withTimeout` のタイムアウトを含む）まで失敗扱いにするため、停止ボタンで「生成エラー」が出たり、タイムアウトが握りつぶされたりします（ADR-031）。
+- チャットの送信・再生成は `startGeneration` で削除処理前から操作をロックし、開始時の sessionId を履歴取得・質問保存・回答保存に使います。生成中の新規チャット作成は無効にし、セッション作成中も送信・再生成・重複作成を受け付けません（ADR-060）。
 - `ChatViewModel.sendMessage` は `try/finally` で `isGenerating` を戻します。ジョブは LAZY 起動で `currentJob` を代入してから開始します（`viewModelScope` は `Main.immediate` のため）。
 
 ### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)

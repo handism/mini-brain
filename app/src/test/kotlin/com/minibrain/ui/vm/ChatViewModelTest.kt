@@ -19,12 +19,14 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkAll
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -291,6 +293,104 @@ class ChatViewModelTest {
         assertFalse(finalMsgs.last().isStreaming)
         // キャンセルはエラーではないので、エラーメッセージは出さない
         assertNull(viewModel.error.value)
+    }
+
+    private fun raceFixture(): Triple<ChatViewModel, ChatRepository, AgentPipeline> {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        val repository = mockk<ChatRepository>(relaxed = true)
+        val pipeline = mockk<AgentPipeline>(relaxed = true)
+        every { app.container } returns container
+        every { container.chatRepository } returns repository
+        every { container.agentPipeline } returns pipeline
+        val store = mockk<DataStore<Preferences>>()
+        val prefs = mockk<Preferences>(relaxed = true)
+        every { prefs[stringPreferencesKey("tree_uri")] } returns ""
+        every { prefs[booleanPreferencesKey("show_search_log")] } returns false
+        every { store.data } returns flowOf(prefs)
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns store
+        every { repository.observeMessages(any()) } returns flowOf(emptyList())
+        coEvery { repository.getRecentHistory(any()) } returns emptyList()
+        return Triple(createViewModel(app, 100L), repository, pipeline)
+    }
+
+    @Test
+    fun `new session is ignored during answer generation`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        val finish = CompletableDeferred<Unit>()
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flow { finish.await(); emit("answer") }, emptyList(),
+        )
+        runCurrent()
+        vm.sendMessage("question")
+        runCurrent()
+        vm.newSession()
+        runCurrent()
+        coVerify(exactly = 0) { repository.createSession(any()) }
+        finish.complete(Unit)
+        advanceUntilIdle()
+        coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.ASSISTANT, "answer", any()) }
+        assertFalse(vm.isGenerating.value)
+    }
+
+    @Test
+    fun `regeneration locks before deletion and rejects competing operations`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        val deletion = CompletableDeferred<Unit>()
+        coEvery { repository.removeLastExchange(100L) } coAnswers {
+            deletion.await()
+            "original question"
+        }
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flowOf("replacement"), emptyList(),
+        )
+        runCurrent()
+        vm.regenerate()
+        assertTrue(vm.isGenerating.value)
+        runCurrent()
+        vm.regenerate()
+        vm.sendMessage("competing question")
+        vm.newSession()
+        runCurrent()
+        coVerify(exactly = 1) { repository.removeLastExchange(100L) }
+        coVerify(exactly = 0) { repository.createSession(any()) }
+        coVerify(exactly = 0) { repository.addMessage(any(), MessageRole.USER, any(), any()) }
+        deletion.complete(Unit)
+        advanceUntilIdle()
+        coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.USER, "original question", any()) }
+        coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.ASSISTANT, "replacement", any()) }
+        assertFalse(vm.isGenerating.value)
+    }
+
+    @Test
+    fun `regeneration without an exchange releases the lock`() = runTest {
+        val (vm, repository, _) = raceFixture()
+        coEvery { repository.removeLastExchange(100L) } returns null
+        runCurrent()
+        vm.regenerate()
+        advanceUntilIdle()
+        assertFalse(vm.isGenerating.value)
+    }
+
+    @Test
+    fun `session creation rejects sends and repeated creation while pending`() = runTest {
+        val (vm, repository, _) = raceFixture()
+        val creation = CompletableDeferred<Long>()
+        coEvery { repository.createSession(any()) } coAnswers { creation.await() }
+        runCurrent()
+        vm.newSession()
+        runCurrent()
+        vm.newSession()
+        vm.sendMessage("competing question")
+        vm.regenerate()
+        runCurrent()
+        coVerify(exactly = 1) { repository.createSession(any()) }
+        coVerify(exactly = 0) { repository.addMessage(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.removeLastExchange(any()) }
+        creation.complete(200L)
+        advanceUntilIdle()
+        assertTrue(vm.messages.value.isEmpty())
     }
 
     @Test
