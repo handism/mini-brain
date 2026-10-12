@@ -157,21 +157,31 @@ class MdFileReaderTest {
     }
 
     @Test
-    fun `listMdFiles skips file if readText returns null`() = runTest {
+    fun `listMdFiles fails if readText returns null`() = runTest {
         tree.file("root", "error.md", "x")
         tree.contents.remove("root/error.md")
 
-        assertTrue(MdFileReader.listMdFiles(tree).isEmpty())
+        try {
+            MdFileReader.listMdFiles(tree)
+            fail("expected IOException")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("error.md"))
+        }
     }
 
     @Test
-    fun `listMdFiles skips file if readText throws exception`() = runTest {
+    fun `listMdFiles fails if readText throws exception`() = runTest {
         tree.file("root", "error.md", "x")
         tree.file("root", "ok.md", "ok")
         tree.throwingFiles.add("root/error.md")
 
-        assertEquals(listOf("ok.md"), MdFileReader.listMdFiles(tree).map { it.name })
-        assertTrue(loggedMessages.any { it.contains("read failed: error.md") })
+        try {
+            MdFileReader.listMdFiles(tree)
+            fail("expected IOException")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("error.md"))
+            assertTrue(e.cause is IOException)
+        }
     }
 
     @Test

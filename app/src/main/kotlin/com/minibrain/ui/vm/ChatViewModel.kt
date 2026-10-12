@@ -20,6 +20,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,6 +101,7 @@ class ChatViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private var currentJob: Job? = null
+    private var stoppedJob: Job? = null
     private var isSwitchingSession = false
 
     init {
@@ -150,9 +153,30 @@ class ChatViewModel(
 
                 // エージェントループ（計画 → 多段ツール実行 → 回答）
                 val agentResult = runAgentPipeline(question, sessionId) ?: return@launch
+                updateStreamingMessage { it.copy(traceEvents = agentResult.traceEvents) }
                 val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
 
-                finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents, sessionId)
+                withContext(NonCancellable) {
+                    finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents, sessionId)
+                }
+            } catch (e: CancellationException) {
+                if (stoppedJob === coroutineContext[Job]) {
+                    val partial = _messages.value.lastOrNull { it.isStreaming }
+                    if (partial != null && partial.content.isNotEmpty()) {
+                        // 停止の後処理が終わるまで操作をロックし、元のセッションに保存する。
+                        withContext(NonCancellable) {
+                            runCatchingCancellable {
+                                finalizeMessage(partial.content, partial.citations, partial.traceEvents, sessionId)
+                            }.onFailure {
+                                _error.value = ChatError(ChatErrorKind.GENERATION, it.message)
+                                updateStreamingMessage { message -> message.copy(isStreaming = false) }
+                            }
+                        }
+                    } else {
+                        removeStreamingMessage()
+                    }
+                }
+                throw e
             } finally {
                 // 途中で例外が出ても送信不能のまま固まらないよう必ず戻す。
                 // キャンセル後に次の送信が始まっていたら、そちらの状態は触らない
@@ -163,6 +187,13 @@ class ChatViewModel(
             }
         }
         currentJob = job
+        // ディスパッチ前に停止した場合は本体の finally が実行されない。
+        job.invokeOnCompletion {
+            if (currentJob === job) {
+                _isGenerating.value = false
+                _statusText.value = null
+            }
+        }
         job.start()
     }
 
@@ -312,15 +343,10 @@ class ChatViewModel(
     }
 
     fun cancelGeneration() {
+        if (!_isGenerating.value) return
+        stoppedJob = currentJob
         currentJob?.cancel()
-        _isGenerating.value = false
         _statusText.value = null
-        // 検索中（本文がまだ空）に止めた場合は空の吹き出しを残さない
-        if (_messages.value.lastOrNull { it.isStreaming }?.content.isNullOrEmpty()) {
-            removeStreamingMessage()
-        } else {
-            updateStreamingMessage { it.copy(isStreaming = false) }
-        }
     }
 }
 

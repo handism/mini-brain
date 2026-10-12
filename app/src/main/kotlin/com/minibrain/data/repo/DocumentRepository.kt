@@ -164,7 +164,8 @@ class DocumentRepository(
                 }
 
                 if (existing != null && existing.contentHash == mdFile.contentHash &&
-                    existingChunkCount > 0
+                    existingChunkCount > 0 && existingChunkCount ==
+                    MarkdownChunker.chunk(mdFile.content, mdFile.relativePath).size
                 ) {
                     createUpdatedDocumentEntity(existing, mdFile)?.let { docsToUpdate.add(it) }
                     totalChunks += existingChunkCount

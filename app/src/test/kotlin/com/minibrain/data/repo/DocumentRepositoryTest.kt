@@ -269,7 +269,7 @@ class DocumentRepositoryTest {
             relativePath = "update.md",
             lastModified = 0L,
             contentHash = "hash_same",
-            content = "# Existing Content"
+            content = "# Existing Content\nBody"
         )
         io.mockk.coEvery { com.minibrain.data.md.MdFileReader.listMdFiles(any<android.content.Context>(), any<android.net.Uri>(), any(), any()) } returns listOf(mdFile)
 
@@ -297,7 +297,7 @@ class DocumentRepositoryTest {
         }
         io.mockk.coEvery { documentDao.getAllByTree(treeUriStr) } returns listOf(docEntity)
         io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns listOf(
-            com.minibrain.data.db.daos.DocChunkCount(1L, 5)
+            com.minibrain.data.db.daos.DocChunkCount(1L, 1)
         )
 
         // Force exception in refreshMetadata
@@ -669,4 +669,74 @@ class DocumentRepositoryTest {
             writableDb.setTransactionSuccessful()
         }
     }
+    @org.junit.Test
+    fun `read failure aborts before changing existing index`() = kotlinx.coroutines.test.runTest {
+        val uri = android.net.Uri.parse("content://notes/tree/root")
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        io.mockk.coEvery {
+            com.minibrain.data.md.MdFileReader.listMdFiles(any<Context>(), any<android.net.Uri>(), any(), any())
+        } throws java.io.IOException("ファイルを読み込めませんでした: note.md")
+
+        repository.indexFolder(uri)
+
+        org.junit.Assert.assertTrue(repository.indexingState.value is IndexingState.Error)
+        io.mockk.coVerify(exactly = 0) { documentDao.getAllByTree(any()) }
+        io.mockk.coVerify(exactly = 0) { documentDao.deleteByIds(any()) }
+        io.mockk.coVerify(exactly = 0) { chunkDao.deleteByDocIds(any()) }
+        io.mockk.coVerify(exactly = 0) { folderEmbeddingDao.replaceAllByTree(any(), any()) }
+    }
+
+    @org.junit.Test
+    fun `unchanged partially embedded document is retried and then skipped when complete`() = kotlinx.coroutines.test.runTest {
+        val uri = android.net.Uri.parse("content://notes/tree/root")
+        val file = com.minibrain.data.md.MdFile(
+            android.net.Uri.parse("content://notes/document/note"), "note.md", "note.md", 0L,
+            "same-hash", "# One\nFirst body\n# Two\nSecond body",
+        )
+        var storedDoc: com.minibrain.data.db.entities.DocumentEntity? = null
+        var storedChunks = emptyList<com.minibrain.data.db.entities.ChunkEntity>()
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        io.mockk.coEvery {
+            com.minibrain.data.md.MdFileReader.listMdFiles(any<Context>(), any<android.net.Uri>(), any(), any())
+        } returns listOf(file)
+        io.mockk.coEvery { documentDao.getAllByTree(any()) } answers { listOfNotNull(storedDoc) }
+        io.mockk.coEvery { documentDao.insertAll(any()) } answers {
+            storedDoc = firstArg<List<com.minibrain.data.db.entities.DocumentEntity>>().single().copy(id = 1L)
+            listOf(1L)
+        }
+        io.mockk.coEvery { documentDao.updateAll(any()) } answers {
+            storedDoc = firstArg<List<com.minibrain.data.db.entities.DocumentEntity>>().single()
+        }
+        io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } answers {
+            listOf(com.minibrain.data.db.daos.DocChunkCount(1L, storedChunks.size))
+        }
+        io.mockk.coEvery { chunkDao.deleteFtsByDocIds(any()) } returns Unit
+        io.mockk.coEvery { chunkDao.deleteByDocIds(any()) } answers { storedChunks = emptyList() }
+        io.mockk.coEvery { chunkDao.insertAll(any()) } answers {
+            storedChunks = firstArg<List<com.minibrain.data.db.entities.ChunkEntity>>()
+            storedChunks.indices.map { it.toLong() + 1 }
+        }
+        io.mockk.every { writableDb.compileStatement(any()) } returns io.mockk.mockk(relaxed = true)
+        io.mockk.coEvery { embedder.embedAll(any(), any()) } throws IllegalStateException("batch failed")
+        var singleCalls = 0
+        io.mockk.coEvery { embedder.embed(any(), any()) } answers {
+            singleCalls++
+            if (singleCalls == 1) throw IllegalStateException("transient failure")
+            floatArrayOf(0.1f)
+        }
+
+        repository.indexFolder(uri)
+        org.junit.Assert.assertEquals(1, storedChunks.size)
+        io.mockk.coEvery { embedder.embedAll(any(), any()) } answers {
+            firstArg<List<String>>().map { floatArrayOf(0.1f) }
+        }
+        repository.indexFolder(uri)
+        org.junit.Assert.assertEquals(2, storedChunks.size)
+        org.junit.Assert.assertEquals(IndexingState.Done(1, 2), repository.indexingState.value)
+        repository.indexFolder(uri)
+        // 3回目は本文が同じでチャンクが揃っているため埋め込み・再挿入しない。
+        io.mockk.coVerify(exactly = 2) { documentDao.insertAll(any()) }
+        io.mockk.coVerify(exactly = 2) { embedder.embedAll(any(), any()) }
+    }
+
 }

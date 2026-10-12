@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
@@ -169,11 +170,12 @@ object MdFileReader {
         }
         val uri = tree.documentUri(entry.documentId)
         val content = try {
-            tree.readText(uri)
+            tree.readText(uri) ?: throw IOException("読み込み結果が空です")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Timber.tag(TAG).w(e, "read failed: $relativePath")
-            null
-        } ?: return null
+            throw IOException("ファイルを読み込めませんでした: $relativePath", e)
+        }
         return MdFile(
             uri = uri,
             name = entry.name,

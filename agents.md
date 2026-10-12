@@ -48,6 +48,7 @@
 ### 2.4 Storage Access Framework (SAF)
 - フォルダの選択には `ActivityResultContracts.OpenDocumentTree()` を使用し、`takePersistableUriPermission` で永続アクセス権を取得してファイルを読み込みます。
 - フォルダの列挙（`MdFileReader`）は `DocumentsContract` を直接 query します。`DocumentFile` は query の失敗を握りつぶして空を返し、深い階層のノートが黙って欠けたため使いません。列挙の失敗は例外にして、インデックスを Error にします（ADR-041）。
+- ファイルの読み込み例外・null stream は列挙成功と区別し、インデックスを Error にします。DB更新前に読み込みを完了することで、一時的に読めないファイルの既存索引を削除しません。
 - 列挙・読み込みは全ファイルを読み終えるまで返らないので、`listMdFiles` の `onListing`（見つかった件数）/ `onRead`（読み終えた数）で `IndexingState.Progress` を更新します。クラウドの提供元では読み込みに時間がかかり、無いと「0/0」のまま止まって見えます。
 
 ---
@@ -76,6 +77,7 @@
 - `EmbedderService` と `LlmService` の初期化は非常に重いため、必ず `Dispatchers.Default` などのバックグラウンドスレッドで行わせるコードにしてください。
 - suspend 文脈で例外を握るときは標準の `runCatching` ではなく `com.minibrain.util.runCatchingCancellable` を使ってください。`runCatching` は `CancellationException`（`withTimeout` のタイムアウトを含む）まで失敗扱いにするため、停止ボタンで「生成エラー」が出たり、タイムアウトが握りつぶされたりします（ADR-031）。
 - チャットの送信・再生成は `startGeneration` で削除処理前から操作をロックし、開始時の sessionId を履歴取得・質問保存・回答保存に使います。生成中の新規チャット作成は無効にし、セッション作成中も送信・再生成・重複作成を受け付けません（ADR-060）。
+- 停止ボタンは生成ジョブをキャンセルし、途中の回答があれば開始時のセッションへ保存します。保存中は `isGenerating` を保持し、送信・再生成・セッション作成を受け付けません。空の回答は保存しません（ADR-061）。
 - `ChatViewModel.sendMessage` は `try/finally` で `isGenerating` を戻します。ジョブは LAZY 起動で `currentJob` を代入してから開始します（`viewModelScope` は `Main.immediate` のため）。
 
 ### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
@@ -104,6 +106,7 @@
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
 - `indexFolder` / `clearFolder` は `DocumentRepository.indexMutex` で直列化されます（Home / Settings からの同時実行で挿入・削除が競合しないため）。`indexFolder` は失敗時に例外を投げず `IndexingState.Error` を出します（キャンセルのみ再送出）。
 - `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。
+- 差分インデックスのスキップはハッシュ一致に加え、保存済みチャンク数と `MarkdownChunker.chunk` の件数一致が必要です。一部の埋め込み失敗・中断で欠けた文書も、本文変更なしで次回再試行します（ADR-061）。
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
 - チャンクの埋め込み入力は `Chunk.embeddingText()`（「パス > 見出し」+ 改行 + 本文）です。DB の `text` と FTS には付けません。作り方を変えたら既存ベクトルと混ざらないよう、DB を上げて `contentHash` を書き換えるマイグレーションを足してください（`MIGRATION_6_7`、ADR-038）。
 - `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。

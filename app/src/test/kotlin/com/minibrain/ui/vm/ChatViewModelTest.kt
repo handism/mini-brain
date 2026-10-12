@@ -293,6 +293,7 @@ class ChatViewModelTest {
         assertFalse(finalMsgs.last().isStreaming)
         // キャンセルはエラーではないので、エラーメッセージは出さない
         assertNull(viewModel.error.value)
+        coVerify(exactly = 1) { chatRepo.addMessage(100L, MessageRole.ASSISTANT, "Start...", any()) }
     }
 
     private fun raceFixture(): Triple<ChatViewModel, ChatRepository, AgentPipeline> {
@@ -391,6 +392,96 @@ class ChatViewModelTest {
         creation.complete(200L)
         advanceUntilIdle()
         assertTrue(vm.messages.value.isEmpty())
+    }
+
+
+    @Test
+    fun `stopping an answer locks operations until partial answer is saved`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        val save = CompletableDeferred<Unit>()
+        coEvery { repository.addMessage(100L, MessageRole.ASSISTANT, "partial", any()) } coAnswers {
+            save.await()
+            42L
+        }
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flow { emit("partial"); CompletableDeferred<Unit>().await() }, emptyList(),
+        )
+        runCurrent()
+        vm.sendMessage("question")
+        runCurrent()
+        vm.cancelGeneration()
+        runCurrent()
+        assertTrue(vm.isGenerating.value)
+        vm.sendMessage("competing")
+        vm.regenerate()
+        vm.newSession()
+        vm.cancelGeneration()
+        runCurrent()
+        coVerify(exactly = 0) { repository.createSession(any()) }
+        coVerify(exactly = 0) { repository.removeLastExchange(any()) }
+        coVerify(exactly = 0) { repository.addMessage(any(), MessageRole.USER, "competing", any()) }
+        save.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.isGenerating.value)
+        assertEquals("partial", vm.messages.value.last().content)
+        assertEquals(42L, vm.messages.value.last().id)
+        assertFalse(vm.messages.value.last().isStreaming)
+        assertNull(vm.error.value)
+        coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.ASSISTANT, "partial", any()) }
+    }
+
+    @Test
+    fun `stopping during search does not save an empty answer`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        coEvery { pipeline.run(any(), any(), any(), any()) } coAnswers { CompletableDeferred<AgentResult>().await() }
+        runCurrent()
+        vm.sendMessage("question")
+        runCurrent()
+        vm.cancelGeneration()
+        advanceUntilIdle()
+        assertFalse(vm.isGenerating.value)
+        assertEquals(listOf(MessageRole.USER), vm.messages.value.map { it.role })
+        coVerify(exactly = 0) { repository.addMessage(any(), MessageRole.ASSISTANT, any(), any()) }
+    }
+
+    @Test
+    fun `stopping before generation starts releases operation lock`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flowOf("answer"), emptyList(),
+        )
+        runCurrent()
+        vm.sendMessage("cancelled before dispatch")
+        vm.cancelGeneration()
+        advanceUntilIdle()
+        assertFalse(vm.isGenerating.value)
+        vm.sendMessage("next question")
+        advanceUntilIdle()
+        coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.ASSISTANT, "answer", any()) }
+    }
+
+    @Test
+    fun `stopping during completed answer save does not insert twice`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        val save = CompletableDeferred<Unit>()
+        coEvery { repository.addMessage(100L, MessageRole.ASSISTANT, "answer", any()) } coAnswers {
+            save.await()
+            42L
+        }
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flowOf("answer"), emptyList(),
+        )
+        runCurrent()
+        vm.sendMessage("question")
+        runCurrent()
+        vm.cancelGeneration()
+        runCurrent()
+        assertTrue(vm.isGenerating.value)
+        save.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.isGenerating.value)
+        assertEquals(42L, vm.messages.value.last().id)
+        coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.ASSISTANT, "answer", any()) }
     }
 
     @Test
