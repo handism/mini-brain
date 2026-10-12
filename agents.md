@@ -110,6 +110,7 @@
 - 差分インデックスのスキップはハッシュ一致に加え、保存済みチャンク数と `MarkdownChunker.chunk` の件数一致が必要です。一部の埋め込み失敗・中断で欠けた文書も、本文変更なしで次回再試行します（ADR-061）。
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
 - チャンクの埋め込み入力は `Chunk.embeddingText()`（「パス > 見出し」+ 改行 + 本文）です。DB の `text` と FTS には付けません。作り方を変えたら既存ベクトルと混ざらないよう、DB を上げて `contentHash` を書き換えるマイグレーションを足してください（`MIGRATION_6_7`、ADR-038）。
+- `MarkdownChunker.chunk` は先頭の YAML フロントマターを `Frontmatter.split` で本文から外し、区切り線を除いた中身を文書の最後のチャンク（headingPath = ファイル名）にします。先頭に置くと先頭チャンクを使うスニペット（`firstChunkOf`）が空になるためです。tags などは検索の手がかりとして残します。メタデータ抽出は元の全文から行います（ADR-065）。
 - `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
 
 **チューニング定数**

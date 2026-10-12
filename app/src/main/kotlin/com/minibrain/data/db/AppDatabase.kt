@@ -98,9 +98,17 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+// チャンクからフロントマターを外した（ADR-065）。見出しの無い文書はチャンク数が変わらず差分インデックスで
+// スキップされるため、contentHash を変えて全文書を切り直す。
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("UPDATE documents SET contentHash = '__REINDEX_REQUIRED_V8__'")
+    }
+}
+
 @Database(
     entities = [DocumentEntity::class, ChunkEntity::class, ChatSessionEntity::class, ChatMessageEntity::class, FolderEmbeddingEntity::class, ChunkFtsEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -121,7 +129,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minibrain.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

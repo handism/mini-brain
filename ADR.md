@@ -2157,3 +2157,14 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 - `OnboardingViewModel.checkAndPrepare` は `ModelDownloader.isAllReady`（LLM 数 GB を含む全モデルの SHA-256 計算）を `viewModelScope`（メインスレッド）で呼んでいたため、起動のたびに UI が数秒以上止まり ANR になり得た。`Dispatchers.IO` で呼ぶ。
 - `ModelDownloader.downloadFile` は HTTP エラー（416 を含む）・ボディなしで返るときにレスポンスを閉じておらず、再試行のたびにコネクションが漏れた。レスポンスは `use` で必ず閉じる。
 - `LlmModelSwitcher` は `initialize` に `forceCpu` を渡さず、オンボーディングで「CPU モードで試す」を選んだ端末でも切り替え時に GPU を試し直していた。`LlmService.forceCpu`（最後に読み込めたときの指定）を新しいモデルの読み込みと前のモデルへの戻しの両方に渡す。
+
+## ADR-065: フロントマターのチャンクを文書の最後に回す
+
+- ステータス: 採用
+- 日付: 2026-10-12
+
+- `MarkdownChunker` は最初の見出しより前を「前置き」として 1 チャンクにしていたため、全メモの冒頭に YAML フロントマターを付けると、`---\ndate: …\n---` だけのチャンクが文書の先頭にできていた。見出しの直後にすぐ下位の見出しが来るメモでは、`SECTION_TAIL_CARRY` で同じフロントマターがもう 1 チャンク複製されていた。
+- `SearchRequestCache.firstChunkOf` を使うスニペット（`dateRangeSearch` 600 字・`topicMatch` 500 字・`timeline_search`）がフロントマターだけになり、ADR-025 / ADR-026 で厚くした本文が Reranker と回答 LLM に届かなくなっていた。
+- `Frontmatter.split` で先頭の `---` 〜 `---`（または `...`）を本文から外してから切り、区切り線を除いた中身を headingPath = ファイル名の単独チャンクとして**最後**に足す。閉じが無ければフロントマターとみなさない。日付などのメタデータは従来どおり `MarkdownMetaExtractor` が元の全文から読む。`extractHeadings` はフロントマターを除いてから数える（YAML の `# コメント` を見出しにしないため）。
+- 評価（118 件）は修正前 Recall@10 0.97 → 修正後 0.96。差は `en-02`（「when did I move to Kiyosumi-Shirakawa」→ `life/引っ越し.md`）の 1 件で、修正前はフロントマターだけのチャンクが候補 16 位で拾っていた。区切り線 `---` を除くだけで 26 位に下がり、捨てる案・本文の頭に付ける案でも同様に落ちた。類似度 0.86 前後で並ぶ中の入れ替わりで、修正前の当たりも偶然に近いと判断した。tags は BM25・ベクトルの手がかりになり得るので、捨てずに最後のチャンクに残す。
+- 差分インデックスのスキップはチャンク数の一致も見るが、数が変わらない文書もあるので、DB を v8 に上げ `MIGRATION_7_8` で `contentHash` を書き換えて全文書を切り直す。

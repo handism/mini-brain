@@ -169,4 +169,40 @@ class MarkdownChunkerTest {
         assertEquals("test.md > Code", chunks[0].headingPath)
         assertTrue(chunks.any { it.text.contains("```\nLine 1\n\nLine 2\n```") })
     }
+
+    @Test
+    fun frontmatterBecomesLastChunk() {
+        val markdown = "---\ndate: 2025-03-20\ntags: [travel]\n---\n\n# 京都旅行\n\n## 行ったところ\n伏見稲荷大社\n\n## よかったこと\n朝の参道"
+        val chunks = MarkdownChunker.chunk(markdown, "travel/京都.md")
+
+        // 先頭チャンクは本文。フロントマターは区切り線を除いて最後に 1 つだけ（tail carry で複製しない）
+        assertEquals(3, chunks.size)
+        assertEquals("travel/京都.md > 京都旅行 > 行ったところ", chunks[0].headingPath)
+        assertEquals("伏見稲荷大社", chunks[0].text)
+        assertTrue(chunks[1].text.endsWith("朝の参道"))
+        assertTrue(chunks.dropLast(1).none { it.text.contains("date:") })
+        assertEquals(Chunk("travel/京都.md", "date: 2025-03-20\ntags: [travel]"), chunks.last())
+    }
+
+    @Test
+    fun frontmatterOfNoHeadingNoteBecomesLastChunk() {
+        val chunks = MarkdownChunker.chunk("---\r\ndate: 2025-03-20\r\n...\r\n本文だけのメモ", "memo.md")
+
+        assertEquals(listOf("本文だけのメモ", "date: 2025-03-20"), chunks.map { it.text })
+    }
+
+    @Test
+    fun unclosedFrontmatterIsKeptAsBody() {
+        val chunks = MarkdownChunker.chunk("---\n区切り線から始まるメモ", "memo.md")
+
+        assertEquals(1, chunks.size)
+        assertEquals("---\n区切り線から始まるメモ", chunks[0].text)
+    }
+
+    @Test
+    fun frontmatterOnlyNoteKeepsMetadataChunk() {
+        val chunks = MarkdownChunker.chunk("---\ntags: [idea]\n---\n", "idea.md")
+
+        assertEquals(listOf(Chunk("idea.md", "tags: [idea]")), chunks)
+    }
 }
