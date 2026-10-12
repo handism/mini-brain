@@ -4,6 +4,7 @@ import android.content.Context
 import com.minibrain.ai.agent.AgentPipeline
 import com.minibrain.ai.agent.CoverageChecker
 import com.minibrain.ai.embed.EmbedderService
+import com.minibrain.ai.llm.LlmModelSwitcher
 import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.llm.ModelDownloader
 import com.minibrain.ai.rag.RagPipeline
@@ -14,12 +15,19 @@ import com.minibrain.ai.search.SearchPipeline
 import com.minibrain.data.db.AppDatabase
 import com.minibrain.data.repo.ChatRepository
 import com.minibrain.data.repo.DocumentRepository
+import com.minibrain.dataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 interface AppContainer {
+    /** 画面を閉じても止めてはいけない処理（インデックス・モデルの切り替え）を走らせるスコープ（ADR-062）。 */
+    val applicationScope: CoroutineScope
     val database: AppDatabase
     val modelDownloader: ModelDownloader
     val embedderService: EmbedderService
     val llmService: LlmService
+    val llmModelSwitcher: LlmModelSwitcher
     val documentRepository: DocumentRepository
     val chatRepository: ChatRepository
     val ragPipeline: RagPipeline
@@ -31,7 +39,10 @@ interface AppContainer {
     val agentPipeline: AgentPipeline
 }
 
-class DefaultAppContainer(private val context: Context) : AppContainer {
+class DefaultAppContainer(
+    private val context: Context,
+    override val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+) : AppContainer {
     override val database: AppDatabase by lazy { AppDatabase.getInstance(context) }
 
     override val modelDownloader: ModelDownloader by lazy { ModelDownloader(context) }
@@ -39,6 +50,10 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     override val embedderService: EmbedderService by lazy { EmbedderService() }
 
     override val llmService: LlmService by lazy { LlmService() }
+
+    override val llmModelSwitcher: LlmModelSwitcher by lazy {
+        LlmModelSwitcher(applicationScope, modelDownloader, llmService, context.dataStore)
+    }
 
     override val documentRepository: DocumentRepository by lazy {
         DocumentRepository(context, database.documentDao(), database.chunkDao(), embedderService, database, database.folderEmbeddingDao())

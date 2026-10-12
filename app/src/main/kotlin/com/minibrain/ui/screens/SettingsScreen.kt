@@ -11,7 +11,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.RadioButton
 import androidx.compose.ui.Alignment
 import com.minibrain.ai.llm.LlmModel
-import com.minibrain.ui.vm.ModelSwitchState
+import com.minibrain.ai.llm.ModelSwitchState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size

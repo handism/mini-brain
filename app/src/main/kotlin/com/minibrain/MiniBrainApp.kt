@@ -27,7 +27,7 @@ class MiniBrainApp : Application() {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val container: AppContainer by lazy { DefaultAppContainer(this) }
+    val container: AppContainer by lazy { DefaultAppContainer(this, applicationScope) }
 
     override fun onCreate() {
         super.onCreate()

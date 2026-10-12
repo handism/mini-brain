@@ -15,11 +15,13 @@ import com.minibrain.data.repo.IndexingState
 import com.minibrain.dataStore
 import com.minibrain.di.AppContainer
 import com.minibrain.ai.llm.LlmModel
-import com.minibrain.ai.llm.LlmService
-import com.minibrain.ai.llm.DownloadResult
-import com.minibrain.ai.llm.DownloadProgress
+import com.minibrain.ai.llm.LlmModelSwitcher
+import com.minibrain.ai.llm.ModelSwitchState
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import io.mockk.verify
-import kotlinx.coroutines.flow.flowOf
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -38,6 +40,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
@@ -63,6 +66,9 @@ class SettingsViewModelTest {
     @MockK
     private lateinit var contentResolver: ContentResolver
 
+    @MockK(relaxUnitFun = true)
+    private lateinit var llmModelSwitcher: LlmModelSwitcher
+
     @MockK
     private lateinit var dataStore: DataStore<Preferences>
 
@@ -84,6 +90,9 @@ class SettingsViewModelTest {
         every { container.documentRepository } returns documentRepository
         every { container.chatRepository } returns chatRepository
         every { container.modelDownloader } returns modelDownloader
+        every { container.applicationScope } returns CoroutineScope(testDispatcher)
+        every { container.llmModelSwitcher } returns llmModelSwitcher
+        every { llmModelSwitcher.state } returns MutableStateFlow(ModelSwitchState.Idle)
         every { app.contentResolver } returns contentResolver
         every { documentRepository.indexingState } returns indexingStateFlow
 
@@ -301,62 +310,40 @@ class SettingsViewModelTest {
         assertEquals(embedderFile, viewModel.embedderModelFile)
     }
 
-    private fun stubLlm(): LlmService {
-        val llm = mockk<LlmService>(relaxed = true)
-        every { container.llmService } returns llm
-        every { modelDownloader.llmFile(LlmModel.E2B) } returns File("e2b")
-        every { modelDownloader.llmFile(LlmModel.E4B) } returns File("e4b")
-        every { modelDownloader.deleteLlm(any()) } returns Unit
-        return llm
+    @Test
+    fun `モデルの切り替えはアプリ全体の切り替え役に任せる`() = runTest(testDispatcher) {
+        val viewModel = SettingsViewModel(app)
+        advanceUntilIdle()
+
+        viewModel.switchLlmModel(LlmModel.E4B)
+
+        verify { llmModelSwitcher.switch(LlmModel.E4B, current = LlmModel.E2B) }
     }
 
     @Test
-    fun `モデルを切り替えると読み込んでから選択を保存し、前のモデルを消す`() = runTest(testDispatcher) {
-        val llm = stubLlm()
-        every { modelDownloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+    fun `設定画面を閉じても再インデックスは最後まで走る`() = runTest(testDispatcher) {
+        val uriStr = "content://saved_folder"
+        val prefs = mockk<Preferences>()
+        every { prefs[PREF_TREE_URI_SETTINGS] } returns uriStr
+        every { prefs[PREF_SHOW_SEARCH_LOG] } returns null
+        every { prefs.asMap() } returns emptyMap()
+        prefsFlow.value = prefs
+        val mockUri = mockk<Uri>()
+        every { Uri.parse(uriStr) } returns mockUri
+        val gate = CompletableDeferred<Unit>()
+        var finished = false
+        coEvery { documentRepository.indexFolder(mockUri) } coAnswers { gate.await(); finished = true }
 
         val viewModel = SettingsViewModel(app)
         advanceUntilIdle()
-        viewModel.switchLlmModel(LlmModel.E4B)
+        viewModel.reindex()
         advanceUntilIdle()
 
-        coVerify { llm.initialize(File("e4b"), any()) }
-        coVerify { dataStore.updateData(any()) }
-        verify { modelDownloader.deleteLlm(LlmModel.E2B) }
-        assertEquals(ModelSwitchState.Idle, viewModel.modelSwitch.value)
-    }
-
-    @Test
-    fun `読み込みに失敗したら前のモデルに戻し、選択もファイルも変えない`() = runTest(testDispatcher) {
-        val llm = stubLlm()
-        every { modelDownloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
-        coEvery { llm.initialize(File("e4b"), any()) } throws RuntimeException("out of memory")
-
-        val viewModel = SettingsViewModel(app)
-        advanceUntilIdle()
-        viewModel.switchLlmModel(LlmModel.E4B)
+        // 画面を閉じた（ViewModel が破棄された）ときと同じく viewModelScope を止める
+        viewModel.viewModelScope.cancel()
+        gate.complete(Unit)
         advanceUntilIdle()
 
-        coVerify { llm.initialize(File("e2b"), any()) }
-        coVerify(exactly = 0) { dataStore.updateData(any()) }
-        verify(exactly = 0) { modelDownloader.deleteLlm(any()) }
-        assertEquals(ModelSwitchState.Failed(LlmModel.E4B, "out of memory"), viewModel.modelSwitch.value)
-    }
-
-    @Test
-    fun `ダウンロードに失敗したら読み込まない`() = runTest(testDispatcher) {
-        val llm = stubLlm()
-        every { modelDownloader.downloadLlm(LlmModel.E4B) } returns flowOf(
-            DownloadResult.Progress(DownloadProgress("e4b", 10, 100)),
-            DownloadResult.Error("HTTP 500"),
-        )
-
-        val viewModel = SettingsViewModel(app)
-        advanceUntilIdle()
-        viewModel.switchLlmModel(LlmModel.E4B)
-        advanceUntilIdle()
-
-        coVerify(exactly = 0) { llm.initialize(any(), any()) }
-        assertEquals(ModelSwitchState.Failed(LlmModel.E4B, "HTTP 500"), viewModel.modelSwitch.value)
+        assertTrue(finished)
     }
 }

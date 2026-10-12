@@ -24,6 +24,7 @@ import io.mockk.impl.annotations.MockK
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,6 +75,7 @@ class HomeViewModelTest {
         every { app.container } returns container
         every { container.documentRepository } returns documentRepository
         every { container.chatRepository } returns chatRepository
+        every { container.applicationScope } returns CoroutineScope(testDispatcher)
         every { app.contentResolver } returns contentResolver
 
         val indexingStateFlow = MutableStateFlow<IndexingState>(IndexingState.Idle)

@@ -54,7 +54,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun onFolderSelected(uri: Uri) {
-        viewModelScope.launch {
+        // 前のフォルダの索引を消してから入れ直すので、画面が閉じても途中で止めない（ADR-062）
+        app.container.applicationScope.launch {
             app.switchKnowledgeFolder(uri, oldUri = savedTreeUri.value)
         }
     }

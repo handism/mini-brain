@@ -35,7 +35,7 @@
   ```
 - **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。JSON 配列だけを返させる呼び出し（`QueryExpander` / `LlmReranker`）は `generateJsonArray` を使い、`]` が出たら生成を打ち切り、タイムアウト（展開 15 秒 / Reranker 30 秒）なら元のクエリ・RRF 順に戻します。最後まで collect すると同じ語の繰り返しで `maxNumTokens` まで止まらず、1 件 100 秒かかったことがあります（ADR-044）。
 
-- **モデルの選択**: 回答などに使う LLM は `LlmModel`（E2B 既定 / E4B）で、設定から切り替えます。ファイルは `ModelDownloader.llmFile(model)` で引き、`llmModelFile` のような固定のパスを足さないでください。切り替えは「ダウンロード → 読み込み → 選択を保存 → 前のモデルを削除」の順で、読み込みに失敗したら前のモデルに戻します（ADR-057）。
+- **モデルの選択**: 回答などに使う LLM は `LlmModel`（E2B 既定 / E4B）で、設定から切り替えます。ファイルは `ModelDownloader.llmFile(model)` で引き、`llmModelFile` のような固定のパスを足さないでください。切り替えは `LlmModelSwitcher`（`AppContainer.llmModelSwitcher`）で「ダウンロード → 読み込み → 選択を保存 → 前のモデルを削除」の順に行い、読み込みに失敗したら前のモデルに戻します（ADR-057）。設定画面を離れても止まらないようアプリ全体のスコープで動かし、読み込み以降は `NonCancellable` で最後まで終えます（ADR-062）。
 
 ### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
 - **クエリ・文章プレフィックス**: クエリには `query: `、文書（チャンク）には `passage: ` のプレフィックス付与が必須。`EmbedType` enum を使用します。
@@ -104,6 +104,7 @@
 - `AgentPipeline.run` の冒頭で `SearchRequestCache(treeUri, chunkDao, documentDao)` を 1 つ生成し、`SearchPipeline.search` / `RagPipeline.vectorOnlyTopK` / `retrieveTopChunks` / `PlannerHintBuilder.build` に注入します。同一リクエスト内の `chunkDao.getAllByTree` と `bytesToFloatArray` の重複を排除する目的です（ADR-024）。クエリの埋め込みも `SearchRequestCache.queryEmbedding` で memoize し、同じ文を二度 embed しません（ADR-030）。`multiVectorSearch` は先に `RagPipeline.prefetchQueryEmbeddings` で全クエリを `embedAll` 1 回で埋め込みます（失敗時は従来の 1 件ずつに戻る、ADR-032）。リクエスト終了で破棄するため書き込みとの整合性は考慮不要。
 - `RagPipeline` は doc / chunk を常に `SearchRequestCache` 経由で参照します。cache を渡さない単独呼び出し（EvalRunner・テスト）では呼び出し内だけのキャッシュを作ります。期間フィルタは `SearchRequestCache.documentsInDateRange` に集約し、`SearchPipeline.dateRangeSearch` と `ToolExecutor.timeline_search` が共有します。BM25 の MATCH 式の生成と失敗時の空返しは `ChunkDao.bm25SearchOrEmpty` に集約しています（ADR-031）。FTS4 は順位を付けないので、`ChunkDao.bm25SearchByTree` は全ヒットの `matchinfo(chunks_fts, 'pcnalx')` を取り、`Bm25Scorer` で採点して上位を返します。`LIMIT` だけで切る SQL に戻さないこと（rowid 順になり関連度と無関係になる）。検索クエリ側は 2 文字以上の語があれば日本語の 1 文字トークンを外します（`NGramTokenizer.toQueryTokens`、ADR-040）。
 - `DocumentRepository.indexFolder` は `chunkBuffer`（900件単位）で `chunkDao.insertAll` と `insertFts` をまとめ、`writableDb.beginTransaction()` を使って単一の SQLite トランザクションでバッチ挿入します。また `indexFolderEmbeddings` や古い FTS/Chunk の削除時もバッチ化・トランザクションで保護し、auto-commit によるディスク I/O オーバーヘッドを排除しています。
+- 再インデックス・フォルダ変更は `viewModelScope` ではなく `AppContainer.applicationScope` で走らせます（画面を閉じても途中で止めないため、ADR-062）。
 - `indexFolder` / `clearFolder` は `DocumentRepository.indexMutex` で直列化されます（Home / Settings からの同時実行で挿入・削除が競合しないため）。`indexFolder` は失敗時に例外を投げず `IndexingState.Error` を出します（キャンセルのみ再送出）。
 - `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。
 - 差分インデックスのスキップはハッシュ一致に加え、保存済みチャンク数と `MarkdownChunker.chunk` の件数一致が必要です。一部の埋め込み失敗・中断で欠けた文書も、本文変更なしで次回再試行します（ADR-061）。
