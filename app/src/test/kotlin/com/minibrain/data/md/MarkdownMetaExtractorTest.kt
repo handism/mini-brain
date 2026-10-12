@@ -43,6 +43,12 @@ class MarkdownMetaExtractorTest {
     }
 
     @Test
+    fun extractHeadings_ignoresFrontmatterComments() {
+        val md = "---\n# YAML のコメント\ndate: 2025-03-20\n---\n# 本文の見出し"
+        assertEquals(listOf("本文の見出し"), extractHeadings(md))
+    }
+
+    @Test
     fun extractHeadings_emptyString() {
         assertEquals(emptyList<String>(), extractHeadings(""))
     }

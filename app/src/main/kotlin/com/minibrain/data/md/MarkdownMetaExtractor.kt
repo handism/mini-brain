@@ -24,8 +24,9 @@ object MarkdownMetaExtractor {
     private val HEADING_JP_DATE_REGEX = Regex("""(\d{4})年(\d{1,2})月(\d{1,2})日""")
     private val HEADING_JP_MONTH_REGEX = Regex("""(\d{4})年(\d{1,2})月(?!\d)""")
 
+    // フロントマターの「# コメント」行を見出しとして数えない
     fun extractHeadings(markdown: String): List<String> =
-        HEADING_REGEX.findAll(markdown).map { it.groupValues[1].trim() }.toList()
+        HEADING_REGEX.findAll(Frontmatter.strip(markdown)).map { it.groupValues[1].trim() }.toList()
 
     fun extractFirstParagraph(markdown: String, maxChars: Int = 200): String {
         val lineSeq = markdown.lineSequence().iterator()

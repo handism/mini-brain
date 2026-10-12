@@ -31,7 +31,11 @@ object MarkdownChunker {
     fun chunk(markdown: String, fileName: String): List<Chunk> {
         if (markdown.isBlank()) return emptyList()
 
-        val sections = splitBySections(markdown, fileName)
+        // フロントマターは本文から外して切り、最後に単独のチャンクとして足す（ADR-065）。
+        // 先頭に置くと先頭チャンクを使うスニペット（firstChunkOf）が空になり、tail carry で複製もされる。
+        // tags などは検索の手がかりになるので捨てない
+        val (frontmatter, content) = Frontmatter.split(markdown)
+        val sections = splitBySections(content, fileName)
         val raw = sections.flatMapIndexed { idx, pair ->
             val (headingPath, body) = pair
             // 直前セクションの末尾を tail として付け足し、見出しまたぎの文脈断絶を緩和する。
@@ -46,7 +50,8 @@ object MarkdownChunker {
                 splitLongSection(headingPath, carried)
             }
         }
-        return raw.filter { it.text.isNotBlank() }
+        val meta = listOfNotNull(frontmatter?.let { Chunk(fileName, it) })
+        return raw.filter { it.text.isNotBlank() } + meta
     }
 
     private fun splitBySections(markdown: String, fileName: String): List<Pair<String, String>> {
