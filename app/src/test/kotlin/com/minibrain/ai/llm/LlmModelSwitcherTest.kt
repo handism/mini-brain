@@ -54,6 +54,19 @@ class LlmModelSwitcherTest {
     }
 
     @Test
+    fun `CPU モードで読み込んでいたら切り替え後も CPU で読み込む`() = runTest(testDispatcher) {
+        every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+        every { llm.forceCpu } returns true
+        val switcher = switcher()
+
+        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        coVerify { llm.initialize(File("e4b"), true) }
+        assertEquals(ModelSwitchState.Idle, switcher.state.value)
+    }
+
+    @Test
     fun `読み込みに失敗したら前のモデルに戻し、選択もファイルも変えない`() = runTest(testDispatcher) {
         every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
         coEvery { llm.initialize(File("e4b"), any()) } throws RuntimeException("out of memory")

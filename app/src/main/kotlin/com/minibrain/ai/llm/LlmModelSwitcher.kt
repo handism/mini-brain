@@ -63,10 +63,12 @@ class LlmModelSwitcher(
             _state.value = ModelSwitchState.Loading(target)
             // initialize は前のエンジンを先に閉じるので、ここから先は途中で止めずに最後まで終わらせる
             withContext(NonCancellable) {
-                val loaded = runCatchingCancellable { llmService.initialize(downloader.llmFile(target)) }
+                // 「CPU モードで試す」で読み込んだ端末では GPU を試し直さない（ADR-064）
+                val forceCpu = llmService.forceCpu
+                val loaded = runCatchingCancellable { llmService.initialize(downloader.llmFile(target), forceCpu) }
                 if (loaded.isFailure) {
                     Timber.tag(TAG).w(loaded.exceptionOrNull(), "failed to load $target, restoring $current")
-                    runCatchingCancellable { llmService.initialize(downloader.llmFile(current)) }
+                    runCatchingCancellable { llmService.initialize(downloader.llmFile(current), forceCpu) }
                     _state.value = ModelSwitchState.Failed(target, loaded.exceptionOrNull()?.localizedMessage)
                     return@withContext
                 }

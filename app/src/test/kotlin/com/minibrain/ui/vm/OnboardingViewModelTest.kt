@@ -94,7 +94,7 @@ class OnboardingViewModelTest {
         val errorMessage = "GPU out of memory"
         coEvery { llmService.initialize(any(), any()) } throws RuntimeException(errorMessage)
 
-        val viewModel = OnboardingViewModel(app)
+        val viewModel = OnboardingViewModel(app, testDispatcher)
 
         advanceUntilIdle()
 
@@ -137,7 +137,7 @@ class OnboardingViewModelTest {
         val errorMessage = "Embedder init failed"
         coEvery { embedderService.initialize(any(), any()) } throws RuntimeException(errorMessage)
 
-        val viewModel = OnboardingViewModel(app)
+        val viewModel = OnboardingViewModel(app, testDispatcher)
 
         advanceUntilIdle()
 
@@ -167,7 +167,7 @@ class OnboardingViewModelTest {
         every { container.modelDownloader } returns modelDownloader
         every { modelDownloader.isAllReady(any()) } returns true
 
-        val viewModel = OnboardingViewModel(app)
+        val viewModel = OnboardingViewModel(app, testDispatcher)
 
         advanceUntilIdle()
 
@@ -197,7 +197,7 @@ class OnboardingViewModelTest {
         every { container.modelDownloader } returns modelDownloader
         every { modelDownloader.isAllReady(any()) } returns false
 
-        val viewModel = OnboardingViewModel(app)
+        val viewModel = OnboardingViewModel(app, testDispatcher)
 
         advanceUntilIdle()
 
@@ -236,7 +236,9 @@ class OnboardingViewModelTest {
         val errorMessage = "CPU initialization failed"
         coEvery { llmService.initialize(any(), forceCpu = true) } throws RuntimeException(errorMessage)
 
-        val viewModel = OnboardingViewModel(app)
+        val viewModel = OnboardingViewModel(app, testDispatcher)
+        // 画面で CPU の再試行を押せるのは、起動時のチェックが終わった後
+        advanceUntilIdle()
 
         viewModel.retryWithCpu()
 
@@ -272,7 +274,7 @@ class OnboardingViewModelTest {
             kotlinx.coroutines.awaitCancellation()
         }
 
-        val viewModel = OnboardingViewModel(app)
+        val viewModel = OnboardingViewModel(app, testDispatcher)
         advanceUntilIdle()
         viewModel.startDownload()
         advanceUntilIdle()
@@ -315,7 +317,7 @@ class OnboardingViewModelTest {
         val loading = CompletableDeferred<Unit>()
         coEvery { llmService.initialize(any(), any()) } coAnswers { loading.await() }
 
-        val viewModel = OnboardingViewModel(app)
+        val viewModel = OnboardingViewModel(app, testDispatcher)
         advanceUntilIdle()
         assertEquals(OnboardingUiState.Initializing, viewModel.state.value)
 

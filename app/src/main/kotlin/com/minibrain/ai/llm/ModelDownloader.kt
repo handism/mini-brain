@@ -171,47 +171,50 @@ class ModelDownloader(private val context: Context) {
             return@flow
         }
 
-        if (!response.isSuccessful) {
-            if (response.code == 416 && dest.exists()) {
-                emit(DownloadResult.Done(dest))
+        // 失敗で途中から返るときもコネクションを放すよう、レスポンスは必ず閉じる（ADR-064）
+        response.use {
+            if (!response.isSuccessful) {
+                if (response.code == 416 && dest.exists()) {
+                    emit(DownloadResult.Done(dest))
+                    return@flow
+                }
+                emit(DownloadResult.Error("HTTP ${response.code}: ${response.message}"))
                 return@flow
             }
-            emit(DownloadResult.Error("HTTP ${response.code}: ${response.message}"))
-            return@flow
-        }
 
-        val body = response.body ?: run {
-            emit(DownloadResult.Error("レスポンスボディが空です"))
-            return@flow
-        }
+            val body = response.body ?: run {
+                emit(DownloadResult.Error("レスポンスボディが空です"))
+                return@flow
+            }
 
-        val contentLength = body.contentLength()
-        val totalBytes = if (response.code == 206 && alreadyDownloaded > 0 && contentLength > 0) {
-            alreadyDownloaded + contentLength
-        } else {
-            contentLength
-        }
+            val contentLength = body.contentLength()
+            val totalBytes = if (response.code == 206 && alreadyDownloaded > 0 && contentLength > 0) {
+                alreadyDownloaded + contentLength
+            } else {
+                contentLength
+            }
 
-        val outputStream = if (alreadyDownloaded > 0 && response.code == 206) {
-            java.io.FileOutputStream(dest, true)
-        } else {
-            java.io.FileOutputStream(dest, false)
-        }
+            val outputStream = if (alreadyDownloaded > 0 && response.code == 206) {
+                java.io.FileOutputStream(dest, true)
+            } else {
+                java.io.FileOutputStream(dest, false)
+            }
 
-        body.byteStream().use { input ->
-            outputStream.use { output ->
-                val buffer = ByteArray(64 * 1024)
-                var downloaded = if (response.code == 206) alreadyDownloaded else 0L
-                var bytes: Int
-                while (input.read(buffer).also { bytes = it } != -1) {
-                    output.write(buffer, 0, bytes)
-                    downloaded += bytes
-                    emit(DownloadResult.Progress(DownloadProgress(label, downloaded, totalBytes)))
-                }
+            body.byteStream().use { input ->
+                outputStream.use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var downloaded = if (response.code == 206) alreadyDownloaded else 0L
+                    var bytes: Int
+                    while (input.read(buffer).also { bytes = it } != -1) {
+                        output.write(buffer, 0, bytes)
+                        downloaded += bytes
+                        emit(DownloadResult.Progress(DownloadProgress(label, downloaded, totalBytes)))
+                    }
 
-                if (totalBytes > 0 && downloaded < totalBytes) {
-                    emit(DownloadResult.Error("中断されました: $downloaded / $totalBytes bytes"))
-                    return@flow
+                    if (totalBytes > 0 && downloaded < totalBytes) {
+                        emit(DownloadResult.Error("中断されました: $downloaded / $totalBytes bytes"))
+                        return@flow
+                    }
                 }
             }
         }

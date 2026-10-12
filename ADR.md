@@ -2147,3 +2147,13 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 - 回答の生成が最初のトークンより前に失敗したとき（LLM の未初期化など）や、空白だけで終わったとき、`ChatViewModel` は空の回答をセッションに保存していた。履歴に空の吹き出しが残り、停止時に空の回答を保存しない ADR-061 とも食い違っていた。回答が空なら保存せず、生成の失敗（`ChatErrorKind.GENERATION`）として出す。質問は残るので「再試行」（`regenerate`）で送り直せる。
 - `OnboardingViewModel.initializeServices` は `catch (e: Exception)` でキャンセルまで失敗扱いにし、`finally` の DataStore 書き込みもキャンセル後で実行されなかった。初期化中にアプリを閉じると初期化中フラグが残り、次の起動で「前回クラッシュした」と表示された。`CancellationException` は投げ直し、フラグの解除は `NonCancellable` で必ず書く。
 - 再生成は `removeLastExchange` で元のやり取りを消してから送り直すため、回答を保存できずに終わると（出力前の停止・検索や生成の失敗・空の回答・画面の破棄）元の回答が失われていた。`removeLastExchange` は消したメッセージ（`RemovedExchange`）を返し、回答を保存しなかったときは `ChatRepository.restoreExchange` で積み直した質問を消して元のやり取りを id のまま戻す。途中まで出てから止めた場合は ADR-061 どおり途中の回答を保存し、元には戻さない。削除と質問の保存は `NonCancellable` で終え、止められても戻す対象を取り逃さない。
+
+
+## ADR-064: 起動時のハッシュ検証をメインスレッドから外す・切り替えで CPU 指定を引き継ぐ
+
+- ステータス: 採用
+- 日付: 2026-10-12
+
+- `OnboardingViewModel.checkAndPrepare` は `ModelDownloader.isAllReady`（LLM 数 GB を含む全モデルの SHA-256 計算）を `viewModelScope`（メインスレッド）で呼んでいたため、起動のたびに UI が数秒以上止まり ANR になり得た。`Dispatchers.IO` で呼ぶ。
+- `ModelDownloader.downloadFile` は HTTP エラー（416 を含む）・ボディなしで返るときにレスポンスを閉じておらず、再試行のたびにコネクションが漏れた。レスポンスは `use` で必ず閉じる。
+- `LlmModelSwitcher` は `initialize` に `forceCpu` を渡さず、オンボーディングで「CPU モードで試す」を選んだ端末でも切り替え時に GPU を試し直していた。`LlmService.forceCpu`（最後に読み込めたときの指定）を新しいモデルの読み込みと前のモデルへの戻しの両方に渡す。
