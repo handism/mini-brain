@@ -12,7 +12,10 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkAll
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -278,5 +281,48 @@ class OnboardingViewModelTest {
         viewModel.cancelDownload()
         advanceUntilIdle()
         assertEquals(OnboardingUiState.Required, viewModel.state.value)
+    }
+
+    @Test
+    fun `初期化中に画面が閉じられても失敗扱いにせず、クラッシュ検知フラグを戻す`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[any<Preferences.Key<Boolean>>()] } returns false
+        every { testDataStore.data } returns flowOf(testPrefs)
+        val written = mutableListOf<Boolean?>()
+        coEvery { testDataStore.updateData(any()) } coAnswers {
+            val transform = firstArg<suspend (Preferences) -> Preferences>()
+            val updated = transform(androidx.datastore.preferences.core.emptyPreferences())
+            written += updated[androidx.datastore.preferences.core.booleanPreferencesKey("init_in_progress")]
+            updated
+        }
+
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val embedderService = mockk<EmbedderService>(relaxed = true)
+        val llmService = mockk<LlmService>(relaxed = true)
+        val modelDownloader = mockk<ModelDownloader>(relaxed = true)
+        every { container.embedderService } returns embedderService
+        every { container.llmService } returns llmService
+        every { container.modelDownloader } returns modelDownloader
+        every { modelDownloader.isAllReady(any()) } returns true
+        every { modelDownloader.llmFile(any()) } returns File("model.bin")
+        val loading = CompletableDeferred<Unit>()
+        coEvery { llmService.initialize(any(), any()) } coAnswers { loading.await() }
+
+        val viewModel = OnboardingViewModel(app)
+        advanceUntilIdle()
+        assertEquals(OnboardingUiState.Initializing, viewModel.state.value)
+
+        viewModel.viewModelScope.cancel()
+        advanceUntilIdle()
+
+        assertEquals(OnboardingUiState.Initializing, viewModel.state.value)
+        assertEquals(listOf<Boolean?>(true, false), written)
     }
 }

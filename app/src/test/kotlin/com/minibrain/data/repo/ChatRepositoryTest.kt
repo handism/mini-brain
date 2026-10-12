@@ -87,7 +87,7 @@ class ChatRepositoryTest {
         coEvery { messageDao.getRecentBySession(5L, 2) } returns listOf(answer, question)
         coEvery { messageDao.deleteByIds(any()) } returns Unit
 
-        assertEquals("q", repository.removeLastExchange(5L))
+        assertEquals(RemovedExchange("q", listOf(question, answer)), repository.removeLastExchange(5L))
         coVerify { messageDao.deleteByIds(listOf(2L, 1L)) }
     }
 
@@ -98,7 +98,7 @@ class ChatRepositoryTest {
         coEvery { messageDao.getRecentBySession(5L, 2) } returns listOf(question, answer)
         coEvery { messageDao.deleteByIds(any()) } returns Unit
 
-        assertEquals("q", repository.removeLastExchange(5L))
+        assertEquals(RemovedExchange("q", listOf(question)), repository.removeLastExchange(5L))
         coVerify { messageDao.deleteByIds(listOf(2L)) }
     }
 
@@ -109,6 +109,19 @@ class ChatRepositoryTest {
 
         assertEquals(null, repository.removeLastExchange(5L))
         coVerify(exactly = 0) { messageDao.deleteByIds(any()) }
+    }
+
+    @Test
+    fun restoreExchange_removesRequeuedQuestionAndReinsertsOriginals() = runTest {
+        val question = ChatMessageEntity(id = 1L, sessionId = 5L, role = MessageRole.USER, content = "q")
+        val answer = ChatMessageEntity(id = 2L, sessionId = 5L, role = MessageRole.ASSISTANT, content = "a")
+        coEvery { messageDao.deleteByIds(any()) } returns Unit
+        coEvery { messageDao.insertAll(any()) } returns Unit
+
+        repository.restoreExchange(RemovedExchange("q", listOf(question, answer)), requeuedQuestionId = 9L)
+
+        coVerify { messageDao.deleteByIds(listOf(9L)) }
+        coVerify { messageDao.insertAll(listOf(question, answer)) }
     }
 
     @Test

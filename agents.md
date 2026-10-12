@@ -77,7 +77,7 @@
 - `EmbedderService` と `LlmService` の初期化は非常に重いため、必ず `Dispatchers.Default` などのバックグラウンドスレッドで行わせるコードにしてください。
 - suspend 文脈で例外を握るときは標準の `runCatching` ではなく `com.minibrain.util.runCatchingCancellable` を使ってください。`runCatching` は `CancellationException`（`withTimeout` のタイムアウトを含む）まで失敗扱いにするため、停止ボタンで「生成エラー」が出たり、タイムアウトが握りつぶされたりします（ADR-031）。
 - チャットの送信・再生成は `startGeneration` で削除処理前から操作をロックし、開始時の sessionId を履歴取得・質問保存・回答保存に使います。生成中の新規チャット作成は無効にし、セッション作成中も送信・再生成・重複作成を受け付けません（ADR-060）。
-- 停止ボタンは生成ジョブをキャンセルし、途中の回答があれば開始時のセッションへ保存します。保存中は `isGenerating` を保持し、送信・再生成・セッション作成を受け付けません。空の回答は保存しません（ADR-061）。
+- 停止ボタンは生成ジョブをキャンセルし、途中の回答があれば開始時のセッションへ保存します。保存中は `isGenerating` を保持し、送信・再生成・セッション作成を受け付けません。空の回答は保存しません（ADR-061）。生成の失敗や空出力で回答が空になったときも保存せず、生成の失敗として出します（ADR-063）。再生成で回答を保存できずに終わったら（出力前の停止・失敗・空の回答）、`ChatRepository.restoreExchange` で元のやり取りを戻します（ADR-063）。
 - `ChatViewModel.sendMessage` は `try/finally` で `isGenerating` を戻します。ジョブは LAZY 起動で `currentJob` を代入してから開始します（`viewModelScope` は `Main.immediate` のため）。
 
 ### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)

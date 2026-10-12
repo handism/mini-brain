@@ -11,6 +11,7 @@ import com.minibrain.ai.agent.AgentResult
 import com.minibrain.data.db.entities.ChatMessageEntity
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.data.repo.ChatRepository
+import com.minibrain.data.repo.RemovedExchange
 import com.minibrain.dataStore
 import com.minibrain.di.AppContainer
 import io.mockk.coEvery
@@ -341,7 +342,7 @@ class ChatViewModelTest {
         val deletion = CompletableDeferred<Unit>()
         coEvery { repository.removeLastExchange(100L) } coAnswers {
             deletion.await()
-            "original question"
+            RemovedExchange("original question", emptyList())
         }
         coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
             emptyList(), flowOf("replacement"), emptyList(),
@@ -490,5 +491,139 @@ class ChatViewModelTest {
         val longAnswer = "スパイス堂には 2024/11/03 に初めて訪れています。" + "あ".repeat(NEGATIVE_CHECK_CHARS) +
             "なお再訪の日付は分かりません。"
         assertFalse(isNegativeResponse(longAnswer))
+    }
+
+    @Test
+    fun `回答の生成が最初のトークンの前に失敗したら空の回答を保存しない`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+        val chatRepo = mockk<ChatRepository>(relaxed = true)
+        val agentPipeline = mockk<AgentPipeline>(relaxed = true)
+        every { container.chatRepository } returns chatRepo
+        every { container.agentPipeline } returns agentPipeline
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[booleanPreferencesKey("show_search_log")] } returns true
+        every { testPrefs[stringPreferencesKey("tree_uri")] } returns ""
+        every { testDataStore.data } returns flowOf(testPrefs)
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val sessionId = 100L
+        coEvery { chatRepo.getOrCreateSession() } returns sessionId
+        every { chatRepo.observeMessages(sessionId) } returns flowOf(emptyList())
+        coEvery { chatRepo.getRecentHistory(sessionId) } returns emptyList()
+        coEvery { agentPipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            citations = emptyList(),
+            answerFlow = flow<String> { throw IllegalStateException("LlmService not initialized") },
+            traceEvents = emptyList(),
+        )
+
+        val viewModel = createViewModel(app)
+        advanceUntilIdle()
+        viewModel.sendMessage("質問")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { chatRepo.addMessage(any(), MessageRole.ASSISTANT, any(), any()) }
+        assertEquals(ChatErrorKind.GENERATION, viewModel.error.value?.kind)
+        assertEquals(listOf(MessageRole.USER), viewModel.messages.value.map { it.role })
+        assertFalse(viewModel.isGenerating.value)
+    }
+
+    @Test
+    fun `回答が空で終わったときも保存せずに失敗として出す`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+        val chatRepo = mockk<ChatRepository>(relaxed = true)
+        val agentPipeline = mockk<AgentPipeline>(relaxed = true)
+        every { container.chatRepository } returns chatRepo
+        every { container.agentPipeline } returns agentPipeline
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[booleanPreferencesKey("show_search_log")] } returns true
+        every { testPrefs[stringPreferencesKey("tree_uri")] } returns ""
+        every { testDataStore.data } returns flowOf(testPrefs)
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val sessionId = 100L
+        coEvery { chatRepo.getOrCreateSession() } returns sessionId
+        every { chatRepo.observeMessages(sessionId) } returns flowOf(emptyList())
+        coEvery { chatRepo.getRecentHistory(sessionId) } returns emptyList()
+        coEvery { agentPipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            citations = emptyList(),
+            answerFlow = flowOf(" ", "\n"),
+            traceEvents = emptyList(),
+        )
+
+        val viewModel = createViewModel(app)
+        advanceUntilIdle()
+        viewModel.sendMessage("質問")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { chatRepo.addMessage(any(), MessageRole.ASSISTANT, any(), any()) }
+        assertEquals(ChatError(ChatErrorKind.GENERATION, null), viewModel.error.value)
+        assertFalse(viewModel.isGenerating.value)
+    }
+
+    private val originalQuestion = ChatMessageEntity(id = 10, sessionId = 100L, role = MessageRole.USER, content = "q", createdAt = 0L, citationsJson = "[]")
+    private val originalAnswer = ChatMessageEntity(id = 11, sessionId = 100L, role = MessageRole.ASSISTANT, content = "old answer", createdAt = 0L, citationsJson = "[]")
+
+    @Test
+    fun `再生成を出力前に止めたら元のやり取りに戻す`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        coEvery { repository.removeLastExchange(100L) } returns RemovedExchange("q", listOf(originalQuestion, originalAnswer))
+        coEvery { repository.addMessage(100L, MessageRole.USER, "q", any()) } returns 12L
+        coEvery { pipeline.run(any(), any(), any(), any()) } coAnswers { CompletableDeferred<AgentResult>().await() }
+        runCurrent()
+
+        vm.regenerate()
+        runCurrent()
+        vm.cancelGeneration()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.restoreExchange(RemovedExchange("q", listOf(originalQuestion, originalAnswer)), 12L) }
+        coVerify(exactly = 0) { repository.addMessage(any(), MessageRole.ASSISTANT, any(), any()) }
+        assertEquals(listOf("q", "old answer"), vm.messages.value.map { it.content })
+        assertEquals(listOf(10L, 11L), vm.messages.value.map { it.id })
+        assertFalse(vm.isGenerating.value)
+    }
+
+    @Test
+    fun `再生成の検索に失敗したら元のやり取りに戻す`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        coEvery { repository.removeLastExchange(100L) } returns RemovedExchange("q", listOf(originalQuestion, originalAnswer))
+        coEvery { repository.addMessage(100L, MessageRole.USER, "q", any()) } returns 12L
+        coEvery { pipeline.run(any(), any(), any(), any()) } throws IllegalStateException("db")
+        runCurrent()
+
+        vm.regenerate()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.restoreExchange(any(), 12L) }
+        assertEquals(listOf("q", "old answer"), vm.messages.value.map { it.content })
+        assertEquals(ChatErrorKind.SEARCH, vm.error.value?.kind)
+    }
+
+    @Test
+    fun `再生成で途中まで出てから止めたら、途中の回答を保存して元には戻さない`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        coEvery { repository.removeLastExchange(100L) } returns RemovedExchange("q", listOf(originalQuestion, originalAnswer))
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flow { emit("partial"); CompletableDeferred<Unit>().await() }, emptyList(),
+        )
+        runCurrent()
+
+        vm.regenerate()
+        runCurrent()
+        vm.cancelGeneration()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.ASSISTANT, "partial", any()) }
+        coVerify(exactly = 0) { repository.restoreExchange(any(), any()) }
     }
 }

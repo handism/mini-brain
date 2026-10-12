@@ -34,10 +34,10 @@ class ChatRepository(
         messageDao.getRecentBySession(sessionId, limit).reversed()
 
     /**
-     * 最後の質問と、それへの回答（あれば）を消してその質問文を返す。再生成で同じ質問を送り直すため。
+     * 最後の質問と、それへの回答（あれば）を消して返す。再生成で同じ質問を送り直すため。
      * 最後のやり取りが質問で終わっていなければ（回答だけが続くなど）何もせず null。
      */
-    suspend fun removeLastExchange(sessionId: Long): String? {
+    suspend fun removeLastExchange(sessionId: Long): RemovedExchange? {
         val recent = messageDao.getRecentBySession(sessionId, 2)
         val last = recent.firstOrNull() ?: return null
         val toDelete = when {
@@ -46,7 +46,16 @@ class ChatRepository(
             else -> return null
         }
         messageDao.deleteByIds(toDelete.map { it.id })
-        return toDelete.last().content
+        return RemovedExchange(question = toDelete.last().content, messages = toDelete.reversed())
+    }
+
+    /**
+     * 再生成で何も答えられなかったとき、[removeLastExchange] で消したやり取りを id を保ったまま戻す。
+     * [requeuedQuestionId] は再生成で積み直した質問（まだ積んでいなければ null）。
+     */
+    suspend fun restoreExchange(removed: RemovedExchange, requeuedQuestionId: Long?) {
+        requeuedQuestionId?.let { messageDao.deleteByIds(listOf(it)) }
+        messageDao.insertAll(removed.messages)
     }
 
     suspend fun updateSessionTitle(id: Long, title: String) = sessionDao.updateTitle(id, title)
@@ -72,5 +81,11 @@ class ChatRepository(
 
 data class DeletedSession(
     val session: ChatSessionEntity,
+    val messages: List<ChatMessageEntity>,
+)
+
+/** [ChatRepository.removeLastExchange] で消したやり取り。[messages] は古い順。 */
+data class RemovedExchange(
+    val question: String,
     val messages: List<ChatMessageEntity>,
 )

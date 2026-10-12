@@ -11,11 +11,14 @@ import com.minibrain.ai.llm.DownloadProgress
 import com.minibrain.ai.llm.DownloadResult
 import com.minibrain.ai.llm.selectedLlmModel
 import com.minibrain.dataStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 sealed class OnboardingUiState {
@@ -145,6 +148,9 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
             Timber.tag(TAG).d("All services initialized")
             _state.value = OnboardingUiState.Ready
+        } catch (e: CancellationException) {
+            // 画面を閉じただけなので失敗としては出さない
+            throw e
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Initialization failed")
             _state.value = OnboardingUiState.Failure(
@@ -153,8 +159,11 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
                 canTryCpu = !forceCpu
             )
         } finally {
-            // 成功・失敗どちらの場合もクラッシュ検知フラグをクリア
-            app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = false }
+            // 成功・失敗・キャンセルのどれでもクラッシュ検知フラグをクリアする。
+            // キャンセル後は suspend 呼び出しがすぐ投げるので、NonCancellable で書き込みを終える
+            withContext(NonCancellable) {
+                app.dataStore.edit { it[PREF_KEY_INIT_IN_PROGRESS] = false }
+            }
         }
     }
 }

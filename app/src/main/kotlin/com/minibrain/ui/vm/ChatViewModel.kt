@@ -13,7 +13,9 @@ import com.minibrain.ai.agent.AgentTraceEvent
 import com.minibrain.ai.agent.FinalAnswerEvent
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.CitationJson
+import com.minibrain.data.db.entities.ChatMessageEntity
 import com.minibrain.data.db.entities.MessageRole
+import com.minibrain.data.repo.RemovedExchange
 import com.minibrain.dataStore
 import com.minibrain.util.runCatchingCancellable
 import kotlinx.coroutines.CoroutineStart
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import timber.log.Timber
 
 private val PREF_TREE_URI = stringPreferencesKey("tree_uri")
 private val PREF_SHOW_SEARCH_LOG = booleanPreferencesKey("show_search_log")
@@ -117,13 +120,7 @@ class ChatViewModel(
                     if (!_isGenerating.value) {
                         val existingTrace = _messages.value.associate { it.id to it.traceEvents }
                         _messages.value = entities.map { entity ->
-                            ChatMessage(
-                                id = entity.id,
-                                role = entity.role,
-                                content = entity.content,
-                                citations = CitationJson.decode(entity.citationsJson),
-                                traceEvents = existingTrace[entity.id] ?: emptyList(),
-                            )
+                            entity.toChatMessage(traceEvents = existingTrace[entity.id] ?: emptyList())
                         }
                     }
                 }
@@ -133,10 +130,13 @@ class ChatViewModel(
 
     fun sendMessage(question: String) {
         if (question.isBlank()) return
-        startGeneration { question }
+        startGeneration { GenerationRequest(question) }
     }
 
-    private fun startGeneration(questionProvider: suspend (Long) -> String?) {
+    /** [removed] は再生成で消した元のやり取り。回答を保存できずに終わったら戻す。 */
+    private data class GenerationRequest(val question: String, val removed: RemovedExchange? = null)
+
+    private fun startGeneration(prepare: suspend (Long) -> GenerationRequest?) {
         if (_isGenerating.value || isSwitchingSession || _sessionId.value <= 0L) return
         val sessionId = _sessionId.value
 
@@ -147,17 +147,28 @@ class ChatViewModel(
         _statusText.value = null
         // viewModelScope は Main.immediate なので、currentJob を代入してから本体を走らせる
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            var removed: RemovedExchange? = null
+            var questionId: Long? = null
+            var answerSaved = false
             try {
-                val question = questionProvider(sessionId) ?: return@launch
-                setupUserAndStreamingMessages(question, sessionId)
+                val request = prepare(sessionId) ?: return@launch
+                removed = request.removed
+                questionId = setupUserAndStreamingMessages(request.question, sessionId)
 
                 // エージェントループ（計画 → 多段ツール実行 → 回答）
-                val agentResult = runAgentPipeline(question, sessionId) ?: return@launch
+                val agentResult = runAgentPipeline(request.question, sessionId) ?: return@launch
                 updateStreamingMessage { it.copy(traceEvents = agentResult.traceEvents) }
                 val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
+                if (finalContent.isBlank()) {
+                    // 空の回答は保存しない（履歴に空の吹き出しが残るため）。失敗として出し、再試行できるようにする
+                    if (_error.value == null) _error.value = ChatError(ChatErrorKind.GENERATION, null)
+                    removeStreamingMessage()
+                    return@launch
+                }
 
                 withContext(NonCancellable) {
                     finalizeMessage(finalContent, agentResult.citations, agentResult.traceEvents, sessionId)
+                    answerSaved = true
                 }
             } catch (e: CancellationException) {
                 if (stoppedJob === coroutineContext[Job]) {
@@ -167,6 +178,7 @@ class ChatViewModel(
                         withContext(NonCancellable) {
                             runCatchingCancellable {
                                 finalizeMessage(partial.content, partial.citations, partial.traceEvents, sessionId)
+                                answerSaved = true
                             }.onFailure {
                                 _error.value = ChatError(ChatErrorKind.GENERATION, it.message)
                                 updateStreamingMessage { message -> message.copy(isStreaming = false) }
@@ -178,6 +190,11 @@ class ChatViewModel(
                 }
                 throw e
             } finally {
+                // 再生成で何も保存できなかったら（出力前の停止・失敗・空の回答）、消した元のやり取りを戻す
+                val toRestore = removed
+                if (toRestore != null && !answerSaved) {
+                    withContext(NonCancellable) { restoreExchange(toRestore, questionId) }
+                }
                 // 途中で例外が出ても送信不能のまま固まらないよう必ず戻す。
                 // キャンセル後に次の送信が始まっていたら、そちらの状態は触らない
                 if (currentJob === coroutineContext[Job]) {
@@ -197,7 +214,8 @@ class ChatViewModel(
         job.start()
     }
 
-    private suspend fun setupUserAndStreamingMessages(question: String, sessionId: Long) {
+    /** 積んだ質問の id を返す。 */
+    private suspend fun setupUserAndStreamingMessages(question: String, sessionId: Long): Long {
         // ユーザーメッセージを追加（最初の送信時はセッションタイトルを質問で更新）
         if (_messages.value.isEmpty()) {
             val title = question.take(40).let { if (question.length > 40) "$it…" else it }
@@ -205,7 +223,10 @@ class ChatViewModel(
         }
         val userMsg = ChatMessage(role = MessageRole.USER, content = question)
         _messages.value = _messages.value + userMsg
-        app.container.chatRepository.addMessage(sessionId, MessageRole.USER, question)
+        // 保存の途中で止められても id を取り逃さないよう、挿入は最後まで終える（再生成の取り消しで消すため）
+        val questionId = withContext(NonCancellable) {
+            app.container.chatRepository.addMessage(sessionId, MessageRole.USER, question)
+        }
 
         // ストリーミングプレースホルダーを先行追加（検索中も CircularProgressIndicator 表示）
         val streamingMsg = ChatMessage(
@@ -214,6 +235,22 @@ class ChatViewModel(
             isStreaming = true,
         )
         _messages.value = _messages.value + streamingMsg
+        return questionId
+    }
+
+    private suspend fun restoreExchange(removed: RemovedExchange, questionId: Long?) {
+        runCatchingCancellable { app.container.chatRepository.restoreExchange(removed, questionId) }
+            .onSuccess {
+                // 積み直した質問と回答欄を外して、元のやり取りを末尾に戻す
+                val list = _messages.value.filterNot { it.isStreaming }
+                val requeued = list.indexOfLast { it.role == MessageRole.USER && it.id == 0L }
+                val base = if (questionId != null && requeued >= 0) list.subList(0, requeued) else list
+                _messages.value = base + removed.messages.map { it.toChatMessage() }
+            }
+            .onFailure {
+                Timber.tag(TAG).e(it, "restore exchange failed")
+                if (_error.value == null) _error.value = ChatError(ChatErrorKind.GENERATION, it.message)
+            }
     }
 
     private suspend fun runAgentPipeline(question: String, sessionId: Long): AgentResult? {
@@ -290,11 +327,14 @@ class ChatViewModel(
     /** 最後の回答を捨てて、同じ質問をもう一度送る。 */
     fun regenerate() {
         startGeneration { sessionId ->
-            val question = app.container.chatRepository.removeLastExchange(sessionId) ?: return@startGeneration null
+            // 消した直後に止められても戻せるよう、削除と消した内容の受け取りは最後まで終える
+            val removed = withContext(NonCancellable) {
+                app.container.chatRepository.removeLastExchange(sessionId)
+            } ?: return@startGeneration null
             // DB の変更通知を待たずに画面からも消し、この生成処理で末尾に積み直す
             val lastUser = _messages.value.indexOfLast { it.role == MessageRole.USER }
             if (lastUser >= 0) _messages.value = _messages.value.subList(0, lastUser)
-            question
+            GenerationRequest(removed.question, removed)
         }
     }
 
@@ -349,6 +389,16 @@ class ChatViewModel(
         _statusText.value = null
     }
 }
+
+private const val TAG = "ChatViewModel"
+
+private fun ChatMessageEntity.toChatMessage(traceEvents: List<AgentTraceEvent> = emptyList()) = ChatMessage(
+    id = id,
+    role = role,
+    content = content,
+    citations = CitationJson.decode(citationsJson),
+    traceEvents = traceEvents,
+)
 
 // 話題の候補を拾うファイル数。日付だけのファイル名が続いても話題が残る程度に多めに取る
 private const val RECENT_FILES_FOR_SUGGESTIONS = 20
