@@ -25,6 +25,10 @@ open class LlmService {
     @Volatile private var engine: Engine? = null
     private val mutex = Mutex()
 
+    /** 最後に読み込めたときに CPU を指定していたか。モデルの切り替えでも同じ指定で読み込むため（ADR-064）。 */
+    @Volatile var forceCpu: Boolean = false
+        private set
+
     open suspend fun initialize(modelFile: File, forceCpu: Boolean = false) = withContext(Dispatchers.Default) {
         mutex.withLock {
             if (!modelFile.exists() || modelFile.length() < 100_000_000L) {
@@ -44,6 +48,7 @@ open class LlmService {
                     gpuEng = Engine(config)
                     gpuEng.initialize()
                     engine = gpuEng
+                    this@LlmService.forceCpu = false
                     return@withLock
                 } catch (e: Throwable) {
                     runCatching { gpuEng?.close() }
@@ -58,6 +63,7 @@ open class LlmService {
                 val eng = Engine(cpuConfig)
                 eng.initialize()
                 engine = eng
+                this@LlmService.forceCpu = forceCpu
             } catch (e: Throwable) {
                 Timber.tag(TAG).e(e, "CPU initialization failed")
                 val msg = if (forceCpu) "CPUモードでの初期化に失敗しました" else "GPU/CPU 両方で失敗しました"

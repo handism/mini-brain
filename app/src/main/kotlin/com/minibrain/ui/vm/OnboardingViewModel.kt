@@ -12,6 +12,8 @@ import com.minibrain.ai.llm.DownloadResult
 import com.minibrain.ai.llm.selectedLlmModel
 import com.minibrain.dataStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,7 +43,12 @@ sealed class OnboardingUiState {
     ) : OnboardingUiState()
 }
 
-class OnboardingViewModel(application: Application) : AndroidViewModel(application) {
+// viewModel() の既定の factory は Application だけを取るコンストラクタを探すので @JvmOverloads を付ける
+class OnboardingViewModel @JvmOverloads constructor(
+    application: Application,
+    /** モデルのハッシュ検証を走らせる先。テストで差し替える */
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : AndroidViewModel(application) {
 
     private companion object {
         private const val TAG = "Onboarding"
@@ -67,7 +74,10 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             val prefs = app.dataStore.data.first()
             val crashedLastTime = prefs[PREF_KEY_INIT_IN_PROGRESS] ?: false
             
-            if (downloader.isAllReady(app.dataStore.selectedLlmModel())) {
+            // 数 GB のモデルの SHA-256 を計算するので、メインスレッドで呼ぶと起動が固まる（ADR-064）
+            val model = app.dataStore.selectedLlmModel()
+            val ready = withContext(ioDispatcher) { downloader.isAllReady(model) }
+            if (ready) {
                 if (crashedLastTime) {
                     _state.value = OnboardingUiState.Failure(
                         "前回の起動時に初期化中に問題が発生しました。GPUメモリ不足の可能性があります。CPUモードで試しますか？",
