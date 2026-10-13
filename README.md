@@ -1,273 +1,117 @@
 # Mini Brain
 
-内部ストレージの Markdown ファイルを知識源として、自然言語で質問するとオンデバイス AI が回答する個人用エージェント型 RAG アプリ。
-
-すべての推論はデバイス上で完結するため、個人情報・機密情報を含むメモも安全に扱える。
+端末内の Markdown ノートを知識源に、自然言語の質問へオンデバイス AI が答える Android 向けの個人用 RAG アプリ。推論はすべて端末内で完結するため、個人情報を含むメモも外に出さずに扱えます。
 
 ## 特徴
 
-- **完全プライベート** — 質問・回答・md の内容はクラウドに送信しない。ネットワーク通信はモデルのダウンロード（初回と、設定でモデルを切り替えたとき）のみ
-- **Search First → Coverage Check → Agent** — Query Expansion で検索語を展開し BM25 / Metadata / Vector を並行検索、LLM Reranker で上位候補を選択。さらに Coverage Check で「証拠が揃っているか」を評価し、不足している場合は Explorer Strategy を決定して ReAct にエスカレーション
-- **Query Expansion** — LLM が元クエリを 3〜8 件の検索語群に展開。固有名詞（人名・地名・施設名・サービス名等）は助詞・疑問詞を取り除いた単独名詞として必ず保持し、日付表現・関連語も補完
-- **HyDE（Hypothetical Document Embeddings）** — LLM がクエリへの「ありそうな回答」を 1〜2 文生成し、その埋め込みでベクトル検索を追加実行。query↔passage の表現非対称を緩和して Recall を底上げ
-- **Metadata Search** — ファイル名・フォルダパス・タグ・documentDate を直接検索。本文にない情報（日付フォルダ・会社名）も Recall に貢献。ファイル名(拡張子除く)が質問に部分文字列として含まれる場合の逆引きも実施し、日本語助詞でトークン化されないクエリでも固有名詞ファイルを確実に拾う。snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込み、日付クエリでの回答可能性判定を高速化
-- **Multi-Vector Search** — 元クエリ + 展開クエリ + HyDE 仮想回答で順次ベクトル検索し、コサイン類似度 0.45 未満はノイズとして除外。字面が一致しない言い換えや概念質問を取り逃さない
-- **重み付き RRF** — Metadata=1.5 / BM25=1.2 / Vector=1.0 の重みで rank 融合。完全一致のメタデータを優先しつつ、低類似度のベクトルノイズを上位に来づらくする
-- **LLM Reranker** — 50 件の候補を LLM が関連度順に再採点し、上位 10 件を回答コンテキストに投入。`path / heading / date / source / snippet` の構造化形式で投入し、日付クエリでは date フィールドを持つ候補を優先。日付クエリでファイル名一致の候補がある場合は LLM 採点を省略して高速化
-- **Coverage Check** — Search First 後に LLM が「回答に必要な証拠が揃っているか」を評価。不足情報（`visit_date` 等）を特定し、Explorer Strategy（EXPAND_TIME / EXPAND_TOPIC）を決定して ReAct に指示を渡す。日付クエリ かつ 日付プレフィックス付き候補がある場合は LLM 呼び出しを短絡
-- **ReAct エージェント（Fallback）** — Search First + Coverage Check で証拠が揃わなかった場合のフォールバック。Explorer Strategy の hint を参照し、glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search を自由に組み合わせて多段探索。EXPAND_TIME は read_file での全文読解を優先
-- **Query Classifier** — 一般知識の質問は RAG をスキップして直接 LLM が回答。検索コストを削減
-- **Recentness Ranking** — ファイルパスから日付を抽出し、RRF スコアに指数減衰のフレッシュネス加点を適用（新しい情報を優先）
-- **Timeline Search** — 期間表現（去年の夏・去年の3月・2024年3月など）を DateRange に解釈し、期間指定でファイルを収集する `timeline_search` ツールを提供
-- **Folder Embedding** — フォルダ単位の仮想埋め込みを生成。ベクトル検索でフォルダ全体の意味をキャプチャ
-- **日付形式不問** — YYYY/MM/DD・YYYYMMDD・YYYY-MM-DD など命名規則が混在していても DB 側で吸収して一致ファイルの docId を解決
-- **ハイブリッド検索** — BM25（FTS4）+ ベクトル検索（multilingual-e5-small INT8 / 384 次元）を RRF でマージ。FTS4 には順位付けが無いため、`matchinfo` から BM25 スコアを計算して並べる
-- **Markdown 対応** — 見出し階層を解析してチャンク分割。引用元のファイル名と見出しパスを回答に表示。チャンクの埋め込みには「パス > 見出し」を本文の前に付け、ファイルの途中のチャンクでも何の話かを検索に効かせる
-- **ストリーミング回答** — LiteRT-LM のトークンストリームを Compose UI にリアルタイム描画。本文が届くまでは検索の段階と経過秒数を表示し、回答は再生成できる。生成・再生成中は新しいチャットの作成を無効にし、履歴の混在を防ぐ。表・引用を含む Markdown も整形して表示
-- **すぐ使える Home** — 最終インデックス日時と最近のチャットを表示。空のチャットには知識ベースの中身（先月のメモ・最近のファイル名）から作った質問例を出す
-- **表示** — Material 3 の dynamic color。テーマは設定で「端末に従う / ライト / ダーク」から選べる。設定の「このアプリについて」でバージョンとライセンスを確認できる
-- **差分インデックス** — SHA-256 ハッシュで変更ファイルとチャンクが欠けたファイルを再インデックス。読み込みエラー時は既存の索引を保持（フォルダから消したファイルはインデックスからも自動削除）
-- **生成の停止** — 停止した時点までの回答もチャット履歴に保存。保存が終わってから次の質問や新規チャットを開始できます
+- **完全プライベート** — 質問・回答・ノートの内容は端末の外に送らない。通信はモデルのダウンロード時だけ
+- **ハイブリッド検索** — BM25（FTS4）・メタデータ（ファイル名 / パス / タグ / 日付）・ベクトル（multilingual-e5-small）を並行に検索し、重み付き RRF で融合。LLM によるクエリ展開・HyDE・Reranker で精度を上げる
+- **日付に強い** — 「去年の夏」「先月」「一昨年の3月」などの期間表現を解釈。ファイル名・フロントマター・見出し・本文の日付から、いつの話かを拾う
+- **エージェント型の再探索** — 検索結果で答えられないと判断したら、ReAct で `grep` / `read_file` / `timeline_search` などのツールを使って探し直す
+- **一覧の質問** — 「〇〇を全部挙げて」「△△フォルダにあるもの」には、該当フォルダのノートを漏れなく並べる
+- **差分インデックス** — 変更・追加されたノートだけを再インデックス。消したノートは索引からも消える
+- **チャット** — ストリーミング回答（Markdown の表・引用も整形）、停止・再生成、引用元ファイルの表示、履歴の検索と削除（取り消し可）
+- **モデル切り替え** — 回答用 LLM を Gemma 4 E2B（既定）/ E4B から選べる
+- **表示** — Material 3 の dynamic color、テーマは「端末に従う / ライト / ダーク」
 
-## スタック
+## インストール
 
-| カテゴリ     | 技術                                      |
-| ------------ | ----------------------------------------- |
-| 言語         | Kotlin                                    |
-| UI           | Jetpack Compose + Material 3              |
-| 最小 SDK     | API 31 (Android 12)                       |
-| LLM          | Gemma 4 E2B（設定で E4B に切り替え可）via LiteRT-LM |
-| Embedder     | multilingual-e5-small (INT8 ONNX) via ONNX Runtime + 純 Kotlin tokenizer |
-| DB           | Room（FTS4 + ベクトル）                   |
-| 設定保存     | DataStore                                 |
-| ファイル選択 | Storage Access Framework                  |
+Android 12 以上の arm64 端末（RAM 6 GB 以上、空き容量 4 GB 以上推奨）に対応しています。
 
-## セットアップ
+1. 端末のブラウザで [Releases](https://github.com/handism/mini-brain/releases) を開き、最新版の `mini-brain-x.y.z.apk` をダウンロードする
+2. APK を開き、提供元の許可を求められたら許可してインストールする（Play プロテクトの警告は「詳細」→「インストールする」）
 
-### 必要環境
-
-- Android Studio Narwhal (2025.1.1) 以降（AGP 9.x が必要）
-- JDK 17
-- Android 12 以上の実機（RAM 6 GB 以上、空き容量 4 GB 以上推奨）
-
-### APK からインストール
-
-Android 12 以上の arm64 端末に対応しています。
-
-1. 端末のブラウザで [Releases](https://github.com/handism/mini-brain/releases) を開き、最新版の Assets にある `mini-brain-x.y.z.apk` をダウンロードする
-2. ダウンロードした APK を開く
-3. 初回は「このソースからのアプリを許可」を求められるので、ブラウザ（またはファイルアプリ）に許可を出してインストールする
-4. Play プロテクトの警告が出たら「詳細」→「インストールする」で進める
-
-新しいバージョンも同じ手順で上書き更新できます。[Obtainium](https://github.com/ImranR98/Obtainium) にこのリポジトリの URL を登録すると、新しいリリースを自動で受け取れます。
+更新も同じ手順で上書きできます。[Obtainium](https://github.com/ImranR98/Obtainium) にこのリポジトリを登録すると自動で受け取れます。
 
 > [!WARNING]
-> `./gradlew installDebug` で入れた debug ビルドが端末にある場合、Releases の APK は署名鍵が違うため上書きできません（「既存のパッケージと競合しています」と表示されます）。debug ビルドをアンインストールしてから入れてください。アンインストールするとダウンロード済みのモデル（約 2.6 GB）・インデックス・チャット履歴も消えるため、モデルは Wi-Fi 環境で再ダウンロードが必要です。
+> `./gradlew installDebug` で入れた debug ビルドがあると、署名鍵が違うため Releases の APK で上書きできません。debug ビルドをアンインストールしてから入れてください（ダウンロード済みのモデル・インデックス・チャット履歴も消えます）。
 
-### ビルド手順
+## 使い方
 
-```bash
-# 1. Android Studio でプロジェクトを開く
-#    File > Open > /path/to/mini-brain
+1. Wi-Fi に接続してアプリを起動し、「ダウンロード開始」でモデルを取得（約 2.6 GB）
+2. Markdown ノートが入ったフォルダを選ぶ
+3. インデックスが終わったらチャットで質問する（次回以降はチャット画面から始まる）
 
-# 2. Gradleをインストールしてwrapperを生成
-brew install gradle
-gradle wrapper --gradle-version 9.5.1
+## 開発
 
-# 3. Gradle Sync が完了したらビルド
-./gradlew assembleDebug
-
-# 4. 実機にインストール
-#    実機を開発者向けオプション有効化し、USBデバッグを有効化してUSBで接続
-./gradlew installDebug
-```
-
-### リリース手順（メンテナ向け）
-
-`v1.2.3` 形式のタグを push すると、`.github/workflows/release.yml` が署名済み APK をビルドして GitHub Release に添付します（`v1.0.0-beta.1` のように `-` を含むタグは prerelease）。
+- Android Studio Narwhal (2025.1.1) 以降（AGP 9.x）、JDK 17
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+./gradlew assembleDebug        # ビルド
+./gradlew installDebug         # USB デバッグを有効にした実機へインストール
+./gradlew testDebugUnitTest    # ユニットテスト
 ```
 
-初回だけ、リポジトリの Settings → Secrets and variables → Actions に次の 4 つを登録します。
+設計の背景は [ADR.md](ADR.md)、実装上の制約と検索フローの詳細は [agents.md](agents.md) を参照してください。
 
-| Secret | 内容 |
+### スタック
+
+| カテゴリ | 技術 |
 | --- | --- |
-| `RELEASE_KEYSTORE_BASE64` | `base64 -i release.jks` の出力 |
-| `RELEASE_KEYSTORE_PASSWORD` | keystore のパスワード |
-| `RELEASE_KEY_ALIAS` | 鍵のエイリアス |
-| `RELEASE_KEY_PASSWORD` | 鍵のパスワード |
+| 言語 / UI | Kotlin / Jetpack Compose + Material 3 |
+| 最小 SDK | API 31（Android 12） |
+| LLM | Gemma 4 E2B / E4B via LiteRT-LM |
+| Embedder | multilingual-e5-small（INT8 ONNX）via ONNX Runtime + 純 Kotlin tokenizer |
+| DB / 設定 | Room（FTS4 + ベクトル）/ DataStore |
+| ファイル | Storage Access Framework |
 
-keystore は `keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 4096 -validity 36500 -alias mini-brain` で作れます。なくすと既存のインストールを上書き更新できなくなるので、リポジトリ外にバックアップしてください。
-
-### 初回起動
-
-1. Wi-Fi に接続した状態でアプリを起動
-2. Onboarding 画面で「ダウンロード開始」をタップ
-3. モデルのダウンロードが完了するまで待機（LLM 約 2.5 GB + Embedder 約 118 MB + Tokenizer 約 17 MB）
-4. ホーム画面で md ファイルが入ったフォルダを選択
-5. インデックス作成が完了したらチャット画面で質問（次回以降の起動はチャット画面から始まります。戻るとホーム画面）
-
-## プロジェクト構成
-
-```
-app/src/main/kotlin/com/minibrain/
-├── MiniBrainApp.kt          # Application — シングルトン DI
-├── MainActivity.kt
-├── ai/
-│   ├── search/                  # Search First パイプライン（新規）
-│   │   ├── SearchPipeline.kt    # QueryExpansion→HyDE→並行検索→重み付き RRF→Rerank のオーケストレーション
-│   │   ├── QueryExpander.kt     # LLM によるクエリ展開（3〜8 件・JSON 配列出力）
-│   │   ├── HyDE.kt              # LLM による仮想回答生成（query↔passage 非対称の緩和）
-│   │   └── LlmReranker.kt       # LLM による候補再採点（path/heading/date/source/snippet 構造化）
-│   ├── agent/
-│   │   ├── AgentPipeline.kt     # Search First + CoverageCheck + ReAct フォールバック統合
-│   │   ├── AgentTypes.kt        # AgentTool / Observation / PlannerDecision 等の型定義
-│   │   ├── AgentTraceEvent.kt   # トレースイベント型（Search First + CoverageCheck + ReAct）
-│   │   ├── CoverageChecker.kt   # 回答可能性評価（LLM）+ Explorer Strategy 決定
-│   │   ├── PlannerPrompt.kt     # Planner プロンプト生成 + DSL(key:value)パーサ
-│   │   ├── CitationIntegrator.kt# 重複除去・優先度整列・トークン budget 制御
-│   │   ├── DateResolver.kt      # 相対日付・期間表現 → 絶対日付/DateRange 変換
-│   │   ├── QueryClassifier.kt   # クエリ種別判定（MEMORY/GENERAL/TEMPORAL）
-│   │   └── tools/
-│   │       ├── ToolExecutor.kt  # 7 ツールの実装（glob/list_dir/read_file/grep/vector/rrf/timeline）
-│   │       └── GlobMatcher.kt   # glob パターン → Kotlin Regex 変換
-│   ├── llm/
-│   │   ├── LlmService.kt        # LiteRT-LM Engine ラッパー
-│   │   └── ModelDownloader.kt   # レジューム対応ダウンロード
-│   ├── embed/
-│   │   └── EmbedderService.kt   # ONNX Runtime + multilingual-e5-small ラッパー（EmbedType で query/passage 切替）
-│   └── rag/
-│       ├── RagPipeline.kt       # RAG（RRF・Citation 型・SourceType 定義）
-│       └── CosineSimilarity.kt  # コサイン類似度（純 Kotlin）
-├── eval/                        # 検索評価フレーム（P@K / R@K / MRR）
-│   ├── EvalCase.kt              # 評価ケース型（質問 + 期待 relativePath）
-│   ├── EvalMetrics.kt           # P@K / R@K / MRR 計算（純 Kotlin）
-│   └── EvalRunner.kt            # 評価セットを SearchPipeline に流して指標化
-├── data/
-│   ├── db/                      # Room スキーマ・DAO（v6: E5 Embedder への切替で chunks/folder_embeddings をリセット）
-│   ├── md/
-│   │   ├── MarkdownChunker.kt      # 見出しベースのチャンク分割
-│   │   ├── MarkdownMetaExtractor.kt # 見出し・本文・タグ抽出
-│   │   └── MdFileReader.kt         # SAF 経由の md 列挙・読み込み
-│   └── repo/                    # リポジトリ層
-└── ui/
-    ├── nav/AppNav.kt
-    ├── screens/                 # Onboarding / Home / Chat / Settings
-    ├── vm/                      # ViewModel 群
-    └── theme/                   # Material 3 テーマ
-```
-
-## 検索アーキテクチャ
-
-**Recall 最大化** を目的とした **Search First → Coverage Check → Agent** を採用。候補収集を並行多手法で行い、LLM は選別（Rerank）・回答可能性評価（Coverage Check）・回答生成に専念させる。
+### 検索の流れ
 
 ```
 質問
-↓ QueryClassifier
-  GENERAL_KNOWLEDGE → RAG スキップ → LLM 直接回答
-  TEMPORAL_SUMMARIZATION / MEMORY_SEARCH → 以下へ
-
-↓ SearchPipeline（Search First）
-  1. QueryExpander（LLM）: クエリを 3〜8 件に展開
-  1.5 HyDE（LLM）: 仮想回答を 1〜2 文生成（タイムアウト 6 秒、失敗時はスキップ）
-  2. Parallel Retrieval:
-     ├─ 展開クエリ × BM25（FTS4）
-     ├─ 展開クエリ × Metadata Search（fileName / path / tags / documentDate）
-     │                              + fileName 逆引き（fileName が query の substring）→ Citation.topicMatch=true
-     │                              snippet 先頭に `[日付: YYYY-MM-DD]` を埋め込む
-     │                              topicMatch ヒットは snippet を先頭 chunk から 500 字採る（本文の日付ラベル行を回答 LLM に届けるため）
-     └─ Multi-Vector（元クエリ + 展開クエリ + HyDE 仮想回答）
-                                    コサイン類似度 < 0.45 は閾値カット
-  3. Candidate Merge: 重み付き RRF（k=60、META=1.5 / BM25=1.2 / VECTOR=1.0）で重複排除 → 上位 50 件
-  4. LlmReranker（LLM）: 上位 10 件に絞り込み
-     ※ path / heading / date / topic / source / snippet の構造化形式で投入
-     ※ 日付クエリは date フィールドを持つ候補と topic=match の候補を両方優先（topicMatch は date 欄が空でも除外しない）
-  4.5 dateRange pin: 期間クエリで dateRangeSearch ヒットがあれば上位 5 件を結果の先頭に強制マージ
-
-↓ CoverageCheck（LLM）
-  ※ 日付クエリ かつ snippet 先頭が `[日付:` で始まる候補があれば LLM を呼ばずに即 canAnswer=true で短絡
-  ※ 日付クエリ かつ topicMatch=true の候補（固有名詞ヒット）が top5 にあれば同じく短絡 yes
-  canAnswer=true  → 回答生成へ
-  canAnswer=false → ExplorerStrategy を決定して ReAct ループへ
-    EXPAND_TIME  : visit/date/time が不足 → read_file で全文を読んで日付メタを確認（timeline_search は最終手段）
-    EXPAND_TOPIC : その他の情報が不足    → read_file/grep を hint に追加
-
-↓ 空 OR CoverageCheck 失敗の場合 → ReAct ループ（Fallback）
-  Planner LLM がツールを選択（DSL key:value 形式）:
-  ├─ glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search
-  → パース失敗 2 回連続 → RRF 即時フォールバック
-
-↓ CitationIntegrator
-  優先度: READ_FILE > GREP > METADATA > BM25 > VECTOR > RRF > GLOB > FOLDER
-  重複除去（docId + headingPath キー）・トークン budget（chars/3 推定、上限 1200 tokens）
-  citations 空 → RRF 強制フォールバック（セーフティネット）
-↓ LLM 回答生成（ストリーミング）
-  ※ 期間クエリ または「いつ/何月/年前/去年/先月/先週」系の date クエリでは、context block 直後に日付の拾い方を指示:
-    (1) `[日付: YYYY-MM-DD]` プレフィックス → (2) 本文中の「初回訪問日:」「訪問日:」「日付:」ラベル行 → (3) 本文中の YYYY/MM/DD・YYYY-MM-DD・YYYY年MM月DD日 表記
+↓ QueryClassifier — 一般知識の質問は検索せず LLM が直接回答
+↓ SearchPipeline
+   クエリ展開 + HyDE（LLM）
+   → BM25 / メタデータ / ベクトルを並行検索
+   → 重み付き RRF（meta 1.5 / BM25 1.2 / vector 1.0）、1 ファイル 1 件にまとめる
+   → LlmReranker（上位 20 件 → 10 件）
+   → 期間クエリ・一覧の質問・フォルダ指定ではその文書を先頭に固定
+↓ CoverageChecker — 答えられるか判定。足りなければ ReAct で再探索
+↓ 回答生成（上位 3 文書は全文を渡す。ストリーミング）
 ```
 
-ノートの命名: 日付付きファイル名（`2024-12-15.md` / `2024-12.md` / `2024年12月.md` 等）はインデックス時に自動で時系列メタ（`documentDate`）として取り込まれ、「去年の冬」「先月」のような期間クエリで `[日付:]` プレフィックス付きの引用として優先表示される。月のみの命名は月初 1 日として扱う。
-
-固有名詞質問（例: 「スパイス堂にいつ行ったっけ？」）は **ファイル名一致経路**で対象ファイルが必ず引用に残り、回答 LLM が本文中の「初回訪問日: 2024/11/03」のようなラベル行や YYYY/MM/DD 表記を直接読んで日付を答える。ユーザーは `documentDate` が抽出できる形式（ファイル名 / YAML frontmatter / 見出し）に揃えなくても、本文に日付を書いていれば「いつ」系クエリに回答できる。
-
-### Recentness Ranking
-
-RRF スコアに指数減衰の freshnessBoost を加算。ファイルパスから YYYY-MM-DD / YYYYMMDD / YYYY/MM/DD 形式で日付を抽出し DB に保存。
+入口は [AgentPipeline.kt](app/src/main/kotlin/com/minibrain/ai/agent/AgentPipeline.kt) です。
 
 ```
-finalScore = rrfScore + FRESHNESS_BOOST_MAX × exp(−daysSince / FRESHNESS_DECAY_DAYS)
-// FRESHNESS_BOOST_MAX = 0.010, FRESHNESS_DECAY_DAYS = 90
-// 30日: +0.0072, 1年: +0.0017, 3年: +0.0001
+app/src/main/kotlin/com/minibrain/
+├── ai/search/   # 検索パイプライン（展開・HyDE・Reranker）
+├── ai/agent/    # AgentPipeline・CoverageCheck・ReAct・日付解釈・回答プロンプト
+├── ai/rag/      # RRF・コサイン類似度・リクエスト内キャッシュ
+├── ai/llm/      # LiteRT-LM ラッパー・モデルのダウンロードと切り替え
+├── ai/embed/    # ONNX Runtime + E5 tokenizer
+├── data/        # Room・Markdown の読み込みとチャンク分割・リポジトリ
+├── eval/        # 検索精度の評価
+├── di/          # 手動 DI（AppContainer）
+└── ui/          # Compose 画面・ViewModel・テーマ
 ```
 
-### 評価フレーム
+### 検索精度の評価
 
-`app/src/main/kotlin/com/minibrain/eval/` に Precision@K / Recall@K / MRR / 候補 Recall を計測する評価フレームを同梱。チューニング（VECTOR_MIN_SCORE、RRF 重み、チャンクの作り方など）の前後で同じ評価セットを流し、数字で比べる。
+架空のノートと評価クエリを [eval/](eval/README.md) に同梱しています。設定 → 開発者 →「検索精度の評価」で評価セットの JSON を選ぶと Recall / MRR などを出します。エミュレータで自動実行するなら `scripts/eval-emulator.sh`（`EVAL_ANSWER=true` で回答まで生成して事実の含有率も測る）。検索まわりを変えたら前後で流して比べてください。
 
-1. 「質問 → 正解ファイル（フォルダからの相対パス）」の JSON を作る（`assets/eval/queries.sample.json` が書式見本。評価用の架空ノート群から抜き出した 8 件。`note` は意図のメモでアプリは読まない。個人ノートのパスを含む評価セットはリポジトリに入れない）。
-   ```json
-   [{ "id": "when-02", "query": "スパイス堂に初めて行ったのはいつ？", "expected": ["food/店/【神保町】スパイス堂.md"] }]
-   ```
-2. 端末に置き、設定 → 開発者 →「検索精度の評価」で選んで実行する（1 件 10〜20 秒ほど）。
-3. 結果をコピーし、施策の前後で並べる。取りこぼしは「候補に無い」（検索で拾えていない）と「絞り込みで落ちた」（Reranker が落とした）に分けて出る。
+### リリース（メンテナ向け）
 
-測るのは `SearchPipeline`（展開〜Reranker）まで。LLM の出力は実行ごとに揺れるので、小さな差は 2 回流して確かめる。
+`v1.2.3` 形式のタグを push すると、GitHub Actions が署名済み APK を Release に添付します（`-` を含むタグは prerelease）。
 
-### Folder Embedding
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
 
-インデックス時にフォルダ直下のファイル名・見出しを連結して埋め込みを生成し `folder_embeddings` テーブルに保存。ベクトル検索でフォルダ単位の意味マッチを実現。
+初回だけ Actions の Secrets に `RELEASE_KEYSTORE_BASE64`（`base64 -i release.jks` の出力）・`RELEASE_KEYSTORE_PASSWORD`・`RELEASE_KEY_ALIAS`・`RELEASE_KEY_PASSWORD` を登録します。keystore は `keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 4096 -validity 36500 -alias mini-brain` で作れます。なくすと既存のインストールを上書きできなくなるので、リポジトリ外にバックアップしてください。
 
-## UIの案内
+## モデル
 
-初回は「AIを準備 → ノートのフォルダを選択 → 質問」の順に案内します。チャットには現在の参照フォルダを表示し、質問例は編集できるカードとして表示します。回答の引用元は操作ボタンの下にファイル単位で最大2件を表示し、展開すると全ファイルと引用箇所を確認できます。Homeではノート件数と更新日時を表示し、フォルダ変更は知識ベースカード内にまとめています。設定では回答用AIの選択と技術情報を分けています。
+| モデル | 用途 | サイズ | ライセンス |
+| --- | --- | --- | --- |
+| Gemma 4 E2B | 回答生成（既定） | 約 2.5 GB | Apache 2.0 |
+| Gemma 4 E4B | 回答生成（設定で選んだとき） | 約 3.7 GB | Apache 2.0 |
+| multilingual-e5-small (INT8 ONNX) | 埋め込み | 約 118 MB | MIT |
+| XLM-RoBERTa SentencePiece | トークナイズ | 約 17 MB | MIT |
 
-## 画面構成
-
-| 画面       | 役割                                                       |
-| ---------- | ---------------------------------------------------------- |
-| Onboarding | 初回モデルダウンロード（モデルごとの % / MB 表示）・失敗時の再試行 |
-| Home       | フォルダ選択・変更（変更時は確認あり、前のフォルダのインデックスは削除）・インデックス状態（残り時間の目安）・ファイル数 |
-| Chat       | Q&A（ストリーミング、回答はテキスト選択可）・セッション名の表示・検索ステータス・質問例・引用元ファイルのチップ（タップで元ファイルを開く）と引用箇所の展開・インデックス中の進捗バナー・失敗時の再試行 |
-| History    | 日付グループ付きのチャット一覧・タイトル検索・スワイプで削除（Snackbar から取り消し可） |
-| Settings   | フォルダ変更・再インデックス（進捗表示）・チャット履歴削除・検索ログ表示（既定は OFF）・検索精度の評価・LLM モデルの切り替え（E2B / E4B） |
-
-## モデル情報
-
-| モデル                                | 用途             | サイズ    | ライセンス |
-| ------------------------------------- | ---------------- | --------- | ---------- |
-| Gemma 4 E2B                           | テキスト生成     | 約 2.5 GB | Apache 2.0 |
-| Gemma 4 E4B（設定で選んだときだけ）       | テキスト生成     | 約 3.7 GB | Apache 2.0 |
-| multilingual-e5-small (INT8 ONNX)     | テキスト埋め込み | 約 118 MB | MIT        |
-| XLM-RoBERTa SentencePiece (tokenizer) | トークナイズ     | 約 17 MB  | MIT        |
-
-モデルは初回起動時に `context.filesDir/models/` にダウンロードされる（Xenova/multilingual-e5-small から取得）。アプリのアンインストール時に自動削除される。
+モデルはアプリの内部ストレージ（`filesDir/models/`）に保存され、アンインストールで消えます。
 
 ## プライバシー
 
-- 推論はすべてオンデバイス
-- ネットワーク通信はモデルのダウンロード（初回と、設定でモデルを切り替えたとき）のみ（Wi-Fi 推奨）
-- md の内容・質問・回答はデバイス外に送信しない
-- チャット履歴は Room DB（アプリ内部ストレージ）にのみ保存
+- 推論はすべて端末内
+- 通信はモデルのダウンロード（初回と、モデルを切り替えたとき）だけ
+- ノートの内容・質問・回答・チャット履歴は端末の外に送らない
