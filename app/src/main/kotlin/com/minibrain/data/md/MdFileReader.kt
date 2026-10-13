@@ -170,7 +170,8 @@ object MdFileReader {
         }
         val uri = tree.documentUri(entry.documentId)
         val content = try {
-            tree.readText(uri) ?: throw IOException("読み込み結果が空です")
+            // Windows で作ったノートの BOM が残ると、1 行目の `---` や `# 見出し` を読み落とす（ADR-067）
+            tree.readText(uri)?.removePrefix("\uFEFF") ?: throw IOException("読み込み結果が空です")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

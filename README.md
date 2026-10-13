@@ -18,7 +18,7 @@
 - **ReAct エージェント（Fallback）** — Search First + Coverage Check で証拠が揃わなかった場合のフォールバック。Explorer Strategy の hint を参照し、glob / list_dir / read_file / grep / vector_search / rrf_search / timeline_search を自由に組み合わせて多段探索。EXPAND_TIME は read_file での全文読解を優先
 - **Query Classifier** — 一般知識の質問は RAG をスキップして直接 LLM が回答。検索コストを削減
 - **Recentness Ranking** — ファイルパスから日付を抽出し、RRF スコアに指数減衰のフレッシュネス加点を適用（新しい情報を優先）
-- **Timeline Search** — 期間表現（去年の夏・2024年3月など）を DateRange に解釈し、期間指定でファイルを収集する `timeline_search` ツールを提供
+- **Timeline Search** — 期間表現（去年の夏・去年の3月・2024年3月など）を DateRange に解釈し、期間指定でファイルを収集する `timeline_search` ツールを提供
 - **Folder Embedding** — フォルダ単位の仮想埋め込みを生成。ベクトル検索でフォルダ全体の意味をキャプチャ
 - **日付形式不問** — YYYY/MM/DD・YYYYMMDD・YYYY-MM-DD など命名規則が混在していても DB 側で吸収して一致ファイルの docId を解決
 - **ハイブリッド検索** — BM25（FTS4）+ ベクトル検索（multilingual-e5-small INT8 / 384 次元）を RRF でマージ。FTS4 には順位付けが無いため、`matchinfo` から BM25 スコアを計算して並べる

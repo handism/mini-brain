@@ -314,6 +314,61 @@ class DateResolverTest {
         assertTrue(DateResolver.isDiaryQuery("2024.05.01のメモ"))
     }
 
+    // ─────────────── 去年 / 一昨年 + 月（ADR-067） ───────────────
+
+    @Test
+    fun `一昨年 resolves to two years ago, not last year`() {
+        val range = DateResolver.resolveDateRange("一昨年何してた？", today)
+        assertEquals(DateRange(LocalDate.of(2023, 1, 1), LocalDate.of(2023, 12, 31)), range)
+    }
+
+    @Test
+    fun `去年 still resolves to last year`() {
+        val range = DateResolver.resolveDateRange("去年の話", today)
+        assertEquals(DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31)), range)
+    }
+
+    @Test
+    fun `去年の3月 resolves to that month only`() {
+        val range = DateResolver.resolveDateRange("去年の3月何してた？", today)
+        assertEquals(DateRange(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 3, 31)), range)
+    }
+
+    @Test
+    fun `一昨年の3月 resolves to that month two years ago`() {
+        val range = DateResolver.resolveDateRange("一昨年の3月", today)
+        assertEquals(DateRange(LocalDate.of(2023, 3, 1), LocalDate.of(2023, 3, 31)), range)
+    }
+
+    @Test
+    fun `今年の6月 ends at today`() {
+        val range = DateResolver.resolveDateRange("今年の6月", today)
+        assertEquals(DateRange(LocalDate.of(2025, 6, 1), today), range)
+    }
+
+    @Test
+    fun `昨年の3月5日 resolves to a single day`() {
+        val range = DateResolver.resolveDateRange("昨年の3月5日に行った店", today)
+        assertEquals(DateRange(LocalDate.of(2024, 3, 5), LocalDate.of(2024, 3, 5)), range)
+    }
+
+    @Test
+    fun `一昨年 month-day date string uses two years ago`() {
+        assertEquals(listOf("2023-03-05"), DateResolver.resolveToDateStrings("一昨年の3月5日", today))
+    }
+
+    @Test
+    fun `一昨年の正月 uses two years ago`() {
+        val result = DateResolver.resolveToDateStrings("一昨年の正月", today)
+        assertEquals("2023-01-01", result.first())
+    }
+
+    @Test
+    fun `一昨年 quarter without の uses two years ago`() {
+        val range = DateResolver.resolveDateRange("一昨年 Q1", today)
+        assertEquals(DateRange(LocalDate.of(2023, 1, 1), LocalDate.of(2023, 3, 31)), range)
+    }
+
     // ─────────────── isDateQuery ───────────────
 
     @Test

@@ -23,6 +23,8 @@ object DateResolver {
     private val N_YEARS_AGO_SEASON_RE = Regex("""(\d+)\s*年[前まえ](?:の)?(春|夏|秋|冬)""")
     private val RELATIVE_SEASON_RE = Regex("""(去年|昨年|一昨年|今年)(?:の)?(春|夏|秋|冬)""")
     private val YEAR_SEASON_RE = Regex("""(\d{4})年(?:の)?(春|夏|秋|冬)""")
+    // 「去年の3月」「一昨年の3月5日」。年の数字が無いので YEAR_MONTH_RE では拾えない（ADR-067）
+    private val RELATIVE_YEAR_MONTH_RE = Regex("""(一昨年|去年|昨年|今年)(?:の)?(\d{1,2})月(?:(\d{1,2})日)?""")
 
     // 年まで入った特定の日付。1 日だけの期間として扱い、日付ヒットを先頭に固定させる（ADR-042）
     private val FULL_DATE_RES = listOf(
@@ -142,7 +144,7 @@ object DateResolver {
     }
 
     private fun resolveRelativeKeywords(question: String, today: LocalDate): List<String>? {
-        val isPastYear = question.contains("去年") || question.contains("昨年")
+        val yearOffset = relativeYearOffset(question)
         return when {
             question.contains("一昨日") || question.contains("おととい") ->
                 listOf(today.minusDays(2).format(FORMATTER))
@@ -168,12 +170,16 @@ object DateResolver {
                 List(days) { start.plusDays(it.toLong()).format(FORMATTER) }
             }
             question.contains("正月") || question.contains("お正月") || question.contains("年始") -> {
-                val year = if (isPastYear) today.year - 1 else today.year
+                val year = today.year - (yearOffset ?: 0)
                 List(7) { LocalDate.of(year, 1, it + 1).format(FORMATTER) }
             }
             question.contains("年末") -> {
                 // 上半期に「年末」と言ったら去年の年末を指す可能性が高い
-                val year = if (isPastYear || today.monthValue <= 6) today.year - 1 else today.year
+                val year = when {
+                    yearOffset != null -> today.year - yearOffset
+                    today.monthValue <= 6 -> today.year - 1
+                    else -> today.year
+                }
                 List(7) { LocalDate.of(year, 12, 25 + it).format(FORMATTER) }
             }
             question.contains("最近") ->
@@ -216,6 +222,7 @@ object DateResolver {
             ?: resolveQuarterRange(question, today)
             ?: resolveNYearsAgoRange(question, today)
             ?: resolveYearMonthRange(question, today)
+            ?: resolveRelativeYearMonthRange(question, today)
             ?: resolveRelativeSeasonRange(question, today)
             ?: resolveYearSeasonRange(question, today)
             ?: resolveRelativeDateRange(question, today)
@@ -270,8 +277,7 @@ object DateResolver {
 
         QUARTER_RE.find(question)?.let { match ->
             val q = match.groupValues[1].ifEmpty { match.groupValues[2] }.toIntOrNull() ?: return@let
-            val isPastYear = question.contains("去年") || question.contains("昨年")
-            val year = if (isPastYear) today.year - 1 else today.year
+            val year = today.year - (relativeYearOffset(question) ?: 0)
             return quarterRange(q, year, today)
         }
 
@@ -312,6 +318,22 @@ object DateResolver {
         return null
     }
 
+    private fun resolveRelativeYearMonthRange(question: String, today: LocalDate): DateRange? {
+        val match = RELATIVE_YEAR_MONTH_RE.find(question) ?: return null
+        val year = today.year - (relativeYearOffset(match.groupValues[1]) ?: return null)
+        val month = match.groupValues[2].toInt()
+        val day = match.groupValues[3].toIntOrNull()
+        return runCatching {
+            if (day != null) {
+                LocalDate.of(year, month, day).let { DateRange(it, it) }
+            } else {
+                val start = LocalDate.of(year, month, 1)
+                DateRange(start, minOf(start.withDayOfMonth(start.lengthOfMonth()), today))
+            }
+        }.onFailure { Timber.tag(TAG).w(it, "Invalid relative year+month: $year/$month/$day") }
+         .getOrNull()
+    }
+
     private fun resolveRelativeSeasonRange(question: String, today: LocalDate): DateRange? {
         RELATIVE_SEASON_RE.find(question)?.let { match ->
             val yearRef = match.groupValues[1]
@@ -333,18 +355,13 @@ object DateResolver {
     }
 
     private fun resolveRelativeDateRange(question: String, today: LocalDate): DateRange? {
-        if (question.contains("去年") || question.contains("昨年")) {
-            val year = today.year - 1
-            return DateRange(LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31))
-        }
-
-        if (question.contains("一昨年")) {
-            val year = today.year - 2
-            return DateRange(LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31))
-        }
-
-        if (question.contains("今年")) {
-            return DateRange(LocalDate.of(today.year, 1, 1), today)
+        when (val offset = relativeYearOffset(question)) {
+            null -> Unit
+            0 -> return DateRange(LocalDate.of(today.year, 1, 1), today)
+            else -> {
+                val year = today.year - offset
+                return DateRange(LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31))
+            }
         }
 
         if (question.contains("先月")) {
@@ -407,11 +424,17 @@ object DateResolver {
     }.onFailure { Timber.tag(TAG).w(it, "Invalid season: $season $year") }
      .getOrNull()
 
-    private fun resolveYear(question: String, today: LocalDate, month: Int): Int = when {
-        question.contains("去年") || question.contains("昨年") -> today.year - 1
-        question.contains("今年") -> today.year
+    private fun resolveYear(question: String, today: LocalDate, month: Int): Int {
+        relativeYearOffset(question)?.let { return today.year - it }
         // 年の指定なし：未来の月なら去年、過去の月なら今年
-        month > today.monthValue -> today.year - 1
-        else -> today.year
+        return if (month > today.monthValue) today.year - 1 else today.year
+    }
+
+    // 「一昨年」は「昨年」を含むので先に見る（後に見ると去年と読み違える、ADR-067）
+    private fun relativeYearOffset(question: String): Int? = when {
+        question.contains("一昨年") -> 2
+        question.contains("去年") || question.contains("昨年") -> 1
+        question.contains("今年") -> 0
+        else -> null
     }
 }

@@ -104,6 +104,17 @@ class MdFileReaderTest {
     }
 
     @Test
+    fun `listMdFiles strips leading BOM so frontmatter and headings are recognized`() = runTest {
+        tree.file("root", "bom.md", "\uFEFF---\ndate: 2024-05-01\n---\n# 京都旅行\n本文")
+
+        val content = MdFileReader.listMdFiles(tree).single().content
+
+        assertEquals("---\ndate: 2024-05-01\n---\n# 京都旅行\n本文", content)
+        assertEquals("date: 2024-05-01", Frontmatter.split(content).first)
+        assertEquals(listOf("京都旅行"), MarkdownMetaExtractor.extractHeadings(content))
+    }
+
+    @Test
     fun `listMdFiles reaches notes nested several levels deep`() = runTest {
         val tech = tree.dir("root", "tech")
         val android = tree.dir(tech, "Android")
