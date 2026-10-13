@@ -388,6 +388,20 @@ class DateResolverTest {
         assertNull(DateResolver.resolveDateRange("今年のQ4", today))
     }
 
+    // 期間にならなかった未来の日付を、月日だけから別の年の日付として解決しない（ADR-069）
+    @Test
+    fun `future dates with explicit year resolve to no date strings`() {
+        assertTrue(DateResolver.resolveToDateStrings("2026年3月5日に何した？", today).isEmpty())
+        assertTrue(DateResolver.resolveToDateStrings("2025年12月の予定", today).isEmpty())
+        assertTrue(DateResolver.resolveToDateStrings("今年の冬", today).isEmpty())
+    }
+
+    @Test
+    fun `past month day without year still resolves`() {
+        assertEquals(listOf("2025-03-05"), DateResolver.resolveToDateStrings("3月5日に何した？", today))
+        assertEquals(listOf("2024-12-25"), DateResolver.resolveToDateStrings("12月25日", today))
+    }
+
     @Test
     fun `period that already started still ends at today`() {
         assertEquals(

@@ -90,6 +90,9 @@ object DateResolver {
 
     // today パラメータを公開することでユニットテストで固定日付を注入できる
     fun resolveToDateStrings(question: String, today: LocalDate = LocalDate.now()): List<String> {
+        // まだ始まっていない期間（「2027年3月5日」「2026年12月」）は resolveDateRange が null を返す。
+        // 下の各段は書かれた年を見ずに月日だけで年を推定するので、ここで止めないと別の年の日付になる（ADR-069）
+        if (resolveDateRangeUnchecked(question, today)?.start?.isAfter(today) == true) return emptyList()
         return resolveDaysAgo(question, today)
             ?: resolveDotSlashDate(question)
             ?: resolveLastWeekDow(question, today)

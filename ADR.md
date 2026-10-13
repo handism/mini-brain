@@ -2205,3 +2205,11 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 - `QueryExpander` のプロンプトの例が「5年前 → 2021年」と年を固定しており、年が変わると小さい LLM がその年をそのまま真似る恐れがあった。例の年は今日から計算する。
 - 差分インデックスのスキップ条件に `existingChunkCount > 0` があり、チャンクが 0 件の空のノートは毎回削除・再挿入されていた。保存済みと `MarkdownChunker.chunk` の件数が一致すれば 0 件同士でも飛ばす（埋め込みが欠けた文書の再試行、ADR-061 はそのまま）。
 - 検索の順位に効く変更ではないため、エミュレータ評価は流していない。
+
+## ADR-069: 期間にならなかった未来の日付を、別の年の日付として検索しない
+
+- ステータス: 採用
+- 日付: 2026-10-13
+
+- ADR-068 で、まだ始まっていない期間は `resolveDateRange` が null を返すようにした。ところが `dateRange == null` のときは `SearchPipeline.dateRangeSearch` の特定日付の分岐と `PlannerHintBuilder.buildDateHints` が `resolveToDateStrings` を呼ぶ。こちらは書かれた年を見ずに月日だけで年を推定するため、「2027年3月5日」は 2026-03-05、「2026年12月」は 2025 年 12 月の全日として検索・hint に入っていた。
+- `resolveToDateStrings` の冒頭で、`resolveDateRange` と同じ解決の結果が未来の期間なら空を返す。年の無い「3月5日」などは従来どおり。
