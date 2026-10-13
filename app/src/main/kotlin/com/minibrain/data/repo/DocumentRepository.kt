@@ -163,9 +163,10 @@ class DocumentRepository(
                     existingChunkCount = chunkCountsMap[existing.id] ?: 0
                 }
 
+                // チャンク数の一致で、埋め込みが欠けた文書だけを再試行する（ADR-061）。
+                // 0 件同士（空のノート）も一致として飛ばす。> 0 を条件にすると空のノートを毎回入れ直していた（ADR-068）
                 if (existing != null && existing.contentHash == mdFile.contentHash &&
-                    existingChunkCount > 0 && existingChunkCount ==
-                    MarkdownChunker.chunk(mdFile.content, mdFile.relativePath).size
+                    existingChunkCount == MarkdownChunker.chunk(mdFile.content, mdFile.relativePath).size
                 ) {
                     createUpdatedDocumentEntity(existing, mdFile)?.let { docsToUpdate.add(it) }
                     totalChunks += existingChunkCount

@@ -173,4 +173,25 @@ class AgentPipelineTest {
         val toolCallEvents = result.traceEvents.filterIsInstance<ToolCallEvent>()
         assertTrue(toolCallEvents.isNotEmpty())
     }
+    @Test
+    fun toolFailureDoesNotAbortRun() = runTest {
+        coEvery {
+            searchPipeline.search(any(), any(), any(), any(), any())
+        } returns SearchPipelineResult(emptyList(), emptyList())
+        every { llmService.isReady() } returns true
+        coEvery { embedderService.embed(any(), any()) } throws IllegalStateException("embedder not ready")
+
+        var callCount = 0
+        coEvery { llmService.generateStream(any()) } answers {
+            callCount++
+            if (callCount == 1) flowOf("TOOL: vector_search\nQUERY: カレー") else flowOf("ACTION: finalize\nREASON: done")
+        }
+
+        val result = pipeline.run("カレーの記録", "content://test")
+
+        val observation = result.traceEvents.filterIsInstance<ObservationEvent>().first { it.step == 1 }
+        assertTrue(observation.summary, observation.summary.startsWith("error:"))
+        // ツールが失敗しても最終フォールバックまで進む
+        coVerify(exactly = 1) { ragPipeline.retrieveTopChunks(any(), any(), any(), any()) }
+    }
 }

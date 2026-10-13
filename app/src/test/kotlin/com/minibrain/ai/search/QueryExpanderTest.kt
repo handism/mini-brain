@@ -144,4 +144,10 @@ class QueryExpanderTest {
         val raw = "]\"apple\", \"banana\"["
         assertTrue(QueryExpander.parseJsonArray(raw).isEmpty())
     }
+    @Test
+    fun `prompt example year follows today`() {
+        val prompt = expander.buildPrompt("質問", java.time.LocalDate.of(2030, 1, 1))
+        assertTrue(prompt.contains("\"2025年3月\",\"2025-03\""))
+        assertTrue(!prompt.contains("2021"))
+    }
 }

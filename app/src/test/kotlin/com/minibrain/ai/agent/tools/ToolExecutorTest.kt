@@ -258,4 +258,43 @@ class ToolExecutorTest {
 
         assertEquals(listOf("diary/a.md"), result.citations.map { it.relativePath })
     }
+    @Test
+    fun executeGrep_withScope_searchesMoreCandidatesBeforeFiltering() = runTest {
+        coEvery { chunkDao.bm25SearchByTree(any(), treeUri, any()) } returns emptyList()
+        coEvery { cache.documents() } returns emptyList()
+
+        toolExecutor.execute(ToolCall(1, AgentTool.Grep(query = "カレー", scope = "diary")))
+        toolExecutor.execute(ToolCall(2, AgentTool.Grep(query = "カレー", scope = null)))
+
+        io.mockk.coVerify(exactly = 1) { chunkDao.bm25SearchByTree(any(), treeUri, 500) }
+        io.mockk.coVerify(exactly = 1) { chunkDao.bm25SearchByTree(any(), treeUri, 50) }
+    }
+
+    @Test
+    fun executeListDir_rootListsTopLevel() = runTest {
+        val docs = listOf(
+            DocumentEntity(id = 1L, treeUri = treeUri, fileUri = "u1", fileName = "top.md",
+                relativePath = "top.md", lastModified = 0L, contentHash = "h"),
+            DocumentEntity(id = 2L, treeUri = treeUri, fileUri = "u2", fileName = "a.md",
+                relativePath = "diary/a.md", lastModified = 0L, contentHash = "h"),
+        )
+        coEvery { cache.documents() } returns docs
+
+        for (root in listOf("/", ".", "./", "")) {
+            val result = toolExecutor.execute(ToolCall(1, AgentTool.ListDir(root)))
+            assertTrue(result.summary, result.summary.contains("folders: [diary]"))
+            assertTrue(result.summary, result.summary.contains("top.md"))
+        }
+    }
+
+    @Test
+    fun executeListDir_folderWithSlashes() = runTest {
+        val doc = DocumentEntity(id = 2L, treeUri = treeUri, fileUri = "u2", fileName = "a.md",
+            relativePath = "diary/a.md", lastModified = 0L, contentHash = "h")
+        coEvery { cache.documents() } returns listOf(doc)
+
+        val result = toolExecutor.execute(ToolCall(1, AgentTool.ListDir("/diary/")))
+
+        assertTrue(result.summary, result.summary.contains("a.md"))
+    }
 }

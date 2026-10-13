@@ -27,6 +27,9 @@ import timber.log.Timber
 private const val TAG = "ToolExecutor"
 private const val MAX_GLOB_RESULTS = 30
 private const val MAX_GREP_RESULTS = 20
+// grep の BM25 候補数。scope 付きは絞り込みの後で足りるよう多めに取る（SQLite のバインド変数上限 999 未満、ADR-068）
+private const val GREP_CANDIDATES = 50
+private const val GREP_SCOPED_CANDIDATES = 500
 private const val GREP_SNIPPET_CHARS = 200
 private const val READ_FILE_MAX_CHARS = 8000
 private const val READ_SECTION_MAX_CHARS = 1000
@@ -84,15 +87,17 @@ class ToolExecutor(
 
     private suspend fun executeListDir(call: ToolCall, tool: AgentTool.ListDir): ToolResult {
         val docs = allDocs()
-        val prefix = tool.folder.trimEnd('/')
-        val inFolder = docs.filter { it.relativePath.startsWith("$prefix/") }
+        // Planner はルートを "/" や "." で指すことがある。空の prefix のまま "/" を付けると何にも一致しない
+        val folder = tool.folder.trim().trim('/').removePrefix("./").let { if (it == ".") "" else it }
+        val prefix = if (folder.isEmpty()) "" else "$folder/"
+        val inFolder = docs.filter { it.relativePath.startsWith(prefix) }
         val subFolders = inFolder.mapNotNull { doc ->
-            val rel = doc.relativePath.removePrefix("$prefix/")
+            val rel = doc.relativePath.removePrefix(prefix)
             val slash = rel.indexOf('/')
             if (slash >= 0) rel.substring(0, slash) else null
         }.toSortedSet()
         val directFiles = inFolder.filter { doc ->
-            val rel = doc.relativePath.removePrefix("$prefix/")
+            val rel = doc.relativePath.removePrefix(prefix)
             '/' !in rel
         }
         val sb = StringBuilder("DIR: ${tool.folder}\n")
@@ -187,7 +192,8 @@ class ToolExecutor(
 
         val rawChunks = withContext(Dispatchers.IO) {
             runCatchingCancellable {
-                chunkDao.bm25SearchByTree(matchQuery, treeUri, 50)
+                val limit = if (tool.scope != null) GREP_SCOPED_CANDIDATES else GREP_CANDIDATES
+                chunkDao.bm25SearchByTree(matchQuery, treeUri, limit)
             }.onFailure { Timber.tag(TAG).w(it, "bm25Search failed for query: $matchQuery") }
              .getOrElse { emptyList() }
         }

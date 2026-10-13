@@ -369,6 +369,33 @@ class DateResolverTest {
         assertEquals(DateRange(LocalDate.of(2023, 1, 1), LocalDate.of(2023, 3, 31)), range)
     }
 
+    // ─────────────── まだ始まっていない期間（ADR-068） ───────────────
+
+    @Test
+    fun `future month of this year is not a range`() {
+        assertNull(DateResolver.resolveDateRange("2025年12月の予定", today))
+        assertNull(DateResolver.resolveDateRange("今年の12月", today))
+    }
+
+    @Test
+    fun `future full date is not a range`() {
+        assertNull(DateResolver.resolveDateRange("2025年11月3日に何がある？", today))
+    }
+
+    @Test
+    fun `future season and quarter of this year are not ranges`() {
+        assertNull(DateResolver.resolveDateRange("今年の冬", today))
+        assertNull(DateResolver.resolveDateRange("今年のQ4", today))
+    }
+
+    @Test
+    fun `period that already started still ends at today`() {
+        assertEquals(
+            DateRange(LocalDate.of(2025, 6, 1), today),
+            DateResolver.resolveDateRange("今年の夏", today),
+        )
+    }
+
     // ─────────────── isDateQuery ───────────────
 
     @Test

@@ -216,11 +216,18 @@ class AgentPipeline(
             val toolCall = ToolCall(iteration, tool)
             params.traceEvents += ToolCallEvent(iteration, tool.traceName, tool.traceArgs)
             params.onStatus?.invoke(tool.progressLabel)
-            val result = withContext(Dispatchers.IO) { executor.execute(toolCall) }
+            // 1 つのツールの失敗（埋め込みの例外など）で回答全体を止めない。失敗は観測として Planner に返す（ADR-068）
+            val outcome = runCatchingCancellable { withContext(Dispatchers.IO) { executor.execute(toolCall) } }
+            val error = outcome.exceptionOrNull()
+            val result = outcome.getOrElse { e ->
+                Timber.tag(TAG).w(e, "tool failed: $tool")
+                ToolResult(toolCall, "ERROR: ${tool.traceName} failed (${e.message ?: e.javaClass.simpleName})", emptyList())
+            }
             toolResults += result
             params.traceEvents += ObservationEvent(
                 iteration,
-                tool.observationKind(result.citations.size, result.summary.length),
+                if (error != null) "error: ${error.message ?: error.javaClass.simpleName}"
+                else tool.observationKind(result.citations.size, result.summary.length),
             )
             addObservation(observations, toolCall, result.summary)
             Timber.tag(TAG).d("tool=${tool} citations=${result.citations.size}")

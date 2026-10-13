@@ -5,6 +5,7 @@ import com.minibrain.ai.llm.generateJsonArray
 import com.minibrain.util.JsonArrayText
 import com.minibrain.util.runCatchingCancellable
 import timber.log.Timber
+import java.time.LocalDate
 
 class QueryExpander(private val llmService: LlmService) {
 
@@ -59,7 +60,10 @@ class QueryExpander(private val llmService: LlmService) {
         return result
     }
 
-    private fun buildPrompt(query: String): String = """
+    // 「5年前」の例の年は今日から計算する。固定の年だと、年が変わったあと LLM がその年をそのまま真似る（ADR-068）
+    internal fun buildPrompt(query: String, today: LocalDate = LocalDate.now()): String {
+        val fiveYearsAgo = today.year - 5
+        return """
         ユーザーの検索クエリに対して、より多くの関連文書を見つけるための検索語群を生成してください。
         元のクエリを必ず含め、3〜8個の検索語をJSON配列で出力してください。
         重複は不可。説明やコメントは不要で、JSON配列のみ出力してください。
@@ -84,10 +88,11 @@ class QueryExpander(private val llmService: LlmService) {
 
         例:
         入力: 5年前の3月何してた？
-        出力: ["5年前の3月何してた？","2021年3月","2021-03","日記","journal","振り返り","5年前"]
+        出力: ["5年前の3月何してた？","${fiveYearsAgo}年3月","${fiveYearsAgo}-03","日記","journal","振り返り","5年前"]
 
         入力: $query
         出力:
-    """.trimIndent()
+        """.trimIndent()
+    }
 }
 

@@ -739,4 +739,30 @@ class DocumentRepositoryTest {
         io.mockk.coVerify(exactly = 2) { embedder.embedAll(any(), any()) }
     }
 
+    @org.junit.Test
+    fun `unchanged empty document is skipped`() = kotlinx.coroutines.test.runTest {
+        val uri = android.net.Uri.parse("content://notes/tree/root")
+        val file = com.minibrain.data.md.MdFile(
+            android.net.Uri.parse("content://notes/document/empty"), "empty.md", "empty.md", 0L,
+            "empty-hash", "",
+        )
+        val existing = com.minibrain.data.db.entities.DocumentEntity(
+            id = 1L, treeUri = uri.toString(), fileUri = file.uri.toString(), fileName = file.name,
+            relativePath = file.relativePath, lastModified = 0L, contentHash = "empty-hash",
+            headings = "[]", firstParagraph = "", tags = "[]", documentDate = "2024-01-01",
+        )
+        io.mockk.mockkObject(com.minibrain.data.md.MdFileReader)
+        io.mockk.coEvery {
+            com.minibrain.data.md.MdFileReader.listMdFiles(any<Context>(), any<android.net.Uri>(), any(), any())
+        } returns listOf(file)
+        io.mockk.coEvery { documentDao.getAllByTree(any()) } returns listOf(existing)
+        io.mockk.coEvery { chunkDao.getChunkCountsGroupedByDoc() } returns emptyList()
+        io.mockk.every { writableDb.compileStatement(any()) } returns io.mockk.mockk(relaxed = true)
+
+        repository.indexFolder(uri)
+
+        org.junit.Assert.assertEquals(IndexingState.Done(1, 0), repository.indexingState.value)
+        io.mockk.coVerify(exactly = 0) { documentDao.insertAll(any()) }
+        io.mockk.coVerify(exactly = 0) { chunkDao.deleteByDocIds(any()) }
+    }
 }

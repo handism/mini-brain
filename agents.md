@@ -84,7 +84,7 @@
 
 ### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
 - **ファイル名逆引き**: `SearchPipeline.metadataSearch` では、ファイルの拡張子を除いた名前に部分一致するクエリを検出して優先抽出します（形態素解析に依存しない日本語ファイル検出のため）。判定は `FileNames.stemMatchesAnyQuery` に集約されており、`PlannerHintBuilder.build` のファイル名候補抽出も同じ規則を使います。しきい値 `MIN_STEM_MATCH_CHARS = 1` は `歯.md` / `AI.md` のような 1 文字 stem を拾うための値です（ADR-026 の記載は 3 でしたが後日 1 に引き下げ）。
-- **期間クエリ**: `dateRange != null` のときは、該当期間に属する文書（`documentDate` で判定）を優先検索し、上位5件を再ランカー結果の先頭に強制ピン留めします。`DateResolver.resolveDateRange` は年まで入った特定の日付（`YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日` / 8 桁 `YYYYMMDD`）を最初に見て、1 日だけの期間として返します（月全体に広げない）。「YYYY年の夏」のような年 + 季節も期間にします（ADR-042）。「去年の3月」「一昨年の3月5日」のような相対年 + 月（日）は、年全体ではなくその月（日）にします。「一昨年」は「昨年」を含むので、相対年は `relativeYearOffset` で「一昨年」を先に見て判定します（ADR-067）。
+- **期間クエリ**: `dateRange != null` のときは、該当期間に属する文書（`documentDate` で判定）を優先検索し、上位5件を再ランカー結果の先頭に強制ピン留めします。`DateResolver.resolveDateRange` は年まで入った特定の日付（`YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY年M月D日` / 8 桁 `YYYYMMDD`）を最初に見て、1 日だけの期間として返します（月全体に広げない）。「YYYY年の夏」のような年 + 季節も期間にします（ADR-042）。「去年の3月」「一昨年の3月5日」のような相対年 + 月（日）は、年全体ではなくその月（日）にします。「一昨年」は「昨年」を含むので、相対年は `relativeYearOffset` で「一昨年」を先に見て判定します（ADR-067）。まだ始まっていない期間（開始が今日より後）は期間にせず null を返します。未来の日付の文書は無く、逆向きの期間は検索を 0 件にしてフォルダ固定も止めるためです（ADR-068）。
 - **回答プロンプトの日付**: `AnswerPromptBuilder.buildAnswerPrompt` は質問の前に今日の日付（`AnswerContext.today`）を入れ、`dateRange` があれば質問文のすぐ後ろに「（この質問の期間: …）」を足します。無いと LLM が「去年」を学習時点の年で読み替えます（ADR-050）。
 - **日付抽出**: `DocumentRepository.extractDateFromPath` は、ファイル名から日付（完全日付 `YYYY-MM-DD` または月のみ `YYYY-MM`）を正しくパースできるようにしてください。月のみの場合は月初の日付（`-01`）として処理します。
 - **日付の LLM 参照優先度**: 日付に関連するクエリの場合、LLM に対して以下の優先順位で日付情報を解決するように回答プロンプト（`AnswerPromptBuilder.buildAnswerPrompt`）内で明確に指示を差し込みます。
@@ -94,7 +94,7 @@
 
 ### 5.3 ReAct DSL
 - ReAct の observation は「最新 2 件を full、それ以前を compact」で Planner に渡します（`addObservation`）。新しい observation は常に full で追加してください（ADR-031）。
-- ReAct ツールは現在の `treeUri` の外を読まないこと。`read_file` の docId 指定も `treeUri` 一致を確認します。`grep` / `vector_search` の scope はフォルダ単位で判定します（`diary` は `diary2/` に一致しない、ADR-031）。
+- ReAct ツールは現在の `treeUri` の外を読まないこと。`read_file` の docId 指定も `treeUri` 一致を確認します。`grep` / `vector_search` の scope はフォルダ単位で判定します（`diary` は `diary2/` に一致しない、ADR-031）。scope 付きの `grep` は BM25 を 500 件取ってから絞ります。`list_dir` は `/` や `.` をルートとして扱います。ツールの例外は `handleToolCall` で `ERROR: …` の観測にして、回答全体を止めません（ADR-068）。
 - ReAct ループで Planner LLM が出力するツール命令は、JVM 上でのユニットテスト実行の互換性を担保するため、**JSON ではなく独自の DSL 形式（key:value）** を用います。
 - `PlannerHintBuilder.build` は 期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致 の順に解析して hint を構築します。
 
@@ -109,7 +109,7 @@
 - 再インデックス・フォルダ変更は `viewModelScope` ではなく `AppContainer.applicationScope` で走らせます（画面を閉じても途中で止めないため、ADR-062）。
 - `indexFolder` / `clearFolder` は `DocumentRepository.indexMutex` で直列化されます（Home / Settings からの同時実行で挿入・削除が競合しないため）。`indexFolder` は失敗時に例外を投げず `IndexingState.Error` を出します（キャンセルのみ再送出）。
 - `indexFolder` はフォルダから消えたファイルの document / chunk / FTS を削除し、`folder_embeddings` は `FolderEmbeddingDao.replaceAllByTree` で tree 単位に入れ替えます（ADR-029）。`clearFolder` も `folder_embeddings` を消します。
-- 差分インデックスのスキップはハッシュ一致に加え、保存済みチャンク数と `MarkdownChunker.chunk` の件数一致が必要です。一部の埋め込み失敗・中断で欠けた文書も、本文変更なしで次回再試行します（ADR-061）。
+- 差分インデックスのスキップはハッシュ一致に加え、保存済みチャンク数と `MarkdownChunker.chunk` の件数一致が必要です。0 件同士（空のノート）も一致として飛ばします（ADR-068）。一部の埋め込み失敗・中断で欠けた文書も、本文変更なしで次回再試行します（ADR-061）。
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
 - チャンクの埋め込み入力は `Chunk.embeddingText()`（「パス > 見出し」+ 改行 + 本文）です。DB の `text` と FTS には付けません。作り方を変えたら既存ベクトルと混ざらないよう、DB を上げて `contentHash` を書き換えるマイグレーションを足してください（`MIGRATION_6_7`、ADR-038）。
 - `MarkdownChunker.chunk` は先頭の YAML フロントマターを `Frontmatter.split` で本文から外し、区切り線を除いた中身を文書の最後のチャンク（headingPath = ファイル名）にします。先頭に置くと先頭チャンクを使うスニペット（`firstChunkOf`）が空になるためです。tags などは検索の手がかりとして残します。800 字を超えるフロントマターは本文と同じく `splitLongSection` で切ります（ADR-066）。メタデータ抽出は元の全文から行います（ADR-065）。

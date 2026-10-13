@@ -216,7 +216,12 @@ object DateResolver {
         return emptyList()
     }
 
-    fun resolveDateRange(question: String, today: LocalDate = LocalDate.now()): DateRange? {
+    // 各段は終わりだけを今日で切るので、まだ始まっていない期間（今日が 10 月の「今年の冬」「2026年12月」）は
+    // 開始 > 終了になる。documentDate は未来の日付を持たないのでヒットせず、フォルダ固定も止まるため期間なしにする（ADR-068）
+    fun resolveDateRange(question: String, today: LocalDate = LocalDate.now()): DateRange? =
+        resolveDateRangeUnchecked(question, today)?.takeUnless { it.start.isAfter(today) }
+
+    private fun resolveDateRangeUnchecked(question: String, today: LocalDate): DateRange? {
         return resolveFullDateRange(question)
             ?: resolveEraRange(question, today)
             ?: resolveQuarterRange(question, today)
