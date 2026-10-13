@@ -50,7 +50,12 @@ object MarkdownChunker {
                 splitLongSection(headingPath, carried)
             }
         }
-        val meta = listOfNotNull(frontmatter?.let { Chunk(fileName, it) })
+        // 長いフロントマターも本文と同じ長さで切る（512 トークンを超えると埋め込みで後ろが落ちるため）
+        val meta = when {
+            frontmatter == null -> emptyList()
+            frontmatter.length <= MAX_CHUNK_CHARS -> listOf(Chunk(fileName, frontmatter))
+            else -> splitLongSection(fileName, frontmatter)
+        }
         return raw.filter { it.text.isNotBlank() } + meta
     }
 

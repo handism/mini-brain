@@ -16,6 +16,7 @@ import com.minibrain.dataStore
 import com.minibrain.di.AppContainer
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -208,6 +209,63 @@ class ChatViewModelTest {
 
         coVerify { chatRepo.addMessage(sessionId, MessageRole.USER, question) }
         coVerify { chatRepo.addMessage(sessionId, MessageRole.ASSISTANT, "It is a language.", any()) }
+    }
+
+    @Test
+    fun `履歴は質問を保存する前に取り、今の質問を履歴に入れない`() = runTest {
+        val app = mockk<MiniBrainApp>(relaxed = true)
+        val container = mockk<AppContainer>(relaxed = true)
+        every { app.container } returns container
+        val chatRepo = mockk<ChatRepository>(relaxed = true)
+        val agentPipeline = mockk<AgentPipeline>(relaxed = true)
+        every { container.chatRepository } returns chatRepo
+        every { container.agentPipeline } returns agentPipeline
+
+        val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
+        val testPrefs = mockk<Preferences>(relaxed = true)
+        every { testPrefs[booleanPreferencesKey("show_search_log")] } returns true
+        every { testPrefs[stringPreferencesKey("tree_uri")] } returns ""
+        every { testDataStore.data } returns flowOf(testPrefs)
+        coEvery { testDataStore.updateData(any()) } returns testPrefs
+        mockkStatic("com.minibrain.MiniBrainAppKt")
+        every { app.dataStore } returns testDataStore
+
+        val sessionId = 100L
+        coEvery { chatRepo.getOrCreateSession() } returns sessionId
+        every { chatRepo.observeMessages(sessionId) } returns flowOf(emptyList())
+        coEvery { chatRepo.getRecentHistory(sessionId) } returns emptyList()
+
+        val question = "What is Kotlin?"
+
+        // Setup agent pipeline mock
+        val answerFlow = flow {
+            emit("It ")
+            emit("is ")
+            emit("a language.")
+        }
+        val agentResult = AgentResult(
+            citations = emptyList(),
+            answerFlow = answerFlow,
+            traceEvents = emptyList()
+        )
+        coEvery {
+            agentPipeline.run(any(), any(), any(), any())
+        } returns agentResult
+
+        val viewModel = createViewModel(app)
+        advanceUntilIdle() // let init complete
+
+        // Verify isGenerating is false before sending message
+        assertFalse(viewModel.isGenerating.value)
+
+        viewModel.sendMessage(question)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerifyOrder {
+            chatRepo.getRecentHistory(sessionId)
+            chatRepo.addMessage(sessionId, MessageRole.USER, question, any())
+        }
     }
 
     @Test

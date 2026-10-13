@@ -1,6 +1,7 @@
 package com.minibrain.ai.agent
 
 import com.minibrain.ai.llm.LlmService
+import com.minibrain.ai.llm.generateBounded
 import com.minibrain.ai.rag.Citation
 import com.minibrain.util.DatePrefix
 import com.minibrain.util.runCatchingCancellable
@@ -17,6 +18,8 @@ class CoverageChecker(private val llmService: LlmService) {
         private const val TAG = "CoverageChecker"
         private const val SNIPPET_MAX_CHARS = 300
         private const val MAX_CANDIDATES = 5
+        // 出力は 1 行だけでよいので、yes / no の行が出たら打ち切る。出なくてもこの時間で止める（ADR-066）
+        private const val GENERATE_TIMEOUT_MS = 20_000L
 
         // 日付クエリで上位候補に日付プレフィックス付き snippet があるか（LLM 短絡判定）
         internal fun isDateShortCircuit(query: String, candidates: List<Citation>): Boolean =
@@ -37,10 +40,10 @@ class CoverageChecker(private val llmService: LlmService) {
                 val line = rawLine.trim()
                 if (line.isEmpty()) continue
 
-                if (line.startsWith("yes")) {
+                if (line.startsWithWord("yes")) {
                     return CoverageResult(canAnswer = true, missingInformation = emptyList())
                 }
-                if (line.startsWith("no")) {
+                if (line.startsWithWord("no")) {
                     val parts = line.substringAfter("no").trimStart(',', ' ')
                     val missing = if (parts.isBlank()) emptyList()
                     else parts.split(",").mapNotNull { it.trim().ifBlank { null } }
@@ -53,6 +56,20 @@ class CoverageChecker(private val llmService: LlmService) {
             Timber.tag(TAG).d("coverage parse unclear: $raw — defaulting canAnswer=true")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
+
+        /** 改行で閉じた行のどれかが yes / no で始まっていれば、それ以上の生成は要らない。 */
+        internal fun hasAnswerLine(text: CharSequence): Boolean {
+            val lastBreak = text.lastIndexOf('\n')
+            if (lastBreak < 0) return false
+            return text.substring(0, lastBreak).lowercase().lines().any {
+                val line = it.trim()
+                line.startsWithWord("yes") || line.startsWithWord("no")
+            }
+        }
+
+        // "note:" や "none" を no と読まないよう、語の直後が英字でないことも確かめる
+        private fun String.startsWithWord(word: String): Boolean =
+            startsWith(word) && getOrNull(word.length).let { it == null || it !in 'a'..'z' }
     }
 
     suspend fun check(query: String, candidates: List<Citation>): CoverageResult {
@@ -71,15 +88,14 @@ class CoverageChecker(private val llmService: LlmService) {
         if (!llmService.isReady()) return CoverageResult(canAnswer = true, missingInformation = emptyList())
 
         val prompt = buildPrompt(query, candidates.take(MAX_CANDIDATES))
-        val sb = StringBuilder()
-        runCatchingCancellable {
-            llmService.generateStream(prompt).collect { token -> sb.append(token) }
-        }.onFailure {
+        val raw = runCatchingCancellable {
+            llmService.generateBounded(prompt, GENERATE_TIMEOUT_MS, ::hasAnswerLine)
+        }.getOrElse {
             Timber.tag(TAG).w(it, "coverage check LLM failed")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }
 
-        return parse(sb.toString().trim().lowercase())
+        return parse(raw.trim().lowercase())
     }
 
     private fun buildPrompt(query: String, candidates: List<Citation>): String {

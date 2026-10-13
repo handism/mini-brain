@@ -46,36 +46,57 @@ class LlmModelSwitcher(
         // launch 前に立てて、ディスパッチ待ちの間に重ねて押されないようにする
         _state.value = ModelSwitchState.Downloading(target, null)
         scope.launch {
-            var error: String? = null
-            downloader.downloadLlm(target).collect { result ->
-                when (result) {
-                    is DownloadResult.Progress -> _state.value =
-                        ModelSwitchState.Downloading(target, result.progress.fraction.takeIf { result.progress.totalBytes > 0 })
-                    is DownloadResult.Error -> error = result.message
-                    is DownloadResult.Done -> Unit
+            try {
+                runSwitch(target, current)
+            } finally {
+                // 想定外の例外でも「切り替え中」のまま固まらないよう、最後に必ず抜ける（ADR-066）
+                val state = _state.value
+                if (state is ModelSwitchState.Downloading || state is ModelSwitchState.Loading) {
+                    _state.value = ModelSwitchState.Failed(target, null)
                 }
             }
-            if (error != null) {
-                _state.value = ModelSwitchState.Failed(target, error)
-                return@launch
-            }
+        }
+    }
 
-            _state.value = ModelSwitchState.Loading(target)
-            // initialize は前のエンジンを先に閉じるので、ここから先は途中で止めずに最後まで終わらせる
-            withContext(NonCancellable) {
-                // 「CPU モードで試す」で読み込んだ端末では GPU を試し直さない（ADR-064）
-                val forceCpu = llmService.forceCpu
-                val loaded = runCatchingCancellable { llmService.initialize(downloader.llmFile(target), forceCpu) }
-                if (loaded.isFailure) {
-                    Timber.tag(TAG).w(loaded.exceptionOrNull(), "failed to load $target, restoring $current")
-                    runCatchingCancellable { llmService.initialize(downloader.llmFile(current), forceCpu) }
-                    _state.value = ModelSwitchState.Failed(target, loaded.exceptionOrNull()?.localizedMessage)
-                    return@withContext
-                }
-                dataStore.setSelectedLlmModel(target)
-                downloader.deleteLlm(current)
-                _state.value = ModelSwitchState.Idle
+    private suspend fun runSwitch(target: LlmModel, current: LlmModel) {
+        var error: String? = null
+        downloader.downloadLlm(target).collect { result ->
+            when (result) {
+                is DownloadResult.Progress -> _state.value =
+                    ModelSwitchState.Downloading(target, result.progress.fraction.takeIf { result.progress.totalBytes > 0 })
+                is DownloadResult.Error -> error = result.message
+                is DownloadResult.Done -> Unit
             }
+        }
+        if (error != null) {
+            _state.value = ModelSwitchState.Failed(target, error)
+            return
+        }
+
+        _state.value = ModelSwitchState.Loading(target)
+        // initialize は前のエンジンを先に閉じるので、ここから先は途中で止めずに最後まで終わらせる
+        withContext(NonCancellable) {
+            // 「CPU モードで試す」で読み込んだ端末では GPU を試し直さない（ADR-064）
+            val forceCpu = llmService.forceCpu
+            val loaded = runCatchingCancellable { llmService.initialize(downloader.llmFile(target), forceCpu) }
+            if (loaded.isFailure) {
+                Timber.tag(TAG).w(loaded.exceptionOrNull(), "failed to load $target, restoring $current")
+                runCatchingCancellable { llmService.initialize(downloader.llmFile(current), forceCpu) }
+                _state.value = ModelSwitchState.Failed(target, loaded.exceptionOrNull()?.localizedMessage)
+                return@withContext
+            }
+            // 選択を保存できなければ、次回の起動で読み込むモデルと食い違うので前のモデルに戻す
+            val saved = runCatchingCancellable { dataStore.setSelectedLlmModel(target) }
+            if (saved.isFailure) {
+                Timber.tag(TAG).w(saved.exceptionOrNull(), "failed to save $target, restoring $current")
+                runCatchingCancellable { llmService.initialize(downloader.llmFile(current), forceCpu) }
+                _state.value = ModelSwitchState.Failed(target, saved.exceptionOrNull()?.localizedMessage)
+                return@withContext
+            }
+            // 前のファイルが消せなくても切り替えは済んでいる
+            runCatchingCancellable { downloader.deleteLlm(current) }
+                .onFailure { Timber.tag(TAG).w(it, "failed to delete $current") }
+            _state.value = ModelSwitchState.Idle
         }
     }
 }

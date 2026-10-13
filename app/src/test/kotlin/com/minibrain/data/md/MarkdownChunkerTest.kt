@@ -205,4 +205,16 @@ class MarkdownChunkerTest {
 
         assertEquals(listOf(Chunk("idea.md", "tags: [idea]")), chunks)
     }
+
+    @Test
+    fun longFrontmatterIsSplitLikeBody() {
+        val yaml = (1..60).joinToString("\n") { "key$it: value value value" }
+        val chunks = MarkdownChunker.chunk("---\n$yaml\n---\n本文", "long.md")
+
+        val meta = chunks.drop(1)
+        assertTrue(meta.size > 1)
+        assertTrue(meta.all { it.headingPath == "long.md" && it.text.length <= 800 })
+        assertTrue(meta.first().text.startsWith("key1:"))
+        assertTrue(meta.last().text.endsWith("key60: value value value"))
+    }
 }

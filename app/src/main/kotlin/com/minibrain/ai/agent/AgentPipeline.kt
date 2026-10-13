@@ -3,6 +3,7 @@ package com.minibrain.ai.agent
 import com.minibrain.ai.agent.tools.ToolExecutor
 import com.minibrain.ai.embed.EmbedderService
 import com.minibrain.ai.llm.LlmService
+import com.minibrain.ai.llm.generateBounded
 import com.minibrain.ai.rag.Citation
 import com.minibrain.ai.rag.RagPipeline
 import com.minibrain.ai.rag.SearchRequestCache
@@ -26,6 +27,8 @@ class AgentPipeline(
     companion object {
         private const val TAG = "AgentPipeline"
         private const val MAX_ITERATIONS = 6
+        // 1 手ごとの上限。打ち切ったらそこまでの出力を解析する（ADR-066）
+        private const val PLANNER_TIMEOUT_MS = 30_000L
     }
 
     suspend fun run(
@@ -165,13 +168,12 @@ class AgentPipeline(
 
         private suspend fun generateDecision(plannerHint: String?): PlannerDecision {
             val prompt = PlannerPrompt.build(params.question, plannerHint, observations)
-            val sb = StringBuilder()
-            runCatchingCancellable {
-                llmService.generateStream(prompt).collect { token -> sb.append(token) }
-            }.onFailure { Timber.tag(TAG).w(it, "planner LLM failed") }
+            val raw = runCatchingCancellable { llmService.generateBounded(prompt, PLANNER_TIMEOUT_MS) }
+                .onFailure { Timber.tag(TAG).w(it, "planner LLM failed") }
+                .getOrDefault("")
 
-            val decision = PlannerPrompt.parseDecision(sb.toString())
-            Timber.tag(TAG).d("decision=${decision} raw=${sb.take(200)}")
+            val decision = PlannerPrompt.parseDecision(raw)
+            Timber.tag(TAG).d("decision=${decision} raw=${raw.take(200)}")
             return decision
         }
 

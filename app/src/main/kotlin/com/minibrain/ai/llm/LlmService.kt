@@ -19,6 +19,8 @@ open class LlmService {
 
     private companion object {
         private const val TAG = "LlmService"
+        // 要約は 500 字ほどで足りる。繰り返しで止まらなくなったときはここで打ち切る（ADR-066）
+        private const val SUMMARIZE_TIMEOUT_MS = 30_000L
     }
 
     // LiteRT-LM は単一スレッド設計のため、初期化・生成・close を同じ Mutex で直列化する
@@ -89,11 +91,8 @@ open class LlmService {
     open suspend fun summarize(text: String): String {
         if (!isReady()) return text.take(500)
         val prompt = "以下のテキストを500文字以内で簡潔に要約してください。重要な情報を落とさないようにしてください。\n\n$text\n\n要約:"
-        val sb = StringBuilder()
-        runCatchingCancellable {
-            generateStream(prompt).collect { sb.append(it) }
-        }
-        return sb.toString().ifBlank { text.take(500) }
+        val summary = runCatchingCancellable { generateBounded(prompt, SUMMARIZE_TIMEOUT_MS) }.getOrDefault("")
+        return summary.ifBlank { text.take(500) }
     }
 
     open fun isReady(): Boolean = engine != null

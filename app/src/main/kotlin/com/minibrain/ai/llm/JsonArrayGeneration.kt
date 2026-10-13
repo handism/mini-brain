@@ -15,13 +15,32 @@ import kotlinx.coroutines.withTimeoutOrNull
 suspend fun LlmService.generateJsonArray(prompt: String, timeoutMs: Long): String? {
     val sb = StringBuilder()
     return withTimeoutOrNull(timeoutMs) {
-        generateStream(prompt)
-            .transformWhile { token ->
-                sb.append(token)
-                emit(Unit)
-                !JsonArrayText.isClosed(sb)
-            }
-            .collect()
+        collectUntil(prompt, sb) { JsonArrayText.isClosed(it) }
         sb.toString()
     }
+}
+
+/**
+ * 回答以外の呼び出し（CoverageChecker / Planner / summarize）用。[isDone] が true になるか
+ * [timeoutMs] を過ぎたら生成を打ち切り、そこまでのテキストを返す（ADR-066）。
+ * 打ち切っても途中のテキストは捨てない。呼び出し側がそのまま解析し、読めなければ従来の既定値に戻す。
+ */
+suspend fun LlmService.generateBounded(
+    prompt: String,
+    timeoutMs: Long,
+    isDone: (CharSequence) -> Boolean = { false },
+): String {
+    val sb = StringBuilder()
+    withTimeoutOrNull(timeoutMs) { collectUntil(prompt, sb, isDone) }
+    return sb.toString()
+}
+
+private suspend fun LlmService.collectUntil(prompt: String, sb: StringBuilder, isDone: (CharSequence) -> Boolean) {
+    generateStream(prompt)
+        .transformWhile { token ->
+            sb.append(token)
+            emit(Unit)
+            !isDone(sb)
+        }
+        .collect()
 }

@@ -33,9 +33,9 @@
   <uses-native-library android:name="libvndksupport.so" android:required="false"/>
   <uses-native-library android:name="libOpenCL.so" android:required="false"/>
   ```
-- **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。JSON 配列だけを返させる呼び出し（`QueryExpander` / `LlmReranker`）は `generateJsonArray` を使い、`]` が出たら生成を打ち切り、タイムアウト（展開 15 秒 / Reranker 30 秒）なら元のクエリ・RRF 順に戻します。最後まで collect すると同じ語の繰り返しで `maxNumTokens` まで止まらず、1 件 100 秒かかったことがあります（ADR-044）。
+- **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。JSON 配列だけを返させる呼び出し（`QueryExpander` / `LlmReranker`）は `generateJsonArray` を使い、`]` が出たら生成を打ち切り、タイムアウト（展開 15 秒 / Reranker 30 秒）なら元のクエリ・RRF 順に戻します。最後まで collect すると同じ語の繰り返しで `maxNumTokens` まで止まらず、1 件 100 秒かかったことがあります（ADR-044）。それ以外の回答前の呼び出し（`CoverageChecker` / Planner / `summarize`）は `generateBounded` で上限（20 秒 / 30 秒 / 30 秒）を付け、時間切れでもそこまでの出力を解析します。`CoverageChecker` は yes / no の行が出たら打ち切ります（ADR-066）。
 
-- **モデルの選択**: 回答などに使う LLM は `LlmModel`（E2B 既定 / E4B）で、設定から切り替えます。ファイルは `ModelDownloader.llmFile(model)` で引き、`llmModelFile` のような固定のパスを足さないでください。切り替えは `LlmModelSwitcher`（`AppContainer.llmModelSwitcher`）で「ダウンロード → 読み込み → 選択を保存 → 前のモデルを削除」の順に行い、読み込みに失敗したら前のモデルに戻します（ADR-057）。設定画面を離れても止まらないようアプリ全体のスコープで動かし、読み込み以降は `NonCancellable` で最後まで終えます（ADR-062）。読み込みは `LlmService.forceCpu`（最後に読み込めたときの CPU 指定）を引き継ぎます（ADR-064）。`ModelDownloader.isAllReady` / `isLlmReady` は数 GB の SHA-256 を計算するので、メインスレッドで呼ばないでください（ADR-064）。
+- **モデルの選択**: 回答などに使う LLM は `LlmModel`（E2B 既定 / E4B）で、設定から切り替えます。ファイルは `ModelDownloader.llmFile(model)` で引き、`llmModelFile` のような固定のパスを足さないでください。切り替えは `LlmModelSwitcher`（`AppContainer.llmModelSwitcher`）で「ダウンロード → 読み込み → 選択を保存 → 前のモデルを削除」の順に行い、読み込みに失敗したら前のモデルに戻します（ADR-057）。設定画面を離れても止まらないようアプリ全体のスコープで動かし、読み込み以降は `NonCancellable` で最後まで終えます（ADR-062）。読み込みは `LlmService.forceCpu`（最後に読み込めたときの CPU 指定）を引き継ぎます（ADR-064）。選択の保存に失敗したら前のモデルに戻し、想定外の例外でも `Downloading` / `Loading` のまま残しません（ADR-066）。`ModelDownloader.isAllReady` / `isLlmReady` は数 GB の SHA-256 を計算するので、メインスレッドで呼ばないでください（ADR-064）。
 
 ### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
 - **クエリ・文章プレフィックス**: クエリには `query: `、文書（チャンク）には `passage: ` のプレフィックス付与が必須。`EmbedType` enum を使用します。
@@ -78,6 +78,7 @@
 - suspend 文脈で例外を握るときは標準の `runCatching` ではなく `com.minibrain.util.runCatchingCancellable` を使ってください。`runCatching` は `CancellationException`（`withTimeout` のタイムアウトを含む）まで失敗扱いにするため、停止ボタンで「生成エラー」が出たり、タイムアウトが握りつぶされたりします（ADR-031）。
 - チャットの送信・再生成は `startGeneration` で削除処理前から操作をロックし、開始時の sessionId を履歴取得・質問保存・回答保存に使います。生成中の新規チャット作成は無効にし、セッション作成中も送信・再生成・重複作成を受け付けません（ADR-060）。
 - 停止ボタンは生成ジョブをキャンセルし、途中の回答があれば開始時のセッションへ保存します。保存中は `isGenerating` を保持し、送信・再生成・セッション作成を受け付けません。空の回答は保存しません（ADR-061）。生成の失敗や空出力で回答が空になったときも保存せず、生成の失敗として出します（ADR-063）。再生成で回答を保存できずに終わったら（出力前の停止・失敗・空の回答）、`ChatRepository.restoreExchange` で元のやり取りを戻します（ADR-063）。
+- 回答に渡す履歴（`getRecentHistory`）は質問を保存する前に取ります。後で取ると今の質問が履歴にも入り、プロンプトに 2 回並びます（ADR-066）。
 - `ChatViewModel.sendMessage` は `try/finally` で `isGenerating` を戻します。ジョブは LAZY 起動で `currentJob` を代入してから開始します（`viewModelScope` は `Main.immediate` のため）。
 
 ### 5.2 日付・メタデータ抽出とクエリ解決 (ADR-025, ADR-026)
@@ -110,7 +111,7 @@
 - 差分インデックスのスキップはハッシュ一致に加え、保存済みチャンク数と `MarkdownChunker.chunk` の件数一致が必要です。一部の埋め込み失敗・中断で欠けた文書も、本文変更なしで次回再試行します（ADR-061）。
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
 - チャンクの埋め込み入力は `Chunk.embeddingText()`（「パス > 見出し」+ 改行 + 本文）です。DB の `text` と FTS には付けません。作り方を変えたら既存ベクトルと混ざらないよう、DB を上げて `contentHash` を書き換えるマイグレーションを足してください（`MIGRATION_6_7`、ADR-038）。
-- `MarkdownChunker.chunk` は先頭の YAML フロントマターを `Frontmatter.split` で本文から外し、区切り線を除いた中身を文書の最後のチャンク（headingPath = ファイル名）にします。先頭に置くと先頭チャンクを使うスニペット（`firstChunkOf`）が空になるためです。tags などは検索の手がかりとして残します。メタデータ抽出は元の全文から行います（ADR-065）。
+- `MarkdownChunker.chunk` は先頭の YAML フロントマターを `Frontmatter.split` で本文から外し、区切り線を除いた中身を文書の最後のチャンク（headingPath = ファイル名）にします。先頭に置くと先頭チャンクを使うスニペット（`firstChunkOf`）が空になるためです。tags などは検索の手がかりとして残します。800 字を超えるフロントマターは本文と同じく `splitLongSection` で切ります（ADR-066）。メタデータ抽出は元の全文から行います（ADR-065）。
 - `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
 
 **チューニング定数**

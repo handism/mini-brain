@@ -4,6 +4,7 @@ import com.minibrain.ai.llm.LlmService
 import com.minibrain.ai.rag.Citation
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -207,5 +208,48 @@ class CoverageCheckerTest {
         val result = coverageChecker.check("スパイス堂の魅力は？", candidates)
         assertTrue(result.canAnswer)
         assertTrue(result.missingInformation.isEmpty())
+    }
+
+    @Test
+    fun `noで始まる英単語はnoと読まない`() {
+        assertTrue(CoverageChecker.parse("note: 検索結果を確認しました\nyes").canAnswer)
+        assertTrue(CoverageChecker.parse("none").canAnswer)
+    }
+
+    @Test
+    fun `yesかnoの行が改行で閉じたら答えが出たとみなす`() {
+        assertFalse(CoverageChecker.hasAnswerLine("ye"))
+        assertFalse(CoverageChecker.hasAnswerLine("yes"))
+        assertFalse(CoverageChecker.hasAnswerLine("前置きです\n"))
+        assertTrue(CoverageChecker.hasAnswerLine("前置きです\nno, visit_date\n"))
+        assertTrue(CoverageChecker.hasAnswerLine("Yes\n"))
+    }
+
+    @Test
+    fun `check - yesの行の後の繰り返しは読まない`() = runTest {
+        val candidates = listOf(citation("スパイス堂は神保町の欧風カレー店"))
+        var emittedAfterAnswer = 0
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } returns flow {
+            emit("yes\n")
+            repeat(1000) {
+                emittedAfterAnswer++
+                emit("yes ")
+            }
+        }
+
+        val result = coverageChecker.check("スパイス堂の魅力は？", candidates)
+        assertTrue(result.canAnswer)
+        assertEquals(0, emittedAfterAnswer)
+    }
+
+    @Test
+    fun `check - 答えが出ないまま時間切れならcanAnswer=true`() = runTest {
+        val candidates = listOf(citation("スパイス堂は神保町の欧風カレー店"))
+        every { llmService.isReady() } returns true
+        every { llmService.generateStream(any()) } returns flow { awaitCancellation() }
+
+        val result = coverageChecker.check("スパイス堂の魅力は？", candidates)
+        assertTrue(result.canAnswer)
     }
 }

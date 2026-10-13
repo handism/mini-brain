@@ -153,10 +153,12 @@ class ChatViewModel(
             try {
                 val request = prepare(sessionId) ?: return@launch
                 removed = request.removed
+                // 履歴は質問を保存する前に取る。後で取ると今の質問が履歴にも入り、プロンプトに 2 回並ぶ（ADR-066）
+                val history = recentHistory(sessionId)
                 questionId = setupUserAndStreamingMessages(request.question, sessionId)
 
                 // エージェントループ（計画 → 多段ツール実行 → 回答）
-                val agentResult = runAgentPipeline(request.question, sessionId) ?: return@launch
+                val agentResult = runAgentPipeline(request.question, history) ?: return@launch
                 updateStreamingMessage { it.copy(traceEvents = agentResult.traceEvents) }
                 val finalContent = collectAnswerStream(agentResult.answerFlow, agentResult.citations)
                 if (finalContent.isBlank()) {
@@ -253,12 +255,13 @@ class ChatViewModel(
             }
     }
 
-    private suspend fun runAgentPipeline(question: String, sessionId: Long): AgentResult? {
-        val treeUri = savedTreeUri.value ?: ""
-        val history = app.container.chatRepository.getRecentHistory(sessionId).map { msg ->
+    private suspend fun recentHistory(sessionId: Long): List<Pair<String, String>> =
+        app.container.chatRepository.getRecentHistory(sessionId).map { msg ->
             Pair(msg.role.name.lowercase(), msg.content)
         }
 
+    private suspend fun runAgentPipeline(question: String, history: List<Pair<String, String>>): AgentResult? {
+        val treeUri = savedTreeUri.value ?: ""
         return runCatchingCancellable {
             app.container.agentPipeline.run(question, treeUri, history) { status ->
                 _statusText.value = status.ifBlank { null }

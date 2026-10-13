@@ -128,4 +128,45 @@ class LlmModelSwitcherTest {
         verify { downloader.deleteLlm(LlmModel.E2B) }
         assertEquals(ModelSwitchState.Idle, switcher.state.value)
     }
+
+    @Test
+    fun `選択を保存できなければ前のモデルに戻し、ファイルを消さない`() = runTest(testDispatcher) {
+        every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+        coEvery { dataStore.updateData(any()) } throws java.io.IOException("disk full")
+        val switcher = switcher()
+
+        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        coVerify { llm.initialize(File("e2b"), any()) }
+        verify(exactly = 0) { downloader.deleteLlm(any()) }
+        assertEquals(ModelSwitchState.Failed(LlmModel.E4B, "disk full"), switcher.state.value)
+    }
+
+    @Test
+    fun `前のモデルを消せなくても切り替えは終える`() = runTest(testDispatcher) {
+        every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+        every { downloader.deleteLlm(LlmModel.E2B) } throws SecurityException("denied")
+        val switcher = switcher()
+
+        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        assertEquals(ModelSwitchState.Idle, switcher.state.value)
+    }
+
+    @Test
+    fun `ダウンロード中に想定外の例外が出ても切り替え中のまま固まらない`() = runTest(testDispatcher) {
+        every { downloader.downloadLlm(LlmModel.E4B) } returns kotlinx.coroutines.flow.flow {
+            throw IllegalStateException("boom")
+        }
+        val scope = CoroutineScope(testDispatcher + kotlinx.coroutines.SupervisorJob() +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> })
+        val switcher = switcher(scope)
+
+        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        assertEquals(ModelSwitchState.Failed(LlmModel.E4B, null), switcher.state.value)
+    }
 }

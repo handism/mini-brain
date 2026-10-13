@@ -71,4 +71,30 @@ class JsonArrayGenerationTest {
         assertFalse(JsonArrayText.isClosed("]1, 2["))
         assertFalse(JsonArrayText.isClosed("no array"))
     }
+
+    @Test
+    fun `generateBounded stops when isDone becomes true`() = runTest {
+        var emittedAfterDone = 0
+        every { llmService.generateStream(any()) } returns flow {
+            emit("ab")
+            emit("c")
+            repeat(1000) {
+                emittedAfterDone++
+                emit("x")
+            }
+        }
+
+        assertEquals("abc", llmService.generateBounded("prompt", timeoutMs = 1_000) { it.endsWith("c") })
+        assertEquals(0, emittedAfterDone)
+    }
+
+    @Test
+    fun `generateBounded keeps partial text on timeout`() = runTest {
+        every { llmService.generateStream(any()) } returns flow {
+            emit("TOOL: grep\n")
+            awaitCancellation()
+        }
+
+        assertEquals("TOOL: grep\n", llmService.generateBounded("prompt", timeoutMs = 5_000))
+    }
 }
