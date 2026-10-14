@@ -2236,3 +2236,15 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 - ダウンロードに失敗したモデルは途中までのファイル（`*.download`、最大で数 GB）が残るが、`isLlmDownloaded` は完成したファイルしか見ないので削除ボタンが出なかった。失敗したモデルには、完成していなくても「削除して容量を空ける」を出す（`deleteLlm` は途中のファイルも消す）。
 - `DateResolver.resolveToDateStrings` で、`2027/03/05` のような来年以降の日付を `2027-03-05` として返していた。`DateValidator.parseDay` の年の範囲（1990..今年）で期間にならず、ADR-069 のガードを通ってしまうため。`resolveDotSlashDate` で today より後の日付を外し、空を返す（null にすると下の段が月日から別の年を推定する）。
 - `DateValidator.parseDay` の年の範囲は `LocalDate.now()` で決まっており、`DateResolver` に渡した today と食い違っていた（テストの結果が実行した年で変わる）。`parseDay` に `today` を渡せるようにし、`resolveFullDateRange` から渡す。
+
+## ADR-072: 来年・年末・元年などで、未来の日付や別の年を検索しない
+
+- ステータス: 採用
+- 日付: 2026-10-14
+
+- `DateResolver.relativeYearOffset` は「一昨年 / 去年 / 昨年 / 今年」しか知らず、「来年3月の予定」「来年の3月5日」は相対年として扱われなかった。期間にならないので ADR-069 のガードを通り、`resolveByNumericPattern` が月日だけから今年か去年の日付を推定して検索していた。「来年」（-1）と「再来年」（-2）を足し、`RELATIVE_YEAR_MONTH_RE` / `RELATIVE_SEASON_RE` / `YEAR_QUARTER_RE` も同じ判定を使う。来年以降は未来の期間になるので、既存のガード（ADR-068 / ADR-069）で期間なし・空になる。「再来年」は「来年」を含むので先に見る。
+- 年の無い「X月Y日」は月だけを比べており、今日が 10/14 の「10月20日」が今年（未来）の日付になっていた。日まで比べ、今年のその日がまだ来ていなければ去年にする。
+- 「年末」は 7 月以降なら今年の 12/25〜31 を返していた。年の指定が無ければ、今年の 12/25 が来るまでは去年の年末にする。12/25〜31 の間や「正月」の 1/1〜7 の間は今日をまたぐので、`resolveToDateStrings` の最後で今日より後の日付を外す。
+- 元号の正規表現が `(\d{1,2})年` で「令和元年」「平成元年」に一致せず、`isDiaryQuery` だけが反応して月日から別の年を推定していた。「元」を 1 年として読む。
+- `DateValidator.parseDayNotInFuture` / `parseMonth` は年の範囲を `LocalDate.now()` で決めており、渡した today と食い違っていた（ADR-071 で `parseDay` だけ直していた）。全関数で today から決める。
+- 「今週の金曜」（まだ来ていない曜日）は `resolveThisWeekDow` が null を返すが、次の `resolveRelativeKeywords` が「今週」で今週の今日までを返すので、別の年の日付にはならない。変えない。

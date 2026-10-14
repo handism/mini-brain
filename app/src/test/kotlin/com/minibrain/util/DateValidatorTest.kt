@@ -86,6 +86,15 @@ class DateValidatorTest {
         assertNull(DateValidator.parseMonthNotInFuture("2023", "06", today)) // Future month
     }
 
+    // 年の範囲も端末の時計ではなく渡した today で決める（ADR-072）
+    @Test
+    fun `not in future variants use the given today for the year range`() {
+        val today = LocalDate.of(currentYear + 1, 6, 1)
+        assertEquals("${currentYear + 1}-05-01", DateValidator.parseDayNotInFuture("${currentYear + 1}", "05", "01", today))
+        assertEquals("${currentYear + 1}-05-01", DateValidator.parseMonthNotInFuture("${currentYear + 1}", "05", today))
+        assertEquals("${currentYear + 1}-05-01", DateValidator.parseMonth("${currentYear + 1}", "05", today))
+    }
+
     @Test
     fun `parseMonthNotInFuture returns null for invalid month`() {
         val today = LocalDate.of(2023, 5, 15)

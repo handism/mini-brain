@@ -21,10 +21,11 @@ object DateResolver {
     private val ERA_MONTH_RE = Regex("""年(\d{1,2})月""")
     private val N_YEARS_AGO_MONTH_RE = Regex("""(\d+)\s*年[前まえ]の(\d{1,2})月""")
     private val N_YEARS_AGO_SEASON_RE = Regex("""(\d+)\s*年[前まえ](?:の)?(春|夏|秋|冬)""")
-    private val RELATIVE_SEASON_RE = Regex("""(去年|昨年|一昨年|今年)(?:の)?(春|夏|秋|冬)""")
+    // 相対年は長いもの（「一昨年」「再来年」）を先に並べる。短い方が先だと「昨年」「来年」の部分に一致する
+    private val RELATIVE_SEASON_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年)(?:の)?(春|夏|秋|冬)""")
     private val YEAR_SEASON_RE = Regex("""(\d{4})年(?:の)?(春|夏|秋|冬)""")
     // 「去年の3月」「一昨年の3月5日」。年の数字が無いので YEAR_MONTH_RE では拾えない（ADR-067）
-    private val RELATIVE_YEAR_MONTH_RE = Regex("""(一昨年|去年|昨年|今年)(?:の)?(\d{1,2})月(?:(\d{1,2})日)?""")
+    private val RELATIVE_YEAR_MONTH_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年)(?:の)?(\d{1,2})月(?:(\d{1,2})日)?""")
 
     // 年まで入った特定の日付。1 日だけの期間として扱い、日付ヒットを先頭に固定させる（ADR-042）
     private val FULL_DATE_RES = listOf(
@@ -39,7 +40,7 @@ object DateResolver {
 
     // クォーター: Q1〜Q4 / 第1〜4四半期
     private val QUARTER_RE = Regex("""[Qq]([1-4])|第([1-4])四半期""")
-    private val YEAR_QUARTER_RE = Regex("""(去年|昨年|今年|一昨年|\d{4}年)(?:の)?(?:[Qq]([1-4])|第([1-4])四半期)""")
+    private val YEAR_QUARTER_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年|\d{4}年)(?:の)?(?:[Qq]([1-4])|第([1-4])四半期)""")
 
     // ドット/スラッシュ区切り日付: 2024.03.01 / 2024/03/01
     private val DOT_SLASH_DATE_RE = Regex("""(\d{4})[./](\d{1,2})[./](\d{1,2})""")
@@ -50,13 +51,14 @@ object DateResolver {
 
     fun isDateQuery(question: String): Boolean = DATE_QUERY_RE.containsMatchIn(question)
 
-    // 元号: エントリを追加するだけで resolveEraYear / isDiaryQuery の両方に反映される
+    // 元号: エントリを追加するだけで resolveEraYear / isDiaryQuery の両方に反映される。
+    // 「元年」も 1 年として読む。拾えないと月日だけから年を推定し、別の年を検索していた（ADR-072）
     private data class EraEntry(val pattern: Regex, val gregorianOffset: Int)
     private val ERA_LIST = listOf(
-        EraEntry(Regex("""(?:令和|R)(\d{1,2})年""", RegexOption.IGNORE_CASE), 2018),
-        EraEntry(Regex("""(?:平成|H)(\d{1,2})年""", RegexOption.IGNORE_CASE), 1988),
-        EraEntry(Regex("""(?:昭和|S)(\d{1,2})年""", RegexOption.IGNORE_CASE), 1925),
-        EraEntry(Regex("""(?:大正|T)(\d{1,2})年""", RegexOption.IGNORE_CASE), 1911),
+        EraEntry(Regex("""(?:令和|R)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 2018),
+        EraEntry(Regex("""(?:平成|H)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 1988),
+        EraEntry(Regex("""(?:昭和|S)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 1925),
+        EraEntry(Regex("""(?:大正|T)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 1911),
     )
 
     private val WEEKDAY_MAP = mapOf(
@@ -93,12 +95,15 @@ object DateResolver {
         // まだ始まっていない期間（「2027年3月5日」「2026年12月」）は resolveDateRange が null を返す。
         // 下の各段は書かれた年を見ずに月日だけで年を推定するので、ここで止めないと別の年の日付になる（ADR-069）
         if (resolveDateRangeUnchecked(question, today)?.start?.isAfter(today) == true) return emptyList()
-        return resolveDaysAgo(question, today)
+        val dates = resolveDaysAgo(question, today)
             ?: resolveDotSlashDate(question, today)
             ?: resolveLastWeekDow(question, today)
             ?: resolveThisWeekDow(question, today)
             ?: resolveRelativeKeywords(question, today)
             ?: resolveByNumericPattern(question, today)
+        // 「年末」の 12/25〜31 や「正月」の 1/1〜7 は今日をまたぐことがある。未来の日付の文書は無いので外す（ADR-072）
+        val todayString = today.format(FORMATTER)
+        return dates.filter { it <= todayString }
     }
 
     private fun resolveDaysAgo(question: String, today: LocalDate): List<String>? {
@@ -180,10 +185,10 @@ object DateResolver {
                 List(7) { LocalDate.of(year, 1, it + 1).format(FORMATTER) }
             }
             question.contains("年末") -> {
-                // 上半期に「年末」と言ったら去年の年末を指す可能性が高い
+                // 年の指定が無ければ、今年の年末（12/25〜）が来るまでは去年の年末を指す（ADR-072）
                 val year = when {
                     yearOffset != null -> today.year - yearOffset
-                    today.monthValue <= 6 -> today.year - 1
+                    today.isBefore(LocalDate.of(today.year, 12, 25)) -> today.year - 1
                     else -> today.year
                 }
                 List(7) { LocalDate.of(year, 12, 25 + it).format(FORMATTER) }
@@ -199,7 +204,7 @@ object DateResolver {
         MONTH_DAY_RE.find(question)?.let { match ->
             val month = match.groupValues[1].toInt()
             val day = match.groupValues[2].toInt()
-            val year = resolveYear(question, today, month)
+            val year = resolveYear(question, today, month, day)
             return runCatching {
                 listOf(LocalDate.of(year, month, day).format(FORMATTER))
             }.onFailure { Timber.tag(TAG).w(it, "Invalid month/day: $year/$month/$day") }
@@ -209,7 +214,7 @@ object DateResolver {
         // X月（月全体）
         MONTH_ONLY_RE.find(question)?.let { match ->
             val month = match.groupValues[1].toInt()
-            val year = resolveYear(question, today, month)
+            val year = resolveYear(question, today, month, day = 1)
             return runCatching {
                 val start = LocalDate.of(year, month, 1)
                 val end = minOf(start.withDayOfMonth(start.lengthOfMonth()), today)
@@ -277,12 +282,8 @@ object DateResolver {
         YEAR_QUARTER_RE.find(question)?.let { match ->
             val yearRef = match.groupValues[1]
             val q = match.groupValues[2].ifEmpty { match.groupValues[3] }.toIntOrNull() ?: return@let
-            val year = when (yearRef) {
-                "今年" -> today.year
-                "去年", "昨年" -> today.year - 1
-                "一昨年" -> today.year - 2
-                else -> yearRef.removeSuffix("年").toIntOrNull() ?: return@let
-            }
+            val year = relativeYearOffset(yearRef)?.let { today.year - it }
+                ?: yearRef.removeSuffix("年").toIntOrNull() ?: return@let
             return quarterRange(q, year, today)
         }
 
@@ -347,12 +348,7 @@ object DateResolver {
 
     private fun resolveRelativeSeasonRange(question: String, today: LocalDate): DateRange? {
         RELATIVE_SEASON_RE.find(question)?.let { match ->
-            val yearRef = match.groupValues[1]
-            val year = when (yearRef) {
-                "今年" -> today.year
-                "一昨年" -> today.year - 2
-                else -> today.year - 1
-            }
+            val year = today.year - (relativeYearOffset(match.groupValues[1]) ?: return null)
             return seasonRange(match.groupValues[2], year, today)
         }
         return null
@@ -404,7 +400,10 @@ object DateResolver {
 
     private fun resolveEraYear(question: String): Int? {
         for ((pattern, offset) in ERA_LIST) {
-            pattern.find(question)?.let { return offset + it.groupValues[1].toInt() }
+            pattern.find(question)?.let { match ->
+                val n = match.groupValues[1].let { if (it == "元") 1 else it.toInt() }
+                return offset + n
+            }
         }
         return null
     }
@@ -435,15 +434,19 @@ object DateResolver {
     }.onFailure { Timber.tag(TAG).w(it, "Invalid season: $season $year") }
      .getOrNull()
 
-    private fun resolveYear(question: String, today: LocalDate, month: Int): Int {
+    private fun resolveYear(question: String, today: LocalDate, month: Int, day: Int): Int {
         relativeYearOffset(question)?.let { return today.year - it }
-        // 年の指定なし：未来の月なら去年、過去の月なら今年
-        return if (month > today.monthValue) today.year - 1 else today.year
+        // 年の指定なし：今年のその日がまだ来ていなければ去年。月だけでなく日まで比べる（今日が 10/14 の「10月20日」、ADR-072）
+        val notYet = month > today.monthValue || (month == today.monthValue && day > today.dayOfMonth)
+        return if (notYet) today.year - 1 else today.year
     }
 
-    // 「一昨年」は「昨年」を含むので先に見る（後に見ると去年と読み違える、ADR-067）
+    // 今年からの年数（来年は -1）。「一昨年」は「昨年」を、「再来年」は「来年」を含むので先に見る（ADR-067 / ADR-072）。
+    // 来年以降は未来の期間になり、resolveDateRange / resolveToDateStrings のガードで期間なし・空になる
     private fun relativeYearOffset(question: String): Int? = when {
         question.contains("一昨年") -> 2
+        question.contains("再来年") -> -2
+        question.contains("来年") -> -1
         question.contains("去年") || question.contains("昨年") -> 1
         question.contains("今年") -> 0
         else -> null

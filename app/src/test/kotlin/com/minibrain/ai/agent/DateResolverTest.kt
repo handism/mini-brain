@@ -426,6 +426,61 @@ class DateResolverTest {
         )
     }
 
+    // ─────────────── 未来の日付を検索しない（ADR-072） ───────────────
+
+    // 来年・再来年は未来の期間なので、期間にも日付にもしない（月日だけから過去の年を推定しない）
+    @Test
+    fun `next year questions resolve to no range and no dates`() {
+        for (q in listOf("来年の3月5日の予定は？", "来年3月の予定", "来年の夏", "来年のQ1", "再来年の春", "来年の年末", "来年")) {
+            assertNull(q, DateResolver.resolveDateRange(q, today))
+            assertTrue(q, DateResolver.resolveToDateStrings(q, today).isEmpty())
+        }
+    }
+
+    // 年の無い月日は、今年のその日がまだ来ていなければ去年
+    @Test
+    fun `month day later this month resolves to last year`() {
+        assertEquals(listOf("2025-06-10"), DateResolver.resolveToDateStrings("6月10日に何した？", today))
+        assertEquals(listOf("2024-06-11"), DateResolver.resolveToDateStrings("6月11日に何した？", today))
+    }
+
+    @Test
+    fun `year end before december 25 means last year`() {
+        val oct = LocalDate.of(2025, 10, 14)
+        val expected = (25..31).map { "2024-12-%02d".format(it) }
+        assertEquals(expected, DateResolver.resolveToDateStrings("年末何してた？", oct))
+    }
+
+    @Test
+    fun `year end during the week drops days after today`() {
+        val dec27 = LocalDate.of(2025, 12, 27)
+        assertEquals(
+            listOf("2025-12-25", "2025-12-26", "2025-12-27"),
+            DateResolver.resolveToDateStrings("年末何してた？", dec27),
+        )
+    }
+
+    @Test
+    fun `new year during the first week drops days after today`() {
+        val jan3 = LocalDate.of(2026, 1, 3)
+        assertEquals(
+            listOf("2026-01-01", "2026-01-02", "2026-01-03"),
+            DateResolver.resolveToDateStrings("正月何してた？", jan3),
+        )
+    }
+
+    @Test
+    fun `era first year 元年 resolves`() {
+        assertEquals(
+            DateRange(LocalDate.of(2019, 5, 1), LocalDate.of(2019, 5, 31)),
+            DateResolver.resolveDateRange("令和元年5月のメモ", today),
+        )
+        assertEquals(
+            DateRange(LocalDate.of(1989, 1, 1), LocalDate.of(1989, 12, 31)),
+            DateResolver.resolveDateRange("平成元年", today),
+        )
+    }
+
     // ─────────────── isDateQuery ───────────────
 
     @Test
