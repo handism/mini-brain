@@ -149,16 +149,11 @@ class ToolExecutor(
         return ToolResult(call, fullText, citations)
     }
 
-    private suspend fun findDocument(tool: AgentTool.ReadFile): DocumentEntity? = withContext(Dispatchers.IO) {
-        when {
-            // 他フォルダの doc を読まないよう、docId 指定でも現在の tree に属するものだけ返す
-            tool.docId != null -> documentDao.getById(tool.docId)?.takeIf { it.treeUri == treeUri }
-            tool.path != null -> {
-                val keyword = FileNames.stem(tool.path)
-                documentDao.searchByPath(treeUri, keyword).firstOrNull()
-            }
-            else -> null
-        }
+    private suspend fun findDocument(tool: AgentTool.ReadFile): DocumentEntity? = when {
+        // 他フォルダの doc を読まないよう、docId 指定でも現在の tree に属するものだけ返す
+        tool.docId != null -> withContext(Dispatchers.IO) { documentDao.getById(tool.docId) }?.takeIf { it.treeUri == treeUri }
+        tool.path != null -> resolvePath(allDocs(), tool.path)
+        else -> null
     }
 
     private fun buildTruncatedContent(doc: DocumentEntity, chunks: List<ChunkEntity>): String {
@@ -330,4 +325,30 @@ class ToolExecutor(
 
     private fun parseFirstHeadings(json: String, count: Int): String =
         JsonArrays.toStringList(json).take(count).joinToString(", ")
+
+    internal companion object {
+        /**
+         * Planner が書いたパスに当たる文書。部分一致の 1 件目を取ると `AI.md` で `AI入門.md` を、
+         * `diary/2024-01-01.md` で `old/2024-01-01.md` を読んでいたので、近い一致から順に探す（ADR-073）。
+         * パスの完全一致 → 末尾のパスの一致 → ファイル名（拡張子なし）の一致 → 部分一致。同じ段に複数あれば短いパス。
+         */
+        internal fun resolvePath(docs: List<DocumentEntity>, rawPath: String): DocumentEntity? {
+            val path = rawPath.trim().trim('/').removePrefix("./")
+            val stem = FileNames.stem(path)
+            if (stem.isBlank()) return null
+            val withMd = if (path.endsWith(".md", ignoreCase = true)) path else "$path.md"
+            val stages: List<(DocumentEntity) -> Boolean> = listOf(
+                { it.relativePath.equals(path, true) || it.relativePath.equals(withMd, true) },
+                { it.relativePath.endsWith("/$path", true) || it.relativePath.endsWith("/$withMd", true) },
+                { FileNames.stem(it.relativePath).equals(stem, true) },
+                { it.relativePath.contains(path, true) || FileNames.stem(it.relativePath).contains(stem, true) },
+            )
+            for (matches in stages) {
+                docs.filter(matches)
+                    .minWithOrNull(compareBy<DocumentEntity>({ it.relativePath.length }, { it.relativePath }))
+                    ?.let { return it }
+            }
+            return null
+        }
+    }
 }

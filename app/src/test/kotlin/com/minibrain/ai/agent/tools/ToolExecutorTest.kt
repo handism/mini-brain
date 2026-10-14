@@ -297,4 +297,59 @@ class ToolExecutorTest {
 
         assertTrue(result.summary, result.summary.contains("a.md"))
     }
+
+    // ─── read_file のパス解決（ADR-073） ───
+
+    private fun doc(id: Long, path: String) = DocumentEntity(
+        id = id, treeUri = treeUri, fileUri = "u$id", fileName = path.substringAfterLast('/'),
+        relativePath = path, lastModified = 0L, contentHash = "h",
+    )
+
+    @Test
+    fun resolvePath_prefersExactFileNameOverPartialMatch() {
+        val docs = listOf(doc(1, "AI入門.md"), doc(2, "MAIL/inbox.md"), doc(3, "tech/AI.md"))
+        assertEquals(3L, ToolExecutor.resolvePath(docs, "AI.md")?.id)
+        assertEquals(3L, ToolExecutor.resolvePath(docs, "AI")?.id)
+    }
+
+    @Test
+    fun resolvePath_distinguishesSameNameInDifferentFolders() {
+        val docs = listOf(doc(1, "old/2024-01-01.md"), doc(2, "diary/2024-01-01.md"))
+        assertEquals(2L, ToolExecutor.resolvePath(docs, "diary/2024-01-01.md")?.id)
+        assertEquals(2L, ToolExecutor.resolvePath(docs, "/diary/2024-01-01.md")?.id)
+        assertEquals(1L, ToolExecutor.resolvePath(docs, "./old/2024-01-01")?.id)
+    }
+
+    @Test
+    fun resolvePath_matchesTrailingPath() {
+        val docs = listOf(doc(1, "work/meetings/週次.md"), doc(2, "private/週次.md"))
+        assertEquals(1L, ToolExecutor.resolvePath(docs, "meetings/週次.md")?.id)
+    }
+
+    @Test
+    fun resolvePath_fallsBackToShortestPartialMatch() {
+        val docs = listOf(doc(1, "recipes/カレーの作り方まとめ.md"), doc(2, "カレーの作り方.md"))
+        assertEquals(2L, ToolExecutor.resolvePath(docs, "カレー")?.id)
+    }
+
+    @Test
+    fun resolvePath_returnsNullWhenNothingMatches() {
+        val docs = listOf(doc(1, "a.md"))
+        assertEquals(null, ToolExecutor.resolvePath(docs, "zzz.md"))
+        assertEquals(null, ToolExecutor.resolvePath(docs, "/"))
+    }
+
+    @Test
+    fun executeReadFile_byPath_readsTheExactFile() = runTest {
+        val docs = listOf(doc(1, "AI入門.md"), doc(2, "AI.md"))
+        coEvery { cache.documents() } returns docs
+        coEvery { chunkDao.getByDoc(2L) } returns listOf(
+            ChunkEntity(id = 10L, docId = 2L, headingPath = "AI", text = "本文", embedding = ByteArray(0)),
+        )
+
+        val result = toolExecutor.execute(ToolCall(1, AgentTool.ReadFile(docId = null, path = "AI.md")))
+
+        assertTrue(result.summary.startsWith("FILE: AI.md"))
+        io.mockk.coVerify(exactly = 0) { chunkDao.getByDoc(1L) }
+    }
 }

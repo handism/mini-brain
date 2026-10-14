@@ -94,7 +94,7 @@
 
 ### 5.3 ReAct DSL
 - ReAct の observation は「最新 2 件を full、それ以前を compact」で Planner に渡します（`addObservation`）。新しい observation は常に full で追加してください（ADR-031）。
-- ReAct ツールは現在の `treeUri` の外を読まないこと。`read_file` の docId 指定も `treeUri` 一致を確認します。`grep` / `vector_search` の scope はフォルダ単位で判定します（`diary` は `diary2/` に一致しない、ADR-031）。scope 付きの `grep` は BM25 を 500 件取ってから絞ります。`list_dir` は `/` や `.` をルートとして扱います。ツールの例外は `handleToolCall` で `ERROR: …` の観測にして、回答全体を止めません（ADR-068）。
+- ReAct ツールは現在の `treeUri` の外を読まないこと。`read_file` の docId 指定も `treeUri` 一致を確認します。パス指定は `ToolExecutor.resolvePath` でパスの完全一致 → 末尾のパス → ファイル名 → 部分一致（短いパス優先）の順に探します。部分一致の 1 件目を取ると別のファイルを読むためです（ADR-073）。`grep` / `vector_search` の scope はフォルダ単位で判定します（`diary` は `diary2/` に一致しない、ADR-031）。scope 付きの `grep` は BM25 を 500 件取ってから絞ります。`list_dir` は `/` や `.` をルートとして扱います。ツールの例外は `handleToolCall` で `ERROR: …` の観測にして、回答全体を止めません（ADR-068）。
 - ReAct ループで Planner LLM が出力するツール命令は、JVM 上でのユニットテスト実行の互換性を担保するため、**JSON ではなく独自の DSL 形式（key:value）** を用います。
 - `PlannerHintBuilder.build` は 期間クエリ（`resolveDateRange`）→ 日付クエリ（YYYYMMDD 8桁 DB 検索）→ ファイル名一致 の順に解析して hint を構築します。
 

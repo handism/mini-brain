@@ -2248,3 +2248,12 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 - 元号の正規表現が `(\d{1,2})年` で「令和元年」「平成元年」に一致せず、`isDiaryQuery` だけが反応して月日から別の年を推定していた。「元」を 1 年として読む。
 - `DateValidator.parseDayNotInFuture` / `parseMonth` は年の範囲を `LocalDate.now()` で決めており、渡した today と食い違っていた（ADR-071 で `parseDay` だけ直していた）。全関数で today から決める。
 - 「今週の金曜」（まだ来ていない曜日）は `resolveThisWeekDow` が null を返すが、次の `resolveRelativeKeywords` が「今週」で今週の今日までを返すので、別の年の日付にはならない。変えない。
+
+## ADR-073: read_file のパス指定は近い一致から順に探す
+
+- ステータス: 採用
+- 日付: 2026-10-14
+
+- `ToolExecutor.findDocument` はパスから拡張子なしのファイル名だけを取り、`relativePath LIKE '%名前%'` の 1 件目（順序の指定なし）を読んでいた。Planner の `read_file("AI.md")` で `AI入門.md` や `MAIL/…` を、`read_file("diary/2024-01-01.md")` で `old/2024-01-01.md` を読むことがあった。
+- `ToolExecutor.resolvePath` で、ロード済みの `SearchRequestCache.documents()`（現在の tree だけ）から、パスの完全一致 → 末尾のパスの一致 → ファイル名（拡張子なし）の一致 → 部分一致の順に探す。同じ段に複数あれば短いパスを選ぶ。先頭の `/`・`./` と `.md` の有無は問わない。
+- `DocumentDao.searchByPath` は使わなくなったが、DAO のテストがあるので残す。
