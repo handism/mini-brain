@@ -95,6 +95,7 @@ import com.minibrain.ui.components.CHAT_CONTENT_MAX_WIDTH
 import com.minibrain.ui.components.MessageBubble
 import com.minibrain.data.db.entities.MessageRole
 import com.minibrain.data.repo.IndexingState
+import com.minibrain.ui.components.indexingPhaseLabel
 import com.minibrain.ui.vm.ChatError
 import com.minibrain.ui.vm.ChatErrorKind
 import com.minibrain.ui.vm.ChatMessage
@@ -240,7 +241,7 @@ private fun ChatIndexingBanner(state: IndexingState.Progress) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
-                stringResource(R.string.chat_indexing_banner, state.current, state.total),
+                stringResource(R.string.chat_indexing_banner, indexingPhaseLabel(state.phase), state.current, state.total),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import com.minibrain.data.repo.IndexingState
+import com.minibrain.ui.components.indexingPhaseLabel
 import com.minibrain.ui.components.rememberFolderLauncher
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -261,7 +262,7 @@ private fun KnowledgeBaseSection(
         icon = Icons.Default.Sync,
         headline = stringResource(R.string.settings_reindex_changed),
         supporting = indexingProgress?.let {
-            stringResource(R.string.settings_reindexing, it.current, it.total)
+            stringResource(R.string.settings_reindexing, indexingPhaseLabel(it.phase), it.current, it.total)
         } ?: stringResource(R.string.settings_reindex_changed_desc),
         trailing = indexingProgress?.let {
             { CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp) }

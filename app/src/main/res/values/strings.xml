@@ -73,7 +73,7 @@
     <string name="chat_open_file">ファイルを開く</string>
     <string name="chat_error_search">検索に失敗しました</string>
     <string name="chat_error_generation">回答の生成に失敗しました</string>
-    <string name="chat_indexing_banner">インデックス作成中（%1$d/%2$d）。完了までは回答に使われないファイルがあります</string>
+    <string name="chat_indexing_banner">インデックス作成中（%1$s %2$d/%3$d）。完了までは回答に使われないファイルがあります</string>
     <string name="chat_scroll_to_bottom">最新のメッセージへ</string>
     <string name="chat_open_file_failed">このファイルを開けるアプリが見つかりません</string>
     <string name="search_log">検索ログ</string>
@@ -115,7 +115,10 @@
     <string name="settings_current_folder">現在のフォルダ</string>
     <string name="settings_reindex_changed">再インデックス</string>
     <string name="settings_reindex_changed_desc">変更・追加・削除されたファイルだけを反映します</string>
-    <string name="settings_reindexing">インデックス中... %1$d/%2$d</string>
+    <string name="settings_reindexing">インデックス中... %1$s %2$d/%3$d</string>
+    <string name="indexing_phase_scanning">スキャン中</string>
+    <string name="indexing_phase_reading">1/2 読み込み</string>
+    <string name="indexing_phase_embedding">2/2 解析</string>
     <string name="settings_section_chat_history">チャット履歴</string>
     <string name="settings_clear_history">チャット履歴をすべて削除</string>
     <string name="settings_section_developer">開発者</string>

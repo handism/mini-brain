@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.minibrain.data.db.entities.MessageRole
+import com.minibrain.data.repo.IndexingPhase
 import com.minibrain.data.repo.IndexingState
 import com.minibrain.ui.vm.ChatError
 import com.minibrain.ui.vm.ChatErrorKind
@@ -290,13 +291,13 @@ class ChatScreenTest {
     @Test
     fun testIndexingBannerIsShownWhileIndexing() {
         val vm = relaxedVm()
-        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Progress(3, 10, "a.md"))
+        every { vm.indexingState } returns MutableStateFlow<IndexingState>(IndexingState.Progress(3, 10, "a.md", IndexingPhase.EMBEDDING))
 
         composeTestRule.setContent {
             ChatScreen(onBack = {}, onOpenHistory = {}, vm = vm)
         }
 
-        composeTestRule.onNodeWithText("インデックス作成中（3/10）。完了までは回答に使われないファイルがあります").assertIsDisplayed()
+        composeTestRule.onNodeWithText("インデックス作成中（2/2 解析 3/10）。完了までは回答に使われないファイルがあります").assertIsDisplayed()
     }
 
     @Test

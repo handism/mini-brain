@@ -37,9 +37,17 @@ import org.json.JSONArray
 import kotlin.coroutines.cancellation.CancellationException
 import timber.log.Timber
 
+enum class IndexingPhase { SCANNING, READING, EMBEDDING }
+
 sealed class IndexingState {
     object Idle : IndexingState()
-    data class Progress(val current: Int, val total: Int, val fileName: String) : IndexingState()
+    /** 読み込みと解析はどちらも 1 から数え直すので、数字だけだと 2 周しているように見える。段階も一緒に出す */
+    data class Progress(
+        val current: Int,
+        val total: Int,
+        val fileName: String,
+        val phase: IndexingPhase = IndexingPhase.SCANNING,
+    ) : IndexingState()
     data class Done(val fileCount: Int, val chunkCount: Int) : IndexingState()
     data class Error(val message: String) : IndexingState()
 }
@@ -132,7 +140,7 @@ class DocumentRepository(
             treeUri,
             onListing = { found -> _indexingState.value = IndexingState.Progress(0, 0, "スキャン中... $found 件") },
             onRead = { done, total, name ->
-                _indexingState.value = IndexingState.Progress(done, total, "読み込み中: $name")
+                _indexingState.value = IndexingState.Progress(done, total, "読み込み中: $name", IndexingPhase.READING)
             },
         )
         val total = mdFiles.size
@@ -270,7 +278,9 @@ class DocumentRepository(
             // 採番された docId を使って chunk を埋め込み・収集する
             pendingDocs.forEachIndexed { i, pending ->
                 // 重い埋め込みフェーズの進捗を通知する
-                _indexingState.value = IndexingState.Progress(i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}")
+                _indexingState.value = IndexingState.Progress(
+                    i + 1, pendingDocs.size, "解析中: ${pending.mdFile.name}", IndexingPhase.EMBEDDING
+                )
 
                 val docId = insertedDocIds[i]
                 val rawChunks = try {

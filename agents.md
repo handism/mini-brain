@@ -157,7 +157,7 @@
 - 履歴一覧と Home の「最近のチャット」は同じ `SessionListItem` を使います（`ChatSessionSummary.messageCount` / `lastAnswer`）。Home の最終インデックス日時は `MiniBrainApp` が `IndexingState.Done` を見て DataStore（`PREF_LAST_INDEXED_AT` / `PREF_LAST_INDEXED_TREE`）に記録します。
 - ダークモードのウィンドウ背景は `values-night/themes.xml` で暗くしています。テーマを変えるときは昼夜の両方を直してください。
 - フォルダの切り替えは Home・Settings とも `switchKnowledgeFolder`（`ui/vm/KnowledgeFolder.kt`）を通します。前のフォルダのインデックスを消すので、既にフォルダがあるときは `FolderChangeDialog` で確認してからピッカーを開きます（ADR-036）。
-- インデックスの進み具合は Home だけでなく Chat（バナー）と Settings（再インデックス行）にも出します。Settings はインデックス中に再インデックス・フォルダ変更を押せません（押せない行は `SettingsListItem(enabled = false)` で薄くする）。Home の「チャットを開く」はインデックス中も押せます（ADR-058）。
+- インデックスの進み具合は Home だけでなく Chat（バナー）と Settings（再インデックス行）にも出します。Settings はインデックス中に再インデックス・フォルダ変更を押せません（押せない行は `SettingsListItem(enabled = false)` で薄くする）。Home の「チャットを開く」はインデックス中も押せます（ADR-058）。読み込みと解析はどちらも 1 から数え直すので、数字だけを出す Chat・Settings では `IndexingState.Progress.phase` から「1/2 読み込み」「2/2 解析」を添えます（`indexingPhaseLabel`）。
 - チャットの失敗は `ChatViewModel.error`（`ChatError(kind, detail)`）で渡し、見出しは `kind` から strings.xml で決め、例外の中身は「詳細を表示」で折りたたみます。「再試行」は `regenerate` です。
 - 検索ログ表示の既定値は `SHOW_SEARCH_LOG_DEFAULT = false`（開発者向けのため）。コピーボタンは回答側だけに付けます。
 - 検索精度の評価（設定 → 開発者、`EvalScreen`）は SAF で選んだ評価セット JSON を `EvalRunner` に流します。検索まわりを変えたら前後で流して Recall / MRR / 候補 Recall を比べてください。`SearchPipelineResult.candidates`（RRF 後・Reranker 前）は評価で「候補に無い / 絞り込みで落ちた」を分けるのに使うので外さないこと（ADR-037）。評価レポートは「絞り込みで落ちた」を、候補の順位から「Reranker に渡らず（21 位以下）」と「Reranker が落とした」に分けて出します（ADR-047）。LLM の出力は実行ごとに揺れるので、1 回の評価で 1〜2 件動いただけでは判断しないこと。段階ごとの所要時間は `SearchTimingEvent` で検索ログと評価レポートの「内訳」列に出ます（ADR-044）。
