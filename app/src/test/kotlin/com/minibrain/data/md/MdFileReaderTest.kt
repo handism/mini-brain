@@ -114,6 +114,24 @@ class MdFileReaderTest {
         assertEquals(listOf("京都旅行"), MarkdownMetaExtractor.extractHeadings(content))
     }
 
+    // 消したノート（Obsidian の .trash）や設定フォルダの .md を検索に出さない（ADR-074）
+    @Test
+    fun `listMdFiles skips hidden folders and files`() = runTest {
+        val trash = tree.dir("root", ".trash")
+        val obsidian = tree.dir("root", ".obsidian")
+        val notes = tree.dir("root", "notes")
+        val hiddenInside = tree.dir(notes, ".git")
+        tree.file(trash, "消したノート.md", "deleted")
+        tree.file(obsidian, "workspace.md", "config")
+        tree.file(hiddenInside, "x.md", "x")
+        tree.file(notes, ".draft.md", "draft")
+        tree.file(notes, "残すノート.md", "keep")
+
+        val paths = MdFileReader.listMdFiles(tree).map { it.relativePath }
+
+        assertEquals(listOf("notes/残すノート.md"), paths)
+    }
+
     @Test
     fun `listMdFiles reaches notes nested several levels deep`() = runTest {
         val tech = tree.dir("root", "tech")

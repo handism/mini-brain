@@ -151,6 +151,9 @@ object MdFileReader {
                 throw IOException("フォルダを読み込めませんでした: $where", e)
             }
             for (child in children) {
+                // `.trash`（Obsidian のゴミ箱）・`.obsidian`・`.git` などの隠しフォルダ・ファイルは読まない。
+                // 消したノートが検索に出続けるため（ADR-074）
+                if (child.name.startsWith('.')) continue
                 val path = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
                 when {
                     child.isDirectory -> pending.addLast(child.documentId to path)

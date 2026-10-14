@@ -2257,3 +2257,12 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 - `ToolExecutor.findDocument` はパスから拡張子なしのファイル名だけを取り、`relativePath LIKE '%名前%'` の 1 件目（順序の指定なし）を読んでいた。Planner の `read_file("AI.md")` で `AI入門.md` や `MAIL/…` を、`read_file("diary/2024-01-01.md")` で `old/2024-01-01.md` を読むことがあった。
 - `ToolExecutor.resolvePath` で、ロード済みの `SearchRequestCache.documents()`（現在の tree だけ）から、パスの完全一致 → 末尾のパスの一致 → ファイル名（拡張子なし）の一致 → 部分一致の順に探す。同じ段に複数あれば短いパスを選ぶ。先頭の `/`・`./` と `.md` の有無は問わない。
 - `DocumentDao.searchByPath` は使わなくなったが、DAO のテストがあるので残す。
+
+## ADR-074: `.` で始まるフォルダ・ファイルをインデックスしない
+
+- ステータス: 採用
+- 日付: 2026-10-14
+
+- `MdFileReader.collectMdEntries` は隠しフォルダも辿っていた。Obsidian はノートを消すと `.trash/` に移すので、消したはずのノートが検索・回答に出続けた。`.obsidian/` や `.git/` の中の `.md` も読んでいた。
+- 名前が `.` で始まるフォルダとファイルは列挙で飛ばす。特定の名前を並べず一律にするのは、他のアプリの隠しフォルダ（`.stfolder` など）も同じ扱いでよいため。
+- 既にインデックスした分は、次の差分インデックスで「フォルダから消えたファイル」（ADR-029）として document / chunk / FTS ごと消えるので、マイグレーションは不要。

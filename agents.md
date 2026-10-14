@@ -48,6 +48,7 @@
 ### 2.4 Storage Access Framework (SAF)
 - フォルダの選択には `ActivityResultContracts.OpenDocumentTree()` を使用し、`takePersistableUriPermission` で永続アクセス権を取得してファイルを読み込みます。
 - フォルダの列挙（`MdFileReader`）は `DocumentsContract` を直接 query します。`DocumentFile` は query の失敗を握りつぶして空を返し、深い階層のノートが黙って欠けたため使いません。列挙の失敗は例外にして、インデックスを Error にします（ADR-041）。
+- 名前が `.` で始まるフォルダ・ファイル（`.trash` / `.obsidian` / `.git` など）は `MdFileReader` の列挙で飛ばします。Obsidian で消したノートは `.trash/` に移るので、読むと検索に出続けます。既に入った分は次の差分インデックスで「消えたファイル」として削除されます（ADR-074）。
 - 読み込んだ本文の先頭の BOM（U+FEFF）は `MdFileReader` で外します。残ると 1 行目の `---`（フロントマター）や `# 見出し` を読み落とします（ADR-067）。
 - ファイルの読み込み例外・null stream は列挙成功と区別し、インデックスを Error にします。DB更新前に読み込みを完了することで、一時的に読めないファイルの既存索引を削除しません。
 - 列挙・読み込みは全ファイルを読み終えるまで返らないので、`listMdFiles` の `onListing`（見つかった件数）/ `onRead`（読み終えた数）で `IndexingState.Progress` を更新します。クラウドの提供元では読み込みに時間がかかり、無いと「0/0」のまま止まって見えます。
