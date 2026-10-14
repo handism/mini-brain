@@ -333,7 +333,11 @@ private fun ModelInfoSection(
             stringResource(R.string.settings_llm_downloading, llmModelName(modelSwitch.target), (it * 100).toInt())
         } ?: stringResource(R.string.settings_llm_downloading_unknown, llmModelName(modelSwitch.target))
         is ModelSwitchState.Loading -> stringResource(R.string.settings_llm_loading, llmModelName(modelSwitch.target))
-        is ModelSwitchState.Failed -> stringResource(R.string.settings_llm_switch_failed, llmModelName(modelSwitch.target))
+        is ModelSwitchState.Failed -> if (modelSwitch.restoreFailed) {
+            stringResource(R.string.settings_llm_restore_failed, llmModelName(modelSwitch.target))
+        } else {
+            stringResource(R.string.settings_llm_switch_failed, llmModelName(modelSwitch.target))
+        }
     }
     val busy = modelSwitch is ModelSwitchState.Downloading || modelSwitch is ModelSwitchState.Loading
     SettingsListItem(

@@ -415,8 +415,13 @@ class DocumentRepository(
         }
     }
 
-    /** 起動時に FTS インデックスが不完全であれば全チャンクを再投入する。 */
-    suspend fun ensureFtsIndex() = withContext(Dispatchers.IO) {
+    /**
+     * 起動時に FTS インデックスが不完全であれば全チャンクを再投入する。
+     * インデックス作成と同時に走ると、挿入中の FTS 行を全消去で消してしまうので indexMutex で直列化する（ADR-075）。
+     */
+    suspend fun ensureFtsIndex() = indexMutex.withLock { ensureFtsIndexLocked() }
+
+    private suspend fun ensureFtsIndexLocked() = withContext(Dispatchers.IO) {
         val chunkCount = chunkDao.count()
         val ftsCount = ftsCount()
         if (ftsCount == chunkCount) return@withContext

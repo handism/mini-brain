@@ -17,7 +17,11 @@ sealed interface ModelSwitchState {
     /** [fraction] は 0〜1。大きさが分からない間は null */
     data class Downloading(val target: LlmModel, val fraction: Float?) : ModelSwitchState
     data class Loading(val target: LlmModel) : ModelSwitchState
-    data class Failed(val target: LlmModel, val detail: String?) : ModelSwitchState
+    /**
+     * [restoreFailed] は前のモデルにも戻せなかったとき。LLM が読み込まれていないので、
+     * 再起動（起動時に保存済みのモデルを読み込む）か、別のモデルへの切り替えが要る（ADR-075）
+     */
+    data class Failed(val target: LlmModel, val detail: String?, val restoreFailed: Boolean = false) : ModelSwitchState
 }
 
 /**
@@ -110,19 +114,27 @@ class LlmModelSwitcher(
             val loaded = runCatchingCancellable { llmService.initialize(downloader.llmFile(target), forceCpu) }
             if (loaded.isFailure) {
                 Timber.tag(TAG).w(loaded.exceptionOrNull(), "failed to load $target, restoring $current")
-                runCatchingCancellable { llmService.initialize(downloader.llmFile(current), forceCpu) }
-                _state.value = ModelSwitchState.Failed(target, loaded.exceptionOrNull()?.localizedMessage)
+                _state.value = ModelSwitchState.Failed(
+                    target, loaded.exceptionOrNull()?.localizedMessage, restoreFailed = !restore(current, forceCpu),
+                )
                 return@withContext
             }
             // 選択を保存できなければ、次回の起動で読み込むモデルと食い違うので前のモデルに戻す
             val saved = runCatchingCancellable { dataStore.setSelectedLlmModel(target) }
             if (saved.isFailure) {
                 Timber.tag(TAG).w(saved.exceptionOrNull(), "failed to save $target, restoring $current")
-                runCatchingCancellable { llmService.initialize(downloader.llmFile(current), forceCpu) }
-                _state.value = ModelSwitchState.Failed(target, saved.exceptionOrNull()?.localizedMessage)
+                _state.value = ModelSwitchState.Failed(
+                    target, saved.exceptionOrNull()?.localizedMessage, restoreFailed = !restore(current, forceCpu),
+                )
                 return@withContext
             }
             _state.value = ModelSwitchState.Idle
         }
     }
+
+    /** 前のモデルを読み込み直す。失敗を握りつぶすと LLM が無いまま「切り替え失敗」とだけ出ていた（ADR-075） */
+    private suspend fun restore(current: LlmModel, forceCpu: Boolean): Boolean =
+        runCatchingCancellable { llmService.initialize(downloader.llmFile(current), forceCpu) }
+            .onFailure { Timber.tag(TAG).e(it, "failed to restore $current") }
+            .isSuccess
 }

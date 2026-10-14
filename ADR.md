@@ -2266,3 +2266,11 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 - `MdFileReader.collectMdEntries` は隠しフォルダも辿っていた。Obsidian はノートを消すと `.trash/` に移すので、消したはずのノートが検索・回答に出続けた。`.obsidian/` や `.git/` の中の `.md` も読んでいた。
 - 名前が `.` で始まるフォルダとファイルは列挙で飛ばす。特定の名前を並べず一律にするのは、他のアプリの隠しフォルダ（`.stfolder` など）も同じ扱いでよいため。
 - 既にインデックスした分は、次の差分インデックスで「フォルダから消えたファイル」（ADR-029）として document / chunk / FTS ごと消えるので、マイグレーションは不要。
+
+## ADR-075: モデルを元に戻せなかったことを伝え、起動時の FTS 再構築をインデックス作成と直列化する
+
+- ステータス: 採用
+- 日付: 2026-10-14
+
+- `LlmModelSwitcher` は、新しいモデルの読み込みや選択の保存に失敗すると前のモデルを読み込み直すが、その失敗を握りつぶしていた。`LlmService.initialize` は先に前のエンジンを閉じるので、このときエンジンは null のまま残る。画面には「切り替えられませんでした」とだけ出て、次の質問で "LlmService not initialized" になるまで気づけなかった。`ModelSwitchState.Failed.restoreFailed` を立て、設定画面で「元のモデルも読み込めなかった。再起動か、別のモデルを選ぶ」と出す。
+- `DocumentRepository.ensureFtsIndex`（起動時）は `indexMutex` を取っておらず、インデックス作成と同時に走ると `DELETE FROM chunks_fts` が挿入中の行を消しうる。`indexMutex` で直列化する。

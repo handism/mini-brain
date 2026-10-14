@@ -35,7 +35,7 @@
   ```
 - **実行スレッド制限**: LiteRT-LM は単一スレッド設計です。`QueryExpander` と `LlmReranker` などでの並行 LLM 呼び出しは不可であり、逐次実行を厳守してください。`LlmService` は `initialize` / `generateStream` / `close` を同じ `Mutex` で直列化しています（安全網であり、逐次呼び出しの原則は変わりません）。`generateStream` の collect 中に別の `generateStream` を呼ぶとデッドロックします（ADR-032）。JSON 配列だけを返させる呼び出し（`QueryExpander` / `LlmReranker`）は `generateJsonArray` を使い、`]` が出たら生成を打ち切り、タイムアウト（展開 15 秒 / Reranker 30 秒）なら元のクエリ・RRF 順に戻します。最後まで collect すると同じ語の繰り返しで `maxNumTokens` まで止まらず、1 件 100 秒かかったことがあります（ADR-044）。それ以外の回答前の呼び出し（`CoverageChecker` / Planner / `summarize`）は `generateBounded` で上限（20 秒 / 30 秒 / 30 秒）を付け、時間切れでもそこまでの出力を解析します。`CoverageChecker` は yes / no の行が出たら打ち切ります（ADR-066）。
 
-- **モデルの選択**: 回答などに使う LLM は `LlmModel`（E2B 既定 / E4B）で、設定から切り替えます。ファイルは `ModelDownloader.llmFile(model)` で引き、`llmModelFile` のような固定のパスを足さないでください。切り替えは `LlmModelSwitcher`（`AppContainer.llmModelSwitcher`）で「ダウンロード（済んでいれば省く）→ 読み込み → 選択を保存」の順に行い、読み込みに失敗したら前のモデルに戻します（ADR-057）。前のモデルは消さずに残し、使っていないモデルは設定のダイアログから `LlmModelSwitcher.delete` で消します。済んだかは `isLlmDownloaded`（ファイルの有無とサイズ）で見て、切り替えのたびにハッシュを計算しません（ADR-070）。切り替えに失敗した後も行のタップでダイアログを開き、失敗したモデルは途中のファイルしか無くても削除できます（ADR-071）。設定画面を離れても止まらないようアプリ全体のスコープで動かし、読み込み以降は `NonCancellable` で最後まで終えます（ADR-062）。読み込みは `LlmService.forceCpu`（最後に読み込めたときの CPU 指定）を引き継ぎます（ADR-064）。選択の保存に失敗したら前のモデルに戻し、想定外の例外でも `Downloading` / `Loading` のまま残しません（ADR-066）。`ModelDownloader.isAllReady` / `isLlmReady` は数 GB の SHA-256 を計算するので、メインスレッドで呼ばないでください（ADR-064）。
+- **モデルの選択**: 回答などに使う LLM は `LlmModel`（E2B 既定 / E4B）で、設定から切り替えます。ファイルは `ModelDownloader.llmFile(model)` で引き、`llmModelFile` のような固定のパスを足さないでください。切り替えは `LlmModelSwitcher`（`AppContainer.llmModelSwitcher`）で「ダウンロード（済んでいれば省く）→ 読み込み → 選択を保存」の順に行い、読み込みに失敗したら前のモデルに戻します（ADR-057）。前のモデルは消さずに残し、使っていないモデルは設定のダイアログから `LlmModelSwitcher.delete` で消します。済んだかは `isLlmDownloaded`（ファイルの有無とサイズ）で見て、切り替えのたびにハッシュを計算しません（ADR-070）。切り替えに失敗した後も行のタップでダイアログを開き、失敗したモデルは途中のファイルしか無くても削除できます（ADR-071）。設定画面を離れても止まらないようアプリ全体のスコープで動かし、読み込み以降は `NonCancellable` で最後まで終えます（ADR-062）。読み込みは `LlmService.forceCpu`（最後に読み込めたときの CPU 指定）を引き継ぎます（ADR-064）。選択の保存に失敗したら前のモデルに戻し、想定外の例外でも `Downloading` / `Loading` のまま残しません（ADR-066）。前のモデルにも戻せなかったら `ModelSwitchState.Failed.restoreFailed` を立て、設定画面で再起動か別のモデルを促します（ADR-075）。`ModelDownloader.isAllReady` / `isLlmReady` は数 GB の SHA-256 を計算するので、メインスレッドで呼ばないでください（ADR-064）。
 
 ### 2.2 ONNX Runtime + multilingual-e5-small (Embedder)
 - **クエリ・文章プレフィックス**: クエリには `query: `、文書（チャンク）には `passage: ` のプレフィックス付与が必須。`EmbedType` enum を使用します。
@@ -114,7 +114,7 @@
 - チャンクの埋め込みは `EmbedderService.embedAll` で `EMBED_BATCH_SIZE = 8` 件ずつまとめて推論します。バッチが失敗したら 1 件ずつの `embed` に切り替え、失敗したチャンクだけを捨てます（ADR-029）。
 - チャンクの埋め込み入力は `Chunk.embeddingText()`（「パス > 見出し」+ 改行 + 本文）です。DB の `text` と FTS には付けません。作り方を変えたら既存ベクトルと混ざらないよう、DB を上げて `contentHash` を書き換えるマイグレーションを足してください（`MIGRATION_6_7`、ADR-038）。
 - `MarkdownChunker.chunk` は先頭の YAML フロントマターを `Frontmatter.split` で本文から外し、区切り線を除いた中身を文書の最後のチャンク（headingPath = ファイル名）にします。先頭に置くと先頭チャンクを使うスニペット（`firstChunkOf`）が空になるためです。tags などは検索の手がかりとして残します。800 字を超えるフロントマターは本文と同じく `splitLongSection` で切ります（ADR-066）。メタデータ抽出は元の全文から行います（ADR-065）。
-- `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。
+- `ensureFtsIndex` は件数が合わないとき、`chunks_fts` を全消去してから再投入します（孤立 FTS 行の解消のため）。インデックス作成と競合しないよう `indexMutex` を取ります（ADR-075）。
 
 **チューニング定数**
 - RRF 後の候補は `SearchPipeline.collapseByDoc` で 1 ファイル 1 件にまとめてから Reranker に渡します。代表は最上位のチャンクで、ファイル名一致（`topicMatch`）があればそちらを残し、日付ヒットの日付は代表のスニペットに `[日付:]` として付けます。Reranker の後、RRF 上位 `RRF_KEEP_COUNT = 3` 件のうち落とされたものを末尾に戻します（`keepRrfTop`、ADR-047）。

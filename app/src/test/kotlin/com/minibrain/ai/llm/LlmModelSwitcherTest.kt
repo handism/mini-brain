@@ -131,6 +131,22 @@ class LlmModelSwitcherTest {
     }
 
     @Test
+    fun `前のモデルにも戻せなければ、そのことを失敗の状態に出す`() = runTest(testDispatcher) {
+        every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+        coEvery { llm.initialize(File("e4b"), any()) } throws RuntimeException("out of memory")
+        coEvery { llm.initialize(File("e2b"), any()) } throws RuntimeException("still out of memory")
+        val switcher = switcher()
+
+        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        assertEquals(
+            ModelSwitchState.Failed(LlmModel.E4B, "out of memory", restoreFailed = true),
+            switcher.state.value,
+        )
+    }
+
+    @Test
     fun `ダウンロードに失敗したら読み込まない`() = runTest(testDispatcher) {
         every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(
             DownloadResult.Progress(DownloadProgress("e4b", 10, 100)),
