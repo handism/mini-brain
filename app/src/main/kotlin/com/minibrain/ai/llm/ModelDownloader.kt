@@ -41,6 +41,11 @@ class ModelDownloader(private val context: Context) {
 
     fun isLlmReady(model: LlmModel = LlmModel.DEFAULT): Boolean =
         llmFile(model).let { it.exists() && it.length() >= model.minSize && verifyHash(it, model.sha256) }
+    /**
+     * LLM のファイルがあるか。ダウンロードはハッシュを確かめてから本来の名前に移すので、
+     * 数 GB の SHA-256 を計算せずに「ダウンロード済み」を出すのに使える（ADR-070）。
+     */
+    fun isLlmDownloaded(model: LlmModel): Boolean = llmFile(model).let { it.exists() && it.length() >= model.minSize }
     fun isEmbedderReady(): Boolean = embedderModelFile.exists() && embedderModelFile.length() >= MIN_EMBEDDER_SIZE && verifyHash(embedderModelFile, EMBEDDER_SHA256)
     fun isTokenizerReady(): Boolean = tokenizerModelFile.exists() && tokenizerModelFile.length() >= MIN_TOKENIZER_SIZE && verifyHash(tokenizerModelFile, TOKENIZER_SHA256)
     fun isAllReady(model: LlmModel = LlmModel.DEFAULT): Boolean = isLlmReady(model) && isEmbedderReady() && isTokenizerReady()
@@ -87,11 +92,14 @@ class ModelDownloader(private val context: Context) {
         }
     }.flowOn(Dispatchers.IO)
 
-    /** LLM だけをダウンロードする（設定でモデルを切り替えるとき、ADR-057）。済んでいれば Done だけを出す */
+    /**
+     * LLM だけをダウンロードする（設定でモデルを切り替えるとき、ADR-057）。済んでいれば Done だけを出す。
+     * 前に使ったモデルへ戻すたびに数 GB のハッシュを計算しないよう、済んだかはファイルの有無で見る（ADR-070）。
+     */
     fun downloadLlm(model: LlmModel): Flow<DownloadResult> = flow {
         try {
             val file = llmFile(model)
-            if (isLlmReady(model) || downloadAndVerifyModel(model.url, model.fileName, model.sha256, file, "LLM")) {
+            if (isLlmDownloaded(model) || downloadAndVerifyModel(model.url, model.fileName, model.sha256, file, "LLM")) {
                 emit(DownloadResult.Done(file))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {

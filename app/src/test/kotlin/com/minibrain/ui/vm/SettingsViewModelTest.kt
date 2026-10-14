@@ -93,6 +93,7 @@ class SettingsViewModelTest {
         every { container.applicationScope } returns CoroutineScope(testDispatcher)
         every { container.llmModelSwitcher } returns llmModelSwitcher
         every { llmModelSwitcher.state } returns MutableStateFlow(ModelSwitchState.Idle)
+        every { llmModelSwitcher.downloaded } returns MutableStateFlow(emptySet())
         every { app.contentResolver } returns contentResolver
         every { documentRepository.indexingState } returns indexingStateFlow
 

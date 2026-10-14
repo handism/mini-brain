@@ -34,14 +34,16 @@ class LlmModelSwitcherTest {
         every { downloader.llmFile(LlmModel.E2B) } returns File("e2b")
         every { downloader.llmFile(LlmModel.E4B) } returns File("e4b")
         every { downloader.deleteLlm(any()) } returns Unit
+        every { downloader.isLlmDownloaded(any()) } returns false
     }
 
     private fun switcher(scope: CoroutineScope = CoroutineScope(testDispatcher)) =
         LlmModelSwitcher(scope, downloader, llm, dataStore)
 
     @Test
-    fun `モデルを切り替えると読み込んでから選択を保存し、前のモデルを消す`() = runTest(testDispatcher) {
+    fun `モデルを切り替えると読み込んでから選択を保存し、前のモデルは残す`() = runTest(testDispatcher) {
         every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+        every { downloader.isLlmDownloaded(any()) } returns true
         val switcher = switcher()
 
         switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
@@ -49,7 +51,54 @@ class LlmModelSwitcherTest {
 
         coVerify { llm.initialize(File("e4b"), any()) }
         coVerify { dataStore.updateData(any()) }
-        verify { downloader.deleteLlm(LlmModel.E2B) }
+        verify(exactly = 0) { downloader.deleteLlm(any()) }
+        assertEquals(ModelSwitchState.Idle, switcher.state.value)
+        assertEquals(setOf(LlmModel.E2B, LlmModel.E4B), switcher.downloaded.value)
+    }
+
+    @Test
+    fun `使っていないモデルを消せる`() = runTest(testDispatcher) {
+        val switcher = switcher()
+
+        switcher.delete(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        verify { downloader.deleteLlm(LlmModel.E4B) }
+    }
+
+    @Test
+    fun `使っているモデルは消さない`() = runTest(testDispatcher) {
+        val switcher = switcher()
+
+        switcher.delete(LlmModel.E2B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        verify(exactly = 0) { downloader.deleteLlm(any()) }
+    }
+
+    @Test
+    fun `切り替え中はモデルを消さない`() = runTest(testDispatcher) {
+        every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
+        val switcher = switcher()
+
+        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
+        switcher.delete(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        verify(exactly = 0) { downloader.deleteLlm(any()) }
+    }
+
+    @Test
+    fun `切り替えに失敗したモデルを消したら再試行の表示も消す`() = runTest(testDispatcher) {
+        every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Error("HTTP 500"))
+        val switcher = switcher()
+
+        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+        switcher.delete(LlmModel.E4B, current = LlmModel.E2B)
+        advanceUntilIdle()
+
+        verify { downloader.deleteLlm(LlmModel.E4B) }
         assertEquals(ModelSwitchState.Idle, switcher.state.value)
     }
 
@@ -109,7 +158,7 @@ class LlmModelSwitcherTest {
     }
 
     @Test
-    fun `読み込み中に止められても、選択の保存と前のモデルの削除まで終える`() = runTest(testDispatcher) {
+    fun `読み込み中に止められても、選択の保存まで終える`() = runTest(testDispatcher) {
         every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
         val loading = CompletableDeferred<Unit>()
         coEvery { llm.initialize(File("e4b"), any()) } coAnswers { loading.await() }
@@ -125,7 +174,6 @@ class LlmModelSwitcherTest {
         advanceUntilIdle()
 
         coVerify { dataStore.updateData(any()) }
-        verify { downloader.deleteLlm(LlmModel.E2B) }
         assertEquals(ModelSwitchState.Idle, switcher.state.value)
     }
 
@@ -141,18 +189,6 @@ class LlmModelSwitcherTest {
         coVerify { llm.initialize(File("e2b"), any()) }
         verify(exactly = 0) { downloader.deleteLlm(any()) }
         assertEquals(ModelSwitchState.Failed(LlmModel.E4B, "disk full"), switcher.state.value)
-    }
-
-    @Test
-    fun `前のモデルを消せなくても切り替えは終える`() = runTest(testDispatcher) {
-        every { downloader.downloadLlm(LlmModel.E4B) } returns flowOf(DownloadResult.Done(File("e4b")))
-        every { downloader.deleteLlm(LlmModel.E2B) } throws SecurityException("denied")
-        val switcher = switcher()
-
-        switcher.switch(LlmModel.E4B, current = LlmModel.E2B)
-        advanceUntilIdle()
-
-        assertEquals(ModelSwitchState.Idle, switcher.state.value)
     }
 
     @Test

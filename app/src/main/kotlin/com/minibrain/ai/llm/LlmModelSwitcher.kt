@@ -21,8 +21,10 @@ sealed interface ModelSwitchState {
 }
 
 /**
- * LLM を切り替える。ダウンロード → 読み込み → 選択を保存 → 前のモデルのファイルを削除、の順。
+ * LLM を切り替える。ダウンロード（済んでいれば省く）→ 読み込み → 選択を保存、の順。
  * 読み込みに失敗したら前のモデルを読み込み直し、選択は変えない（ダウンロードしたファイルは再試行用に残す）。
+ * 前のモデルのファイルは消さずに残し、次の切り替えをダウンロード無しで済ませる。
+ * 容量を空けたいときは [delete] で使っていないモデルを消す（ADR-070）。
  *
  * 設定画面を離れても止まらないよう、アプリ全体のスコープで動かし、状態もここで持つ（ADR-062）。
  * 画面の ViewModel で動かすと、読み込み中に戻ったとき前のエンジンだけ閉じて戻し損ねる。
@@ -40,6 +42,32 @@ class LlmModelSwitcher(
     private val _state = MutableStateFlow<ModelSwitchState>(ModelSwitchState.Idle)
     val state: StateFlow<ModelSwitchState> = _state
 
+    private val _downloaded = MutableStateFlow<Set<LlmModel>>(emptySet())
+    /** 端末にあるモデル。ファイルの有無だけを見る（ハッシュは計算しない） */
+    val downloaded: StateFlow<Set<LlmModel>> = _downloaded
+
+    fun refreshDownloaded() {
+        _downloaded.value = LlmModel.entries.filter { downloader.isLlmDownloaded(it) }.toSet()
+    }
+
+    /**
+     * 使っていないモデルのファイルを消す。使っているモデルと、切り替え中のモデルは消さない。
+     * 切り替えに失敗したモデルを消したときは、再試行の表示も消す。
+     */
+    fun delete(model: LlmModel, current: LlmModel) {
+        val state = _state.value
+        val busy = state is ModelSwitchState.Downloading || state is ModelSwitchState.Loading
+        if (model == current || busy) return
+        scope.launch {
+            withContext(NonCancellable) {
+                runCatchingCancellable { downloader.deleteLlm(model) }
+                    .onFailure { Timber.tag(TAG).w(it, "failed to delete $model") }
+                if ((_state.value as? ModelSwitchState.Failed)?.target == model) _state.value = ModelSwitchState.Idle
+                refreshDownloaded()
+            }
+        }
+    }
+
     fun switch(target: LlmModel, current: LlmModel) {
         val busy = _state.value is ModelSwitchState.Downloading || _state.value is ModelSwitchState.Loading
         if (target == current || busy) return
@@ -49,6 +77,7 @@ class LlmModelSwitcher(
             try {
                 runSwitch(target, current)
             } finally {
+                refreshDownloaded()
                 // 想定外の例外でも「切り替え中」のまま固まらないよう、最後に必ず抜ける（ADR-066）
                 val state = _state.value
                 if (state is ModelSwitchState.Downloading || state is ModelSwitchState.Loading) {
@@ -93,9 +122,6 @@ class LlmModelSwitcher(
                 _state.value = ModelSwitchState.Failed(target, saved.exceptionOrNull()?.localizedMessage)
                 return@withContext
             }
-            // 前のファイルが消せなくても切り替えは済んでいる
-            runCatchingCancellable { downloader.deleteLlm(current) }
-                .onFailure { Timber.tag(TAG).w(it, "failed to delete $current") }
             _state.value = ModelSwitchState.Idle
         }
     }

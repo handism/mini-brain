@@ -85,6 +85,7 @@ fun SettingsScreen(
     val indexingState by vm.indexingState.collectAsStateWithLifecycle()
     val llmModel by vm.llmModel.collectAsStateWithLifecycle()
     val modelSwitch by vm.modelSwitch.collectAsStateWithLifecycle()
+    val downloadedModels by vm.downloadedLlmModels.collectAsStateWithLifecycle()
     val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     var showClearDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -113,7 +114,10 @@ fun SettingsScreen(
             // 失敗したときは、行をタップするとそのまま同じモデルで再試行する
             when (val st = modelSwitch) {
                 is ModelSwitchState.Failed -> vm.switchLlmModel(st.target)
-                ModelSwitchState.Idle -> showModelDialog = true
+                ModelSwitchState.Idle -> {
+                    vm.refreshDownloadedLlmModels()
+                    showModelDialog = true
+                }
                 else -> Unit
             }
         },
@@ -135,6 +139,8 @@ fun SettingsScreen(
     if (showModelDialog) {
         LlmModelDialog(
             current = llmModel,
+            downloaded = downloadedModels,
+            onDelete = { vm.deleteLlmModel(it) },
             onConfirm = { target ->
                 showModelDialog = false
                 vm.switchLlmModel(target)
@@ -376,6 +382,8 @@ private fun llmModelDescription(model: LlmModel): String = stringResource(
 @Composable
 private fun LlmModelDialog(
     current: LlmModel,
+    downloaded: Set<LlmModel>,
+    onDelete: (LlmModel) -> Unit,
     onConfirm: (LlmModel) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -401,6 +409,20 @@ private fun LlmModelDialog(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (model in downloaded) {
+                                Text(
+                                    stringResource(R.string.settings_llm_downloaded),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                                // 使っているモデルは消せない
+                                if (model != current) {
+                                    TextButton(onClick = { onDelete(model) }) {
+                                        Text(stringResource(R.string.settings_llm_delete))
+                                    }
+                                }
+                            }
                         }
                     }
                 }

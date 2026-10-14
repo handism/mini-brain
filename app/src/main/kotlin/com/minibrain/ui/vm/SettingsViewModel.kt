@@ -65,6 +65,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         app.container.llmModelSwitcher.switch(target, current = llmModel.value)
     }
 
+    /** 端末にあるモデル。ダイアログで「ダウンロード済み」と削除ボタンを出すのに使う（ADR-070） */
+    val downloadedLlmModels: StateFlow<Set<LlmModel>> = app.container.llmModelSwitcher.downloaded
+
+    fun refreshDownloadedLlmModels() {
+        app.container.llmModelSwitcher.refreshDownloaded()
+    }
+
+    /** 使っていないモデルを消して容量を空ける */
+    fun deleteLlmModel(model: LlmModel) {
+        app.container.llmModelSwitcher.delete(model, current = llmModel.value)
+    }
+
     val embedderModelFile get() = app.container.modelDownloader.embedderModelFile
 
     /** 再インデックスを押したあと、設定画面でも進み具合を出すため。 */
