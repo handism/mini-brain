@@ -481,6 +481,21 @@ class DateResolverTest {
         )
     }
 
+    @Test
+    fun `era date with day resolves to single day`() {
+        assertEquals(
+            DateRange(LocalDate.of(2024, 3, 5), LocalDate.of(2024, 3, 5)),
+            DateResolver.resolveDateRange("令和6年3月5日の日記", today),
+        )
+        assertEquals(
+            DateRange(LocalDate.of(2019, 5, 1), LocalDate.of(2019, 5, 1)),
+            DateResolver.resolveDateRange("令和元年5月1日", today),
+        )
+        // 存在しない日は期間にしない。まだ来ていない日は期間なし
+        assertNull(DateResolver.resolveDateRange("令和6年2月30日", today))
+        assertNull(DateResolver.resolveDateRange("令和7年12月1日", today))
+    }
+
     // ─────────────── isDateQuery ───────────────
 
     @Test

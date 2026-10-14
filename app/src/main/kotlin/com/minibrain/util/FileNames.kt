@@ -16,9 +16,10 @@ object FileNames {
 
     /** `notes/2021-03-15 スパイス堂.md` → `2021-03-15 スパイス堂` */
     fun stem(fileNameOrPath: String): String =
-        fileNameOrPath.substringAfterLast('/')
-            .removeSuffix(".md")
-            .removeSuffix(".MD")
+        fileNameOrPath.substringAfterLast('/').let { name ->
+            // MdFileReader は拡張子の大文字小文字を問わず読むので、`.Md` なども外す
+            if (name.endsWith(".md", ignoreCase = true)) name.dropLast(3) else name
+        }
 
     /**
      * ファイル名 stem が queries のいずれかに部分文字列として含まれるか。

@@ -2274,3 +2274,12 @@ SAFのファイル読み込み失敗（例外・null stream）は一覧から除
 
 - `LlmModelSwitcher` は、新しいモデルの読み込みや選択の保存に失敗すると前のモデルを読み込み直すが、その失敗を握りつぶしていた。`LlmService.initialize` は先に前のエンジンを閉じるので、このときエンジンは null のまま残る。画面には「切り替えられませんでした」とだけ出て、次の質問で "LlmService not initialized" になるまで気づけなかった。`ModelSwitchState.Failed.restoreFailed` を立て、設定画面で「元のモデルも読み込めなかった。再起動か、別のモデルを選ぶ」と出す。
 - `DocumentRepository.ensureFtsIndex`（起動時）は `indexMutex` を取っておらず、インデックス作成と同時に走ると `DELETE FROM chunks_fts` が挿入中の行を消しうる。`indexMutex` で直列化する。
+
+## ADR-076: 元号に日まである日付を 1 日だけの期間にし、拡張子の大文字小文字を問わず stem を取る
+
+- ステータス: 採用
+- 日付: 2026-10-14
+
+- `DateResolver.resolveEraRange` は「年X月」までしか読まず、「令和6年3月5日」を 2024-03 の月全体にしていた。西暦の特定日付は 1 日だけの期間にする（ADR-042）ので、元号でも日まであれば 1 日にする。存在しない日は期間にしない。
+- `resolveToDateStrings` は書かれた西暦・元号の年を見ず、「2024年3月5日」を今年の 3/5 にする。ただし呼び出し元（`SearchPipeline.dateRangeSearch` / `PlannerHintBuilder`）は `dateRange == null` のときだけ呼び、年の入った日付・年月は `resolveDateRange` が期間にするので、この経路は通らない。変えない。
+- `FileNames.stem` は `.md` / `.MD` しか外さず、`MdFileReader` が読む `.Md` などのファイルで拡張子が残り、ファイル名一致（topicMatch）を逃していた。大文字小文字を問わず外す。

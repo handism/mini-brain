@@ -23,6 +23,12 @@ class FileNamesTest {
     }
 
     @Test
+    fun testStem_withMixedCaseExtension() {
+        assertEquals("スパイス堂", FileNames.stem("notes/スパイス堂.Md"))
+        assertEquals("スパイス堂", FileNames.stem("notes/スパイス堂.mD"))
+    }
+
+    @Test
     fun testStem_withNoExtension() {
         assertEquals("スパイス堂", FileNames.stem("notes/スパイス堂"))
     }
