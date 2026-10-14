@@ -88,7 +88,7 @@ class RagPipeline(
                     docIdToDate = docIdToDate,
                 )
             ).map { (score, chunk) ->
-                    Timber.tag(TAG).d("rrf=%.4f path=${chunk.headingPath}".format(score))
+                    Timber.tag(TAG).d("rrf=%.4f path=%s", score, chunk.headingPath)
                     Citation(
                         headingPath = chunk.headingPath,
                         snippet = chunk.text,

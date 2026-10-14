@@ -125,7 +125,7 @@ private fun EvalScreenContent(
             ListItem(
                 leadingContent = { Icon(Icons.Default.Description, contentDescription = null) },
                 headlineContent = { Text(stringResource(R.string.eval_file)) },
-                supportingContent = { Text(fileName ?: stringResource(R.string.not_selected)) },
+                supportingContent = { Text(fileName ?: stringResource(R.string.not_selected_label)) },
                 trailingContent = {
                     TextButton(onClick = onChooseFile, enabled = !running) {
                         Text(stringResource(R.string.eval_choose_file))

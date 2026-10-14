@@ -258,7 +258,7 @@ private fun KnowledgeBaseSection(
     SettingsListItem(
         icon = Icons.Default.Folder,
         headline = stringResource(R.string.settings_current_folder),
-        supporting = treeUri?.let { folderDisplayName(it) } ?: stringResource(R.string.not_selected),
+        supporting = treeUri?.let { folderDisplayName(it) } ?: stringResource(R.string.not_selected_label),
         trailing = { ActionLabel(stringResource(R.string.change_folder)) },
         onClick = onChangeFolder,
         // インデックス中に切り替えると、走っている索引の後で消すことになるので待ってもらう
