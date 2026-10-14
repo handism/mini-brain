@@ -462,6 +462,8 @@ class SearchPipeline(
                     { it.relativePath },
                 )
             )
+            // 結果は RERANK_TOP_K 件で切るので、並べてから切り、それより後ろの文書の先頭 chunk は引かない
+            .take(RERANK_TOP_K)
             .map { doc -> rerankHit[doc.id]?.value ?: mergedHit[doc.id]?.value ?: folderDocCitation(doc, ctx) }
         val pinnedIds = inScope.mapTo(HashSet()) { it.id }
         Timber.tag(TAG).d("folder pin: scope=$scope pinned=${pinned.size}")
