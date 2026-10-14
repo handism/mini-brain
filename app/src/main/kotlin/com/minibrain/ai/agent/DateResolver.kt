@@ -22,6 +22,8 @@ object DateResolver {
     // 元号の年の直後（「令和6年」の後ろ）だけに当てる。離れた「去年の3月」の月を元号の年に付けないため（ADR-077）
     private val ERA_MONTH_RE = Regex("""^(?:の)?(\d{1,2})月""")
     private val ERA_MONTH_DAY_RE = Regex("""^(?:の)?(\d{1,2})月(\d{1,2})日""")
+    private val ERA_SEASON_RE = Regex("""^(?:の)?(春|夏|秋|冬)""")
+    private val ERA_QUARTER_RE = Regex("""^(?:の)?(?:[Qq]([1-4])|第([1-4])四半期)""")
     private val N_YEARS_AGO_MONTH_RE = Regex("""(\d+)\s*年[前まえ]の(\d{1,2})月""")
     private val N_YEARS_AGO_SEASON_RE = Regex("""(\d+)\s*年[前まえ](?:の)?(春|夏|秋|冬)""")
     // 相対年は長いもの（「一昨年」「再来年」）を先に並べる。短い方が先だと「昨年」「来年」の部分に一致する
@@ -170,8 +172,11 @@ object DateResolver {
                 val dayOfWeek = today.dayOfWeek.value
                 List(dayOfWeek) { today.minusDays(it.toLong()).format(FORMATTER) }
             }
-            question.contains("先週") ->
-                List(7) { today.minusDays((it + 1).toLong()).format(FORMATTER) }
+            // 「今週」「先週の月曜」と同じく月曜始まりの暦の週。直近 7 日にすると今週の月曜が入り、先週の月曜が漏れる（ADR-078）
+            question.contains("先週") -> {
+                val lastWeekMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1)
+                List(7) { lastWeekMonday.plusDays(it.toLong()).format(FORMATTER) }
+            }
             question.contains("今月") -> {
                 val start = today.withDayOfMonth(1)
                 val days = today.dayOfMonth
@@ -269,6 +274,13 @@ object DateResolver {
             return runCatching { LocalDate.of(year, m.toInt(), d.toInt()).let { DateRange(it, it) } }
                 .onFailure { Timber.tag(TAG).w(it, "Invalid era date: $year/$m/$d") }
                 .getOrNull()
+        }
+        // 季節・四半期も西暦と同じく絞る。年全体にすると別の季節のノートが固定され、
+        // 今年のまだ来ていない季節は今日までの過去の期間にすり替わる（ADR-078）
+        ERA_SEASON_RE.find(afterEra)?.let { return seasonRange(it.groupValues[1], year, today) }
+        ERA_QUARTER_RE.find(afterEra)?.let { match ->
+            val q = match.groupValues[1].ifEmpty { match.groupValues[2] }.toInt()
+            return quarterRange(q, year, today)
         }
         val monthMatch = ERA_MONTH_RE.find(afterEra)
         return if (monthMatch != null) {

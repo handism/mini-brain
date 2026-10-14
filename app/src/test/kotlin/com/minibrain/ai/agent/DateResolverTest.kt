@@ -228,6 +228,13 @@ class DateResolverTest {
     }
 
     @Test
+    fun `last week is previous calendar week from monday to sunday`() {
+        // today = 2025-06-10（火）→ 先週 = 2025-06-02（月）〜 2025-06-08（日）。今週の月曜 6/9 は入らない
+        val result = DateResolver.resolveToDateStrings("先週のまとめ", today)
+        assertEquals(List(7) { LocalDate.of(2025, 6, 2).plusDays(it.toLong()).format(fmt) }, result)
+    }
+
+    @Test
     fun `last month returns full month`() {
         val result = DateResolver.resolveToDateStrings("先月", today)
         assertEquals(31, result.size) // May has 31 days
@@ -513,6 +520,22 @@ class DateResolverTest {
             DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31)),
             DateResolver.resolveDateRange("令和6年に買った物と去年の3月", today),
         )
+    }
+
+    @Test
+    fun `era year with season resolves to the season`() {
+        val summer = DateRange(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 8, 31))
+        assertEquals(summer, DateResolver.resolveDateRange("令和6年の夏", today))
+        assertEquals(summer, DateResolver.resolveDateRange("令和6年夏の旅行", today))
+        // 今年のまだ始まっていない季節は今日までの期間にせず、期間なし
+        assertNull(DateResolver.resolveDateRange("令和7年の秋", today))
+    }
+
+    @Test
+    fun `era year with quarter resolves to the quarter`() {
+        val q1 = DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 3, 31))
+        assertEquals(q1, DateResolver.resolveDateRange("令和6年Q1", today))
+        assertEquals(q1, DateResolver.resolveDateRange("令和6年の第1四半期", today))
     }
 
     // ─────────────── isDateQuery ───────────────
