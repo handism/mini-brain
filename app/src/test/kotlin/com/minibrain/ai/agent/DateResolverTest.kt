@@ -496,6 +496,25 @@ class DateResolverTest {
         assertNull(DateResolver.resolveDateRange("令和7年12月1日", today))
     }
 
+    @Test
+    fun `year followed by の still resolves month and day`() {
+        val march5 = DateRange(LocalDate.of(2024, 3, 5), LocalDate.of(2024, 3, 5))
+        val march = DateRange(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 3, 31))
+        assertEquals(march5, DateResolver.resolveDateRange("2024年の3月5日の日記", today))
+        assertEquals(march5, DateResolver.resolveDateRange("令和6年の3月5日の日記", today))
+        assertEquals(march, DateResolver.resolveDateRange("2024年の3月のメモ", today))
+        assertEquals(march, DateResolver.resolveDateRange("令和6年の3月のメモ", today))
+    }
+
+    @Test
+    fun `era month must follow the era year`() {
+        // 離れた「去年の3月」の月を令和6年に付けない
+        assertEquals(
+            DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31)),
+            DateResolver.resolveDateRange("令和6年に買った物と去年の3月", today),
+        )
+    }
+
     // ─────────────── isDateQuery ───────────────
 
     @Test

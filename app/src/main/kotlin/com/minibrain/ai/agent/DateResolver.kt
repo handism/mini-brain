@@ -16,10 +16,12 @@ object DateResolver {
     private val MONTH_DAY_RE = Regex("""(\d{1,2})月(\d{1,2})日""")
     private val MONTH_ONLY_RE = Regex("""(\d{1,2})月""")
     private val DAYS_AGO_RE = Regex("""(\d+)\s*日[前まえ]""")
-    private val YEAR_MONTH_RE = Regex("""(\d{4})年(\d{1,2})月""")
+    // 「2024年の3月」のように年と月の間に「の」が入っても年月として読む。読めないと年全体の期間になる（ADR-077）
+    private val YEAR_MONTH_RE = Regex("""(\d{4})年(?:の)?(\d{1,2})月""")
     private val YEAR_ONLY_RE = Regex("""(\d{4})年(?!\d)""")
-    private val ERA_MONTH_RE = Regex("""年(\d{1,2})月""")
-    private val ERA_MONTH_DAY_RE = Regex("""年(\d{1,2})月(\d{1,2})日""")
+    // 元号の年の直後（「令和6年」の後ろ）だけに当てる。離れた「去年の3月」の月を元号の年に付けないため（ADR-077）
+    private val ERA_MONTH_RE = Regex("""^(?:の)?(\d{1,2})月""")
+    private val ERA_MONTH_DAY_RE = Regex("""^(?:の)?(\d{1,2})月(\d{1,2})日""")
     private val N_YEARS_AGO_MONTH_RE = Regex("""(\d+)\s*年[前まえ]の(\d{1,2})月""")
     private val N_YEARS_AGO_SEASON_RE = Regex("""(\d+)\s*年[前まえ](?:の)?(春|夏|秋|冬)""")
     // 相対年は長いもの（「一昨年」「再来年」）を先に並べる。短い方が先だと「昨年」「来年」の部分に一致する
@@ -31,7 +33,7 @@ object DateResolver {
     // 年まで入った特定の日付。1 日だけの期間として扱い、日付ヒットを先頭に固定させる（ADR-042）
     private val FULL_DATE_RES = listOf(
         Regex("""(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)"""),
-        Regex("""(?<!\d)(\d{4})年(\d{1,2})月(\d{1,2})日"""),
+        Regex("""(?<!\d)(\d{4})年(?:の)?(\d{1,2})月(\d{1,2})日"""),
         Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"""),
     )
 
@@ -259,15 +261,16 @@ object DateResolver {
     }
 
     private fun resolveEraRange(question: String, today: LocalDate): DateRange? {
-        val year = resolveEraYear(question) ?: return null
+        val (year, eraEnd) = resolveEraYear(question) ?: return null
+        val afterEra = question.substring(eraEnd)
         // 日まであれば西暦の特定日付と同じく 1 日だけの期間にする（ADR-042 / ADR-076）
-        ERA_MONTH_DAY_RE.find(question)?.let { match ->
+        ERA_MONTH_DAY_RE.find(afterEra)?.let { match ->
             val (m, d) = match.destructured
             return runCatching { LocalDate.of(year, m.toInt(), d.toInt()).let { DateRange(it, it) } }
                 .onFailure { Timber.tag(TAG).w(it, "Invalid era date: $year/$m/$d") }
                 .getOrNull()
         }
-        val monthMatch = ERA_MONTH_RE.find(question)
+        val monthMatch = ERA_MONTH_RE.find(afterEra)
         return if (monthMatch != null) {
             val month = monthMatch.groupValues[1].toInt()
             runCatching {
@@ -406,11 +409,12 @@ object DateResolver {
         return null
     }
 
-    private fun resolveEraYear(question: String): Int? {
+    // 元号の年を西暦にした値と、元号の「年」の直後の位置
+    private fun resolveEraYear(question: String): Pair<Int, Int>? {
         for ((pattern, offset) in ERA_LIST) {
             pattern.find(question)?.let { match ->
                 val n = match.groupValues[1].let { if (it == "元") 1 else it.toInt() }
-                return offset + n
+                return (offset + n) to match.range.last + 1
             }
         }
         return null
