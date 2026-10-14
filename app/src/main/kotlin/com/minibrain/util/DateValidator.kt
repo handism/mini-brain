@@ -6,9 +6,10 @@ object DateValidator {
     val YEAR_RANGE: IntRange
         get() = 1990..LocalDate.now().year
 
-    fun parseDay(y: String, m: String, d: String = "1"): String? = runCatching {
+    /** [today] はテストで固定の日付を渡すため。年の範囲は 1990..[today] の年 */
+    fun parseDay(y: String, m: String, d: String = "1", today: LocalDate = LocalDate.now()): String? = runCatching {
         val date = LocalDate.of(y.toInt(), m.toInt(), d.toInt())
-        if (date.year in YEAR_RANGE) date.toString() else null
+        if (date.year in 1990..today.year) date.toString() else null
     }.getOrNull()
 
     fun parseMonth(y: String, m: String): String? = parseDay(y, m, "1")

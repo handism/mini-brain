@@ -94,7 +94,7 @@ object DateResolver {
         // 下の各段は書かれた年を見ずに月日だけで年を推定するので、ここで止めないと別の年の日付になる（ADR-069）
         if (resolveDateRangeUnchecked(question, today)?.start?.isAfter(today) == true) return emptyList()
         return resolveDaysAgo(question, today)
-            ?: resolveDotSlashDate(question)
+            ?: resolveDotSlashDate(question, today)
             ?: resolveLastWeekDow(question, today)
             ?: resolveThisWeekDow(question, today)
             ?: resolveRelativeKeywords(question, today)
@@ -108,13 +108,16 @@ object DateResolver {
         }
     }
 
-    private fun resolveDotSlashDate(question: String): List<String>? {
+    private fun resolveDotSlashDate(question: String, today: LocalDate): List<String>? {
         return DOT_SLASH_DATE_RE.find(question)?.let { match ->
             val year = match.groupValues[1].toInt()
             val month = match.groupValues[2].toInt()
             val day = match.groupValues[3].toInt()
             runCatching {
-                listOf(LocalDate.of(year, month, day).format(FORMATTER))
+                // 来年以降の日付は resolveDateRange の年の範囲で落ちて上のガードを通るので、ここでも未来を外す。
+                // null でなく空を返し、下の段で月日から別の年を推定させない
+                val date = LocalDate.of(year, month, day)
+                if (date.isAfter(today)) emptyList() else listOf(date.format(FORMATTER))
             }.onFailure { Timber.tag(TAG).w(it, "Invalid dot/slash date: $year/$month/$day") }
              .getOrElse { emptyList() }
         }
@@ -225,7 +228,7 @@ object DateResolver {
         resolveDateRangeUnchecked(question, today)?.takeUnless { it.start.isAfter(today) }
 
     private fun resolveDateRangeUnchecked(question: String, today: LocalDate): DateRange? {
-        return resolveFullDateRange(question)
+        return resolveFullDateRange(question, today)
             ?: resolveEraRange(question, today)
             ?: resolveQuarterRange(question, today)
             ?: resolveNYearsAgoRange(question, today)
@@ -237,12 +240,12 @@ object DateResolver {
             ?: resolveYearOnlyRange(question, today)
     }
 
-    private fun resolveFullDateRange(question: String): DateRange? {
+    private fun resolveFullDateRange(question: String, today: LocalDate): DateRange? {
         for (re in FULL_DATE_RES) {
             for (match in re.findAll(question)) {
                 val (y, m, d) = match.destructured
                 // 8 桁の注文番号などを日付と取り違えないよう、実在する日付かつ年の範囲内だけ採る
-                val date = DateValidator.parseDay(y, m, d)?.let(LocalDate::parse) ?: continue
+                val date = DateValidator.parseDay(y, m, d, today)?.let(LocalDate::parse) ?: continue
                 return DateRange(date, date)
             }
         }

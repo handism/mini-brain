@@ -22,6 +22,13 @@ class DateValidatorTest {
     }
 
     @Test
+    fun `parseDay uses the given today for the year range`() {
+        val today = LocalDate.of(2025, 6, 1)
+        assertEquals("2025-12-31", DateValidator.parseDay("2025", "12", "31", today))
+        assertNull(DateValidator.parseDay("2026", "01", "01", today))
+    }
+
+    @Test
     fun `parseDay returns null for invalid date`() {
         assertNull(DateValidator.parseDay("2023", "02", "30")) // Invalid day for Feb
         assertNull(DateValidator.parseDay("2023", "13", "15")) // Invalid month

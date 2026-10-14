@@ -396,6 +396,22 @@ class DateResolverTest {
         assertTrue(DateResolver.resolveToDateStrings("今年の冬", today).isEmpty())
     }
 
+    // 実行した年より後の年は resolveDateRange の年の範囲で落ちるので、スラッシュ・ドット区切りの段で外す
+    @Test
+    fun `future slash and dot dates resolve to no date strings`() {
+        val farFuture = LocalDate.now().year + 1
+        assertTrue(DateResolver.resolveToDateStrings("$farFuture/03/05に何がある？", today).isEmpty())
+        assertTrue(DateResolver.resolveToDateStrings("$farFuture.03.05", today).isEmpty())
+        assertTrue(DateResolver.resolveToDateStrings("2025/12/01の予定", today).isEmpty())
+        assertEquals(listOf("2024-03-01"), DateResolver.resolveToDateStrings("2024/03/01に何した？", today))
+    }
+
+    // 年の範囲は実行した日ではなく渡した today で決める
+    @Test
+    fun `full date after today year is not a range regardless of clock`() {
+        assertNull(DateResolver.resolveDateRange("2026年3月5日に何した？", today))
+    }
+
     @Test
     fun `past month day without year still resolves`() {
         assertEquals(listOf("2025-03-05"), DateResolver.resolveToDateStrings("3月5日に何した？", today))

@@ -111,10 +111,9 @@ fun SettingsScreen(
         llmModelFile = vm.llmFile(llmModel),
         modelSwitch = modelSwitch,
         onChangeModel = {
-            // 失敗したときは、行をタップするとそのまま同じモデルで再試行する
-            when (val st = modelSwitch) {
-                is ModelSwitchState.Failed -> vm.switchLlmModel(st.target)
-                ModelSwitchState.Idle -> {
+            // 失敗したときもダイアログを開き、再試行・選び直し・削除をそこで選ばせる
+            when (modelSwitch) {
+                ModelSwitchState.Idle, is ModelSwitchState.Failed -> {
                     vm.refreshDownloadedLlmModels()
                     showModelDialog = true
                 }
@@ -140,6 +139,7 @@ fun SettingsScreen(
         LlmModelDialog(
             current = llmModel,
             downloaded = downloadedModels,
+            failed = (modelSwitch as? ModelSwitchState.Failed)?.target,
             onDelete = { vm.deleteLlmModel(it) },
             onConfirm = { target ->
                 showModelDialog = false
@@ -383,11 +383,13 @@ private fun llmModelDescription(model: LlmModel): String = stringResource(
 private fun LlmModelDialog(
     current: LlmModel,
     downloaded: Set<LlmModel>,
+    failed: LlmModel?,
     onDelete: (LlmModel) -> Unit,
     onConfirm: (LlmModel) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var selected by remember { mutableStateOf(current) }
+    // 切り替えに失敗した直後は、そのモデルを選んだ状態で開いて再試行しやすくする
+    var selected by remember { mutableStateOf(failed ?: current) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings_llm_model)) },
@@ -416,11 +418,12 @@ private fun LlmModelDialog(
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(top = 4.dp),
                                 )
-                                // 使っているモデルは消せない
-                                if (model != current) {
-                                    TextButton(onClick = { onDelete(model) }) {
-                                        Text(stringResource(R.string.settings_llm_delete))
-                                    }
+                            }
+                            // 失敗したモデルは途中までのダウンロード（*.download）が残るので、未完成でも消せるようにする。
+                            // 使っているモデルは消せない
+                            if ((model in downloaded || model == failed) && model != current) {
+                                TextButton(onClick = { onDelete(model) }) {
+                                    Text(stringResource(R.string.settings_llm_delete))
                                 }
                             }
                         }
