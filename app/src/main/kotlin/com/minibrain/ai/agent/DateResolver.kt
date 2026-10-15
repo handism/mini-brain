@@ -52,7 +52,8 @@ object DateResolver {
 
     // 「いつ」「何月」など時期を尋ねるクエリの判定。
     // AgentPipeline / CoverageChecker / LlmReranker でファイルをまたいで使うため、ここに一本化。
-    private val DATE_QUERY_RE = Regex("""いつ|何月|何日|何年|年前|月前|去年|先月|先週|いつから|いつまで""")
+    // 「昨年」は「去年」と同じ扱い（「一昨年」も含む、ADR-079）
+    private val DATE_QUERY_RE = Regex("""いつ|何月|何日|何年|年前|月前|去年|昨年|先月|先週|いつから|いつまで""")
 
     fun isDateQuery(question: String): Boolean = DATE_QUERY_RE.containsMatchIn(question)
 

@@ -549,6 +549,8 @@ class DateResolverTest {
         assertTrue(DateResolver.isDateQuery("何年前？"))
         assertTrue(DateResolver.isDateQuery("数ヶ月前"))
         assertTrue(DateResolver.isDateQuery("去年の話"))
+        assertTrue(DateResolver.isDateQuery("昨年の旅行"))
+        assertTrue(DateResolver.isDateQuery("一昨年の旅行"))
         assertTrue(DateResolver.isDateQuery("先月は何した？"))
         assertTrue(DateResolver.isDateQuery("先週の出来事"))
         assertTrue(DateResolver.isDateQuery("いつから始めた？"))
