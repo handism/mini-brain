@@ -425,10 +425,17 @@ class SearchPipelineTest {
         val paths = listOf(
             "travel/京都.md", "travel/キャンプ/長野 白樺湖.md", "travel-plan/屋久島.md",
             "work/meetings/a.md", "work/オンボーディング.md", "food/レシピ/カレー.md",
+            "meetings/root.md", "archive/2020/meetings/old.md",
         )
         assertEquals("travel-plan", SearchPipeline.explicitFolder("travel-plan にある行きたい場所", paths))
+        // ASCII フォルダ名に空白なしで日本語の助詞や「フォルダ」が続く場合も一致する（ADR-080）
+        assertEquals("travel-plan", SearchPipeline.explicitFolder("travel-planにある行きたい場所", paths))
         assertEquals("work/meetings", SearchPipeline.explicitFolder("work/meetings の議事録を一覧で", paths))
+        assertEquals("work/meetings", SearchPipeline.explicitFolder("work/meetingsの議事録を一覧で", paths))
+        assertEquals("work", SearchPipeline.explicitFolder("workフォルダの中身", paths))
         assertEquals("travel/キャンプ", SearchPipeline.explicitFolder("キャンプフォルダの中身", paths))
+        // 1 段の名前だけで複数のフォルダに当たる場合は、深いアーカイブではなく浅いフォルダを選ぶ（ADR-080）
+        assertEquals("meetings", SearchPipeline.explicitFolder("meetingsフォルダの議事録", paths))
         // 名前の一部（travel-plan の travel）や、後ろにフォルダの合図が無い 1 段の名前は数えない
         assertEquals(null, SearchPipeline.explicitFolder("travelplan について", paths))
         assertEquals(null, SearchPipeline.explicitFolder("作ったことのある料理のレシピ一覧", paths))

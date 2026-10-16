@@ -564,4 +564,99 @@ class DateResolverTest {
         assertFalse(DateResolver.isDateQuery("何が起こった？"))
         assertFalse(DateResolver.isDateQuery("今日のこと"))
     }
+
+    // ─────────────── 年付きの正月・年始・年末と略称の境界（ADR-080） ───────────────
+
+    @Test
+    fun `year qualified new year and year end resolve to 7-day range instead of full year`() {
+        assertEquals(
+            DateRange(LocalDate.of(2024, 12, 25), LocalDate.of(2024, 12, 31)),
+            DateResolver.resolveDateRange("去年の年末に何した？", today),
+        )
+        assertEquals(
+            DateRange(LocalDate.of(2023, 1, 1), LocalDate.of(2023, 1, 7)),
+            DateResolver.resolveDateRange("一昨年の正月", today),
+        )
+        assertEquals(
+            DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 7)),
+            DateResolver.resolveDateRange("2024年のお正月", today),
+        )
+        assertEquals(
+            DateRange(LocalDate.of(2024, 12, 25), LocalDate.of(2024, 12, 31)),
+            DateResolver.resolveDateRange("令和6年の年末", today),
+        )
+        assertEquals(
+            (25..31).map { "2024-12-$it" },
+            DateResolver.resolveToDateStrings("2024年の年末", today),
+        )
+    }
+
+    @Test
+    fun `this years year end before december 25 is a future period`() {
+        // today = 2025-06-10 の時点で「今年の年末」はまだ来ていないので期間なし・日付なし
+        assertNull(DateResolver.resolveDateRange("今年の年末の予定", today))
+        assertTrue(DateResolver.resolveToDateStrings("今年の年末の予定", today).isEmpty())
+    }
+
+    @Test
+    fun `quarter and era abbreviations do not match inside alphanumeric words or year zero`() {
+        for (q in listOf("コエンザイムQ10のメモ", "FAQ1の回答", "IQ120のテスト", "IT10年目の振り返り", "JS5年の経験", "HR1年の記録", "R0年のメモ")) {
+            assertFalse(q, DateResolver.isDiaryQuery(q))
+            assertNull(q, DateResolver.resolveDateRange(q, today))
+        }
+    }
+
+    @Test
+    fun `year end adjustment is not a year end period`() {
+        assertEquals(
+            DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31)),
+            DateResolver.resolveDateRange("去年の年末調整の書類どこ？", today),
+        )
+        assertEquals(
+            DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31)),
+            DateResolver.resolveDateRange("2024年の年末調整", today),
+        )
+        assertTrue(DateResolver.resolveToDateStrings("年末調整の書類どこ？", today).isEmpty())
+    }
+
+    @Test
+    fun `year end and new year holidays span both years consistently`() {
+        val expected = DateRange(LocalDate.of(2024, 12, 25), LocalDate.of(2025, 1, 7))
+        assertEquals(expected, DateResolver.resolveDateRange("去年の年末年始に何した？", today))
+        val dates = DateResolver.resolveToDateStrings("去年の年末年始に何した？", today)
+        assertEquals("2024-12-25", dates.first())
+        assertEquals("2025-01-07", dates.last())
+        assertEquals(14, dates.size)
+        // 年の指定が無ければ、今年の年末が来るまでは去年の年末からの年末年始
+        assertEquals(dates, DateResolver.resolveToDateStrings("年末年始に何した？", today))
+    }
+
+    @Test
+    fun `contracted year end and new year forms resolve to the holiday`() {
+        val yearEnd = DateRange(LocalDate.of(2024, 12, 25), LocalDate.of(2024, 12, 31))
+        assertEquals(yearEnd, DateResolver.resolveDateRange("2024年末の旅行", today))
+        assertEquals(yearEnd, DateResolver.resolveDateRange("去年末の旅行", today))
+        assertEquals(yearEnd, DateResolver.resolveDateRange("令和6年末の旅行", today))
+        assertEquals(
+            DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 7)),
+            DateResolver.resolveDateRange("2024年始の挨拶", today),
+        )
+        // 「今年始めた」は時期ではないので今年全体のまま
+        assertEquals(
+            DateRange(LocalDate.of(2025, 1, 1), today),
+            DateResolver.resolveDateRange("今年始めた趣味", today),
+        )
+        assertTrue(DateResolver.resolveToDateStrings("今年始めた趣味", today).isEmpty())
+    }
+
+    @Test
+    fun `compact year quarter forms resolve to the quarter`() {
+        val q1 = DateRange(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 3, 31))
+        assertEquals(q1, DateResolver.resolveDateRange("2024Q1の売上メモ", today))
+        assertEquals(
+            DateRange(LocalDate.of(2024, 7, 1), LocalDate.of(2024, 9, 30)),
+            DateResolver.resolveDateRange("FY2024Q3の振り返り", today),
+        )
+        assertTrue(DateResolver.isDiaryQuery("2024Q1の売上メモ"))
+    }
 }

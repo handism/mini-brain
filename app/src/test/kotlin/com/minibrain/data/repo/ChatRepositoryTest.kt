@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -145,6 +147,7 @@ class ChatRepositoryTest {
         )
 
         assertEquals(40L, id)
+        coVerify(exactly = 0) { sessionDao.insert(any()) }
         coVerify {
             messageDao.insert(match {
                 it.sessionId == 1L &&
@@ -153,6 +156,16 @@ class ChatRepositoryTest {
                 it.citationsJson == "[]"
             })
         }
+    }
+
+    @Test
+    fun sessionExists_reflectsWhetherSessionIsStored() = runTest {
+        coEvery { sessionDao.getById(1L) } returns ChatSessionEntity(id = 1L, title = "Existing")
+        coEvery { sessionDao.getById(5L) } returns null
+
+        assertTrue(repository.sessionExists(1L))
+        assertFalse(repository.sessionExists(5L))
+        coVerify(exactly = 0) { sessionDao.insert(any()) }
     }
 
     @Test

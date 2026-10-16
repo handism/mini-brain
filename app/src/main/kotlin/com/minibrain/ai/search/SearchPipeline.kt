@@ -87,21 +87,28 @@ class SearchPipeline(
 
         // フォルダ名 1 段だけの一致は、後ろにこれが続くときだけフォルダの指定とみなす（「レシピ一覧」の「レシピ」は数えない）
         private val FOLDER_CUE_REGEX = Regex("""^\s*(?:フォルダ|にある|の中|内の|配下|folder|directory)""", RegexOption.IGNORE_CASE)
-        private val FOLDER_NAME_CHAR = Regex("""[\p{L}\p{N}_\-/]""")
+
+        // ASCII フォルダ名の単語境界判定用。日本語助詞（「にある」「の」等）は含めない（ADR-080）
+        private fun isAsciiFolderChar(c: Char): Boolean =
+            c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-' || c == '/'
 
         /**
          * 質問に書かれたフォルダ。`work/meetings` のように `/` を含むパスはそのまま、`travel-plan` のような
          * 1 段の名前は後ろに「にある」「の中」などが続くときだけ一致とみなす。名前の一部だけの一致
-         * （`travel-plan` の中の `travel`）は数えない。複数あれば最も長いパス（ADR-052）。
+         * （`travel-plan` の中の `travel`）は数えない。複数あれば一致した名前が最も長いもの、同じなら浅いパスを選ぶ（ADR-052 / ADR-080）。
          */
         internal fun explicitFolder(query: String, paths: List<String>): String? {
             val folders = paths.flatMap { path ->
                 path.split('/').dropLast(1).runningReduce { acc, seg -> "$acc/$seg" }
             }.distinct()
-            return folders.filter { folder ->
-                if ('/' in folder && mentions(query, folder) { true }) return@filter true
-                mentions(query, folder.substringAfterLast('/')) { after -> FOLDER_CUE_REGEX.containsMatchIn(after) }
-            }.maxByOrNull { it.length }
+            return folders.mapNotNull { folder ->
+                val leaf = folder.substringAfterLast('/')
+                when {
+                    '/' in folder && mentions(query, folder) { true } -> folder to folder.length
+                    mentions(query, leaf) { after -> FOLDER_CUE_REGEX.containsMatchIn(after) } -> folder to leaf.length
+                    else -> null
+                }
+            }.maxWithOrNull(compareBy<Pair<String, Int>>({ it.second }, { -it.first.length }))?.first
         }
 
         // name が前後を区切られた形で query に現れ、その直後の文字列が accept を満たすか
@@ -113,10 +120,10 @@ class SearchPipeline(
                 if (i < 0) return false
                 val before = query.getOrNull(i - 1)
                 val after = query.getOrNull(i + name.length)
-                // ASCII の名前は前後が英数字・記号で続いていない所だけ（日本語の名前は助詞が直接続くので見ない）
+                // ASCII の名前は前後が ASCII の英数字・記号で続いていない所だけ（日本語の助詞等が直接続くのは許す、ADR-080）
                 val asciiName = name.all { it.code < 128 }
-                val bounded = !asciiName || ((before == null || !FOLDER_NAME_CHAR.matches(before.toString())) &&
-                    (after == null || !FOLDER_NAME_CHAR.matches(after.toString())))
+                val bounded = !asciiName || ((before == null || !isAsciiFolderChar(before)) &&
+                    (after == null || !isAsciiFolderChar(after)))
                 if (bounded && accept(query.substring(i + name.length))) return true
                 from = i + 1
             }

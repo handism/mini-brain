@@ -138,7 +138,7 @@ class ChatViewModel(
 
     private fun startGeneration(prepare: suspend (Long) -> GenerationRequest?) {
         if (_isGenerating.value || isSwitchingSession || _sessionId.value <= 0L) return
-        val sessionId = _sessionId.value
+        var sessionId = _sessionId.value
 
         currentJob?.cancel()
         // launch 前に立てて、ディスパッチ待ちの間に二重送信されないようにする
@@ -151,6 +151,7 @@ class ChatViewModel(
             var questionId: Long? = null
             var answerSaved = false
             try {
+                sessionId = ensureSessionExists(sessionId)
                 val request = prepare(sessionId) ?: return@launch
                 removed = request.removed
                 // 履歴は質問を保存する前に取る。後で取ると今の質問が履歴にも入り、プロンプトに 2 回並ぶ（ADR-066）
@@ -191,6 +192,16 @@ class ChatViewModel(
                     }
                 }
                 throw e
+            } catch (e: Exception) {
+                if (withContext(NonCancellable) { runCatchingCancellable { app.container.chatRepository.sessionExists(sessionId) }.getOrDefault(true) }) {
+                    Timber.tag(TAG).e(e, "generation failed")
+                    if (_error.value == null) _error.value = ChatError(ChatErrorKind.GENERATION, e.message)
+                    removeStreamingMessage()
+                } else {
+                    // 生成中にこのセッションが削除された。作り直さずに回答を捨てる（ADR-080）
+                    Timber.tag(TAG).w(e, "session $sessionId was deleted during generation; discarding answer")
+                    _messages.value = emptyList()
+                }
             } finally {
                 // 再生成で何も保存できなかったら（出力前の停止・失敗・空の回答）、消した元のやり取りを戻す
                 val toRestore = removed
@@ -214,6 +225,18 @@ class ChatViewModel(
             }
         }
         job.start()
+    }
+
+    /**
+     * 開いているセッションが履歴画面や設定の全削除で消されていたら、新しいセッションに切り替えてその id を返す。
+     * 消えた id のまま保存すると外部キー制約で落ちる（ADR-080）。
+     */
+    private suspend fun ensureSessionExists(sessionId: Long): Long {
+        if (app.container.chatRepository.sessionExists(sessionId)) return sessionId
+        val newId = app.container.chatRepository.createSession()
+        _messages.value = emptyList()
+        _sessionId.value = newId
+        return newId
     }
 
     /** 積んだ質問の id を返す。 */

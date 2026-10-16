@@ -85,6 +85,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         every { container.chatRepository } returns chatRepo
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
@@ -119,6 +120,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         every { container.chatRepository } returns chatRepo
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
@@ -148,6 +150,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         val agentPipeline = mockk<AgentPipeline>(relaxed = true)
         every { container.chatRepository } returns chatRepo
         every { container.agentPipeline } returns agentPipeline
@@ -217,6 +220,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         val agentPipeline = mockk<AgentPipeline>(relaxed = true)
         every { container.chatRepository } returns chatRepo
         every { container.agentPipeline } returns agentPipeline
@@ -274,6 +278,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         every { container.chatRepository } returns chatRepo
 
         val testDataStore = mockk<DataStore<Preferences>>(relaxed = true)
@@ -305,6 +310,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         val agentPipeline = mockk<AgentPipeline>(relaxed = true)
         every { container.chatRepository } returns chatRepo
         every { container.agentPipeline } returns agentPipeline
@@ -359,6 +365,7 @@ class ChatViewModelTest {
         val app = mockk<MiniBrainApp>(relaxed = true)
         val container = mockk<AppContainer>(relaxed = true)
         val repository = mockk<ChatRepository>(relaxed = true)
+        coEvery { repository.sessionExists(any()) } returns true
         val pipeline = mockk<AgentPipeline>(relaxed = true)
         every { app.container } returns container
         every { container.chatRepository } returns repository
@@ -557,6 +564,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         val agentPipeline = mockk<AgentPipeline>(relaxed = true)
         every { container.chatRepository } returns chatRepo
         every { container.agentPipeline } returns agentPipeline
@@ -596,6 +604,7 @@ class ChatViewModelTest {
         val container = mockk<AppContainer>(relaxed = true)
         every { app.container } returns container
         val chatRepo = mockk<ChatRepository>(relaxed = true)
+        coEvery { chatRepo.sessionExists(any()) } returns true
         val agentPipeline = mockk<AgentPipeline>(relaxed = true)
         every { container.chatRepository } returns chatRepo
         every { container.agentPipeline } returns agentPipeline
@@ -683,5 +692,59 @@ class ChatViewModelTest {
 
         coVerify(exactly = 1) { repository.addMessage(100L, MessageRole.ASSISTANT, "partial", any()) }
         coVerify(exactly = 0) { repository.restoreExchange(any(), any()) }
+    }
+
+    @Test
+    fun `開いているセッションが削除されていたら新しいセッションに切り替えて送信しタイトルを付ける`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        coEvery { repository.sessionExists(100L) } returns false
+        coEvery { repository.createSession(any()) } returns 200L
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flowOf("answer"), emptyList(),
+        )
+        runCurrent()
+
+        vm.sendMessage("削除後に送られた質問")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.addMessage(100L, any(), any(), any()) }
+        coVerify { repository.updateSessionTitle(200L, "削除後に送られた質問") }
+        coVerify { repository.addMessage(200L, MessageRole.USER, "削除後に送られた質問", any()) }
+        coVerify { repository.addMessage(200L, MessageRole.ASSISTANT, "answer", any()) }
+        assertNull(vm.error.value)
+    }
+
+    @Test
+    fun `生成中にセッションが削除されたら回答を捨ててエラーを出さない`() = runTest {
+        val (vm, repository, pipeline) = raceFixture()
+        coEvery { pipeline.run(any(), any(), any(), any()) } returns AgentResult(
+            emptyList(), flowOf("answer"), emptyList(),
+        )
+        coEvery { repository.addMessage(100L, MessageRole.ASSISTANT, any(), any()) } throws
+            IllegalStateException("FOREIGN KEY constraint failed")
+        runCurrent()
+        coEvery { repository.sessionExists(100L) } returnsMany listOf(true, false)
+
+        vm.sendMessage("質問")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.createSession(any()) }
+        assertNull(vm.error.value)
+        assertFalse(vm.isGenerating.value)
+        assertTrue(vm.messages.value.isEmpty())
+    }
+
+    @Test
+    fun `質問や回答の保存で例外が起きてもクラッシュせずエラーを表示してロックを解除する`() = runTest {
+        val (vm, repository, _) = raceFixture()
+        coEvery { repository.addMessage(100L, MessageRole.USER, any(), any()) } throws IllegalStateException("DB error")
+        runCurrent()
+
+        vm.sendMessage("質問")
+        advanceUntilIdle()
+
+        assertEquals(ChatErrorKind.GENERATION, vm.error.value?.kind)
+        assertFalse(vm.isGenerating.value)
+        assertTrue(vm.messages.value.none { it.isStreaming })
     }
 }

@@ -21,10 +21,29 @@ class CoverageChecker(private val llmService: LlmService) {
         // 出力は 1 行だけでよいので、yes / no の行が出たら打ち切る。出なくてもこの時間で止める（ADR-066）
         private const val GENERATE_TIMEOUT_MS = 20_000L
 
-        // 日付クエリで上位候補に日付プレフィックス付き snippet があるか（LLM 短絡判定）
-        internal fun isDateShortCircuit(query: String, candidates: List<Citation>): Boolean =
-            DateResolver.isDateQuery(query) &&
-                candidates.take(MAX_CANDIDATES).any { DatePrefix.hasPrefix(it.snippet) }
+        // 日付・期間クエリで上位候補に日付プレフィックス付き snippet があるか（LLM 短絡判定、ADR-080）。
+        // 期間・日付が決まる質問では、その期間に入る日付の候補だけを数える。別の話題の日記が上位にあるだけで
+        // 確認を省くと、ReAct で探すべき質問が無関係な文脈のまま答えられるため
+        internal fun isDateShortCircuit(
+            query: String,
+            candidates: List<Citation>,
+            dateRange: DateRange? = DateResolver.resolveDateRange(query),
+        ): Boolean {
+            val datedCandidates = candidates.take(MAX_CANDIDATES).filter { DatePrefix.hasPrefix(it.snippet) }
+            if (datedCandidates.isEmpty()) return false
+            val candidateDates = datedCandidates.mapNotNull { DatePrefix.split(it.snippet.trimStart()).first }
+            if (dateRange != null) {
+                val start = dateRange.start.toString()
+                val end = dateRange.end.toString()
+                return candidateDates.any { it in start..end }
+            }
+            if (DateResolver.isDiaryQuery(query)) {
+                val dates = DateResolver.resolveToDateStrings(query).toSet()
+                if (dates.isNotEmpty()) return candidateDates.any { it in dates }
+            }
+            // 「いつ行った？」のように期間の無い時期の質問は、日付付きの候補があればよい
+            return DateResolver.isDateQuery(query)
+        }
 
         // 日付クエリ + 固有名詞ヒット (topicMatch) があれば、documentDate が空でも即答可能と判定する（ADR-026）。
         // ファイル名が質問にそのまま入っている時点で対象ファイルは確定しており、本文中の日付は回答 LLM が拾えばよい。
@@ -72,9 +91,13 @@ class CoverageChecker(private val llmService: LlmService) {
             startsWith(word) && getOrNull(word.length).let { it == null || it !in 'a'..'z' }
     }
 
-    suspend fun check(query: String, candidates: List<Citation>): CoverageResult {
-        // 日付クエリで日付プレフィックス付き候補があれば、LLM を呼ばずに即答可能と判定
-        if (isDateShortCircuit(query, candidates)) {
+    suspend fun check(
+        query: String,
+        candidates: List<Citation>,
+        dateRange: DateRange? = DateResolver.resolveDateRange(query),
+    ): CoverageResult {
+        // 日付・期間クエリで日付プレフィックス付き候補があれば、LLM を呼ばずに即答可能と判定
+        if (isDateShortCircuit(query, candidates, dateRange)) {
             Timber.tag(TAG).d("short-circuit: date query with dated candidate → canAnswer=true")
             return CoverageResult(canAnswer = true, missingInformation = emptyList())
         }

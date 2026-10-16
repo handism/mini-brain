@@ -8,6 +8,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -78,6 +79,31 @@ class CoverageCheckerTest {
         val candidates = List(5) { citation("日付なし候補 $it") } +
             citation("[日付: 2024-05-01] 訪問記録")
         assertFalse(CoverageChecker.isDateShortCircuit("いつ行った？", candidates))
+    }
+
+    @Test
+    fun `期間クエリや日記クエリでも期間内の日付プレフィックス付き候補があれば短絡する`() {
+        val candidates = listOf(citation("[日付: 2024-03-15] 京都旅行のメモ"))
+        assertTrue(CoverageChecker.isDateShortCircuit("2024年3月に何してた？", candidates))
+        assertTrue(CoverageChecker.isDateShortCircuit("令和6年の記録", candidates))
+        val yesterday = LocalDate.now().minusDays(1)
+        assertTrue(CoverageChecker.isDateShortCircuit("昨日何してた？", listOf(citation("[日付: $yesterday] 日記"))))
+        val threeDaysAgo = LocalDate.now().minusDays(3)
+        assertTrue(CoverageChecker.isDateShortCircuit("3日前のメモ", listOf(citation("[日付: $threeDaysAgo] メモ"))))
+    }
+
+    @Test
+    fun `期間外の日付の候補しかなければ短絡しない`() {
+        val candidates = listOf(citation("[日付: 2023-08-01] 別の話題の日記"))
+        assertFalse(CoverageChecker.isDateShortCircuit("2024年3月に何してた？", candidates))
+        assertFalse(CoverageChecker.isDateShortCircuit("2024年モデルのPCの値段", candidates))
+        assertFalse(CoverageChecker.isDateShortCircuit("今日のToDoは？", candidates))
+    }
+
+    @Test
+    fun `未来の日付クエリは日付プレフィックス付き候補があっても短絡しない`() {
+        val candidates = listOf(citation("[日付: 2024-03-15] 過去のメモ"))
+        assertFalse(CoverageChecker.isDateShortCircuit("来年の3月15日の予定は？", candidates))
     }
 
     // --- parse ---

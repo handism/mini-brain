@@ -30,6 +30,12 @@ class ChatRepository(
     suspend fun addMessage(sessionId: Long, role: MessageRole, content: String, citationsJson: String = "[]"): Long =
         messageDao.insert(ChatMessageEntity(sessionId = sessionId, role = role, content = content, citationsJson = citationsJson))
 
+    /**
+     * 履歴画面や設定の全削除で消されていないか。消えたセッションは作り直さない
+     * （同じ id で作ると「元に戻す」が主キーで失敗し、消したチャットが回答だけで戻るため、ADR-080）。
+     */
+    suspend fun sessionExists(sessionId: Long): Boolean = sessionDao.getById(sessionId) != null
+
     suspend fun getRecentHistory(sessionId: Long, limit: Int = 6): List<ChatMessageEntity> =
         messageDao.getRecentBySession(sessionId, limit).reversed()
 

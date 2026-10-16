@@ -64,7 +64,7 @@ class AgentPipeline(
         var explorerHint: String? = null
         if (citations.isNotEmpty()) {
             onStatus?.invoke("回答可能性を確認中...")
-            val coverage = coverageChecker.check(question, citations)
+            val coverage = coverageChecker.check(question, citations, dateRange)
             traceEvents += CoverageCheckEvent(coverage.canAnswer, coverage.missingInformation)
             Timber.tag(TAG).d("CoverageCheck canAnswer=${coverage.canAnswer} missing=${coverage.missingInformation}")
             if (!coverage.canAnswer) {

@@ -22,13 +22,20 @@ object DateResolver {
     // 元号の年の直後（「令和6年」の後ろ）だけに当てる。離れた「去年の3月」の月を元号の年に付けないため（ADR-077）
     private val ERA_MONTH_RE = Regex("""^(?:の)?(\d{1,2})月""")
     private val ERA_MONTH_DAY_RE = Regex("""^(?:の)?(\d{1,2})月(\d{1,2})日""")
-    private val ERA_SEASON_RE = Regex("""^(?:の)?(春|夏|秋|冬)""")
-    private val ERA_QUARTER_RE = Regex("""^(?:の)?(?:[Qq]([1-4])|第([1-4])四半期)""")
+    // 季節と年末年始の休み。「年末調整」は時期ではないので外し、「年末年始」は「年末」より先に見る（ADR-080）
+    private const val SEASON_ALT = """春|夏|秋|冬|お正月|正月|年末年始|年始|年末(?!調整)"""
+    // 「2024年末」「去年末」「令和6年末」のように、年の「年」に続けた「末」「始」も年末・年始として読む（ADR-080）。
+    // 「今年始めた」の「始め」は時期ではないので外す
+    private const val YEAR_SUFFIX_SEASON_ALT = """末年始|末(?!調整)|始(?![めま])"""
+    private val YEAR_SEASON_ALT = """$SEASON_ALT|(?<=年)(?:$YEAR_SUFFIX_SEASON_ALT)"""
+    private val HOLIDAY_RE = Regex("""お正月|正月|年末年始|年始(?![めま])|年末(?!調整)""")
+    private val ERA_SEASON_RE = Regex("""^(?:の)?($SEASON_ALT)|^($YEAR_SUFFIX_SEASON_ALT)""")
+    private val ERA_QUARTER_RE = Regex("""^(?:の)?(?:[Qq]([1-4])(?![A-Za-z0-9_])|第([1-4])四半期)""")
     private val N_YEARS_AGO_MONTH_RE = Regex("""(\d+)\s*年[前まえ]の(\d{1,2})月""")
-    private val N_YEARS_AGO_SEASON_RE = Regex("""(\d+)\s*年[前まえ](?:の)?(春|夏|秋|冬)""")
+    private val N_YEARS_AGO_SEASON_RE = Regex("""(\d+)\s*年[前まえ](?:の)?($SEASON_ALT)""")
     // 相対年は長いもの（「一昨年」「再来年」）を先に並べる。短い方が先だと「昨年」「来年」の部分に一致する
-    private val RELATIVE_SEASON_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年)(?:の)?(春|夏|秋|冬)""")
-    private val YEAR_SEASON_RE = Regex("""(\d{4})年(?:の)?(春|夏|秋|冬)""")
+    private val RELATIVE_SEASON_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年)(?:の)?($YEAR_SEASON_ALT)""")
+    private val YEAR_SEASON_RE = Regex("""(\d{4})年(?:の)?($YEAR_SEASON_ALT)""")
     // 「去年の3月」「一昨年の3月5日」。年の数字が無いので YEAR_MONTH_RE では拾えない（ADR-067）
     private val RELATIVE_YEAR_MONTH_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年)(?:の)?(\d{1,2})月(?:(\d{1,2})日)?""")
 
@@ -43,9 +50,10 @@ object DateResolver {
     private val LAST_WEEK_DOW_RE = Regex("""先週(?:の)?(月|火|水|木|金|土|日)(?:曜日?)?""")
     private val THIS_WEEK_DOW_RE = Regex("""今週(?:の)?(月|火|水|木|金|土|日)(?:曜日?)?""")
 
-    // クォーター: Q1〜Q4 / 第1〜4四半期
-    private val QUARTER_RE = Regex("""[Qq]([1-4])|第([1-4])四半期""")
-    private val YEAR_QUARTER_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年|\d{4}年)(?:の)?(?:[Qq]([1-4])|第([1-4])四半期)""")
+    // クォーター: Q1〜Q4 / 第1〜4四半期（Q10 や FAQ1、IQ120 のような英字の途中・数字の続きには一致させない、ADR-080）。
+    // 直前の数字は許す（「2024Q1」「FY2024Q3」は年 + 四半期として YEAR_QUARTER_RE で読む）
+    private val QUARTER_RE = Regex("""(?<![A-Za-z_])[Qq]([1-4])(?![A-Za-z0-9_])|第([1-4])四半期""")
+    private val YEAR_QUARTER_RE = Regex("""(一昨年|再来年|来年|去年|昨年|今年|\d{4}年|(?<!\d)\d{4}(?=[Qq]))(?:の)?(?:[Qq]([1-4])(?![A-Za-z0-9_])|第([1-4])四半期)""")
 
     // ドット/スラッシュ区切り日付: 2024.03.01 / 2024/03/01
     private val DOT_SLASH_DATE_RE = Regex("""(\d{4})[./](\d{1,2})[./](\d{1,2})""")
@@ -58,13 +66,14 @@ object DateResolver {
     fun isDateQuery(question: String): Boolean = DATE_QUERY_RE.containsMatchIn(question)
 
     // 元号: エントリを追加するだけで resolveEraYear / isDiaryQuery の両方に反映される。
-    // 「元年」も 1 年として読む。拾えないと月日だけから年を推定し、別の年を検索していた（ADR-072）
+    // 「元年」も 1 年として読む。拾えないと月日だけから年を推定し、別の年を検索していた（ADR-072）。
+    // 1 文字略称（R/H/S/T）は直前が英数字でないときだけ、年数は 1 以上にする（IT10年・JS5年・R0年の誤検出防止、ADR-080）
     private data class EraEntry(val pattern: Regex, val gregorianOffset: Int)
     private val ERA_LIST = listOf(
-        EraEntry(Regex("""(?:令和|R)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 2018),
-        EraEntry(Regex("""(?:平成|H)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 1988),
-        EraEntry(Regex("""(?:昭和|S)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 1925),
-        EraEntry(Regex("""(?:大正|T)(\d{1,2}|元)年""", RegexOption.IGNORE_CASE), 1911),
+        EraEntry(Regex("""(?:令和|(?<![A-Za-z0-9_])R)([1-9]\d?|元)年""", RegexOption.IGNORE_CASE), 2018),
+        EraEntry(Regex("""(?:平成|(?<![A-Za-z0-9_])H)([1-9]\d?|元)年""", RegexOption.IGNORE_CASE), 1988),
+        EraEntry(Regex("""(?:昭和|(?<![A-Za-z0-9_])S)([1-9]\d?|元)年""", RegexOption.IGNORE_CASE), 1925),
+        EraEntry(Regex("""(?:大正|(?<![A-Za-z0-9_])T)([1-9]\d?|元)年""", RegexOption.IGNORE_CASE), 1911),
     )
 
     private val WEEKDAY_MAP = mapOf(
@@ -161,7 +170,7 @@ object DateResolver {
     }
 
     private fun resolveRelativeKeywords(question: String, today: LocalDate): List<String>? {
-        val yearOffset = relativeYearOffset(question)
+        val holiday = HOLIDAY_RE.find(question)?.value
         return when {
             question.contains("一昨日") || question.contains("おととい") ->
                 listOf(today.minusDays(2).format(FORMATTER))
@@ -189,24 +198,29 @@ object DateResolver {
                 val days = lastMonth.lengthOfMonth()
                 List(days) { start.plusDays(it.toLong()).format(FORMATTER) }
             }
-            question.contains("正月") || question.contains("お正月") || question.contains("年始") -> {
-                val year = today.year - (yearOffset ?: 0)
-                List(7) { LocalDate.of(year, 1, it + 1).format(FORMATTER) }
-            }
-            question.contains("年末") -> {
-                // 年の指定が無ければ、今年の年末（12/25〜）が来るまでは去年の年末を指す（ADR-072）
-                val year = when {
-                    yearOffset != null -> today.year - yearOffset
-                    today.isBefore(LocalDate.of(today.year, 12, 25)) -> today.year - 1
+            holiday != null -> {
+                // 年の指定が無ければ、今年の年末（12/25〜）が来るまでは去年の年末を指す（ADR-072）。
+                // 期間は resolveDateRange と同じ seasonRange で作り、「年末年始」で両者が別の週を指さないようにする（ADR-080）
+                val year = explicitHolidayYear(question, today) ?: when {
+                    holiday == "年末" || holiday == "年末年始" ->
+                        if (today.isBefore(LocalDate.of(today.year, 12, 25))) today.year - 1 else today.year
                     else -> today.year
                 }
-                List(7) { LocalDate.of(year, 12, 25 + it).format(FORMATTER) }
+                val range = seasonRange(holiday, year, today) ?: return emptyList()
+                val days = java.time.temporal.ChronoUnit.DAYS.between(range.start, range.end).toInt() + 1
+                List(maxOf(0, days)) { range.start.plusDays(it.toLong()).format(FORMATTER) }
             }
             question.contains("最近") ->
                 List(15) { today.minusDays(it.toLong()).format(FORMATTER) }
             else -> null
         }
     }
+
+    private fun explicitHolidayYear(question: String, today: LocalDate): Int? =
+        relativeYearOffset(question)?.let { today.year - it }
+            ?: resolveEraYear(question)?.first
+            ?: N_YEARS_AGO_SEASON_RE.find(question)?.groupValues?.get(1)?.toIntOrNull()?.let { today.year - it }
+            ?: YEAR_ONLY_RE.find(question)?.groupValues?.get(1)?.toIntOrNull()
 
     private fun resolveByNumericPattern(question: String, today: LocalDate): List<String> {
         // X月Y日
@@ -278,7 +292,7 @@ object DateResolver {
         }
         // 季節・四半期も西暦と同じく絞る。年全体にすると別の季節のノートが固定され、
         // 今年のまだ来ていない季節は今日までの過去の期間にすり替わる（ADR-078）
-        ERA_SEASON_RE.find(afterEra)?.let { return seasonRange(it.groupValues[1], year, today) }
+        ERA_SEASON_RE.find(afterEra)?.let { return seasonRange(it.groupValues[1].ifEmpty { it.groupValues[2] }, year, today) }
         ERA_QUARTER_RE.find(afterEra)?.let { match ->
             val q = match.groupValues[1].ifEmpty { match.groupValues[2] }.toInt()
             return quarterRange(q, year, today)
@@ -453,6 +467,10 @@ object DateResolver {
                 val febEnd = LocalDate.of(year + 1, 2, 1).let { it.withDayOfMonth(it.lengthOfMonth()) }
                 DateRange(LocalDate.of(year, 12, 1), febEnd)
             }
+            "正月", "お正月", "年始", "始" -> DateRange(LocalDate.of(year, 1, 1), LocalDate.of(year, 1, 7))
+            "年末", "末" -> DateRange(LocalDate.of(year, 12, 25), LocalDate.of(year, 12, 31))
+            // 年をまたぐので、その年の 12/25 から翌年の 1/7 まで
+            "年末年始", "末年始" -> DateRange(LocalDate.of(year, 12, 25), LocalDate.of(year + 1, 1, 7))
             else -> return@runCatching null
         }
         if (range.end.isAfter(today)) DateRange(range.start, today) else range
